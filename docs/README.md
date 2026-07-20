@@ -28,8 +28,8 @@ B2C 电商系统，**Spring Boot 单体后端 + Vue 3 三端分离前端**，Ngi
 | 前端 | Vue 3 + Vite + Element Plus + Pinia + ECharts |
 | 反向代理 | Nginx 1.20.2 |
 | JDK | OpenJDK 22 |
-| RAG 语义搜索 | LangChain4j + Qdrant（向量库）+ Ollama（bge-m3 嵌入） |
-| 智能客服 | SSE 流式 + Qwen3.5:0.8b（大模型）+ RAG 检索增强 |
+| RAG 语义搜索 | LangChain4j + Qdrant（1536维）+ DashScope（text-embedding-v1 嵌入） |
+| 智能客服 | SSE 流式 + DashScope qwen-plus（大模型）+ RAG 检索增强 + 分类名回退 |
 | 离线数仓 | Hive 3.x + Sqoop 1.4.x + Azkaban 3.x |
 
 ---
@@ -95,7 +95,7 @@ shop/
 | **管理后台** | 用户/订单/商品管理、ECharts 统计看板、全平台数据查询 |
 | **商家中心** | shop_id 自动隔离、本店商品/订单管理、发货、本店 ECharts 看板 |
 | **数据看板** | 独立后端（:8081）查询 shop_ads，6 组 ECharts 报表组件 |
-| **智能客服** | SSE 流式对话（ChatService），RAG 检索 TOP-3 商品作为上下文 |
+| **智能客服** | SSE 流式对话，RAG 检索 TOP-3 + 分类名回退，小星真人导购人设 |
 | **RAG 搜索** | Ollama bge-m3 向量化 → Qdrant 检索 → 元数据过滤（分类/价格） |
 
 ---
@@ -128,7 +128,8 @@ shop/
 | POST | /api/order/receive/{id} | 确认收货 |
 | GET/POST/PUT/DELETE | /api/cart/** | 购物车 CRUD |
 | POST | /api/pay/mock-pay | 模拟支付 |
-| POST | /api/chat/ask (SSE) | 智能客服流式对话 |
+| POST | /api/chat/ask (SSE) | 智能客服流式对话（小星人设） |
+| POST | /api/chat/clear | 清除对话历史 |
 
 ### 管理后台（需 `@SaCheckPermission`）
 
@@ -201,7 +202,7 @@ shop/
 | **商品快照** | order_item 记录下单时名称/价格/图片，不受后续变更影响 |
 | **购物车标记** | 下单后批量 `cart.is_ordered = 1`，列表过滤已结算 |
 | **RAG 搜索** | Ollama bge-m3 向量化 → Qdrant 检索 → 元数据过滤 |
-| **智能客服** | SSE 流式输出 → RAG 检索 TOP-3 → Qwen3.5 生成回答 |
+| **智能客服** | SSE 流式输出 → RAG 检索 TOP-3（空结果走分类名回退）→ Qwen3.5 生成回答，小星真人导购人设 |
 | **统一返回** | `{ code, msg, data }`，全局异常处理器接管所有异常 |
 | **Long→String** | Jackson 全局配置，解决雪花 ID 前端 JS 精度丢失 |
 
@@ -231,7 +232,7 @@ Azkaban 每日调度两条 DAG：
 | 页面 | 可视化内容 |
 |------|-----------|
 | 用户端 - 商品详情 | 价格走势图 |
-| 用户端 - 首页 | 语义/关键词双模式搜索 + FloatingChat 智能客服 |
+| 用户端 - 首页 | 语义/关键词双模式搜索 + FloatingChat 智能客服（支持放大/拖拽） |
 | 管理后台 - 控制台 | 销售额趋势 / 订单分布 / 商品TOP10 / 用户增长 |
 | 管理后台 - 数据看板 | 6 组 ECharts 报表组件（KPI / GMV / 分类 / 排行 / 周趋势 / 用户） |
 | 商家中心 - 概览 | 销售额趋势 / 订单分布 / 商品TOP5 / 每日订单数 |

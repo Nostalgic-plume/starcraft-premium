@@ -1,0 +1,149 @@
+-- ============================================================
+-- ODS 层 — 增量表 DDL（5 张）
+-- 分区类型：PARTITIONED BY (dt STRING) — 每天追加增量分区
+-- 数据格式：TEXTFILE，字段分隔符 '\001'
+-- 数据来源：MySQL shop 数据库，通过 Sqoop 增量导入
+--    orders / order_item / user → 按 create_time 过滤新增
+--    product / sku              → 按 update_time 过滤更新
+-- ============================================================
+
+SET hive.execution.engine=mr;
+
+-- ============================================================
+-- 1. ods_orders_inc：订单表（增量）
+--    对应 MySQL：orders
+--    增量字段：create_time（每天新增订单）
+--    与 DWD 事实表关联：ods_orders_inc + ods_order_item_inc → dwd_fact_order_detail
+-- ============================================================
+DROP TABLE IF EXISTS ods.ods_orders_inc;
+CREATE EXTERNAL TABLE ods.ods_orders_inc (
+    id               BIGINT         COMMENT '订单ID',
+    order_no         STRING         COMMENT '订单编号',
+    user_id          BIGINT         COMMENT '用户ID',
+    shop_id          BIGINT         COMMENT '商家ID',
+    total_amount     DECIMAL(10,2)  COMMENT '订单金额',
+    actual_amount    DECIMAL(10,2)  COMMENT '实际支付金额',
+    discount_amount  DECIMAL(10,2)  COMMENT '优惠金额',
+    freight          DECIMAL(10,2)  COMMENT '运费',
+    status           TINYINT        COMMENT '状态：0待支付 1已支付 2已发货 3已收货 4已完成 5已取消 6已退款',
+    receiver_name    STRING         COMMENT '收货人姓名',
+    receiver_phone   STRING         COMMENT '收货电话',
+    receiver_address STRING         COMMENT '收货地址',
+    pay_type         TINYINT        COMMENT '支付方式：1微信 2支付宝',
+    pay_time         STRING         COMMENT '支付时间',
+    deliver_time     STRING         COMMENT '发货时间',
+    logistics_no     STRING         COMMENT '物流单号',
+    receive_time     STRING         COMMENT '收货时间',
+    remark           STRING         COMMENT '订单备注',
+    create_time      STRING         COMMENT '创建时间',
+    update_time      STRING         COMMENT '更新时间',
+    deleted          TINYINT        COMMENT '逻辑删除：0未删 1已删'
+) PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ods/ods_orders_inc';
+
+-- ============================================================
+-- 2. ods_order_item_inc：订单商品项表（增量）
+--    对应 MySQL：order_item
+--    增量字段：create_time（每天新增商品项）
+-- ============================================================
+DROP TABLE IF EXISTS ods.ods_order_item_inc;
+CREATE EXTERNAL TABLE ods.ods_order_item_inc (
+    id                 BIGINT         COMMENT '商品项ID',
+    order_id           BIGINT         COMMENT '订单ID',
+    order_no           STRING         COMMENT '订单编号',
+    product_id         BIGINT         COMMENT '商品ID',
+    product_name       STRING         COMMENT '商品名称（下单快照）',
+    sku_id             BIGINT         COMMENT 'SKU ID',
+    sku_name           STRING         COMMENT 'SKU名称（下单快照）',
+    product_main_image STRING         COMMENT '商品主图快照',
+    price              DECIMAL(10,2)  COMMENT '单价',
+    quantity           INT            COMMENT '数量',
+    subtotal           DECIMAL(10,2)  COMMENT '小计',
+    create_time        STRING         COMMENT '创建时间'
+) PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ods/ods_order_item_inc';
+
+-- ============================================================
+-- 3. ods_product_inc：商品表（增量）
+--    对应 MySQL：product
+--    增量字段：update_time（每天变更的商品）
+--    拉链表驱动表：ods_product_inc 的变化记录驱动 dim_product_zip 的版本更新
+-- ============================================================
+DROP TABLE IF EXISTS ods.ods_product_inc;
+CREATE EXTERNAL TABLE ods.ods_product_inc (
+    id                 BIGINT         COMMENT '商品ID',
+    name               STRING         COMMENT '商品名称',
+    description        STRING         COMMENT '商品描述',
+    category_id        BIGINT         COMMENT '分类ID',
+    first_category_id  BIGINT         COMMENT '一级分类ID',
+    brand              STRING         COMMENT '品牌',
+    main_image         STRING         COMMENT '主图URL',
+    images             STRING         COMMENT '轮播图（JSON数组）',
+    detail             STRING         COMMENT '详情内容（富文本）',
+    shop_id            BIGINT         COMMENT '商家ID',
+    status             TINYINT        COMMENT '状态：0待审核 1上架 2下架',
+    create_time        STRING         COMMENT '创建时间',
+    update_time        STRING         COMMENT '更新时间',
+    deleted            TINYINT        COMMENT '逻辑删除：0未删 1已删'
+) PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ods/ods_product_inc';
+
+-- ============================================================
+-- 4. ods_sku_inc：SKU 表（增量）
+--    对应 MySQL：sku
+--    增量字段：update_time（每天变更的 SKU）
+--    拉链表驱动表：ods_sku_inc 的变化记录驱动 dim_sku_zip 的版本更新
+-- ============================================================
+DROP TABLE IF EXISTS ods.ods_sku_inc;
+CREATE EXTERNAL TABLE ods.ods_sku_inc (
+    id              BIGINT         COMMENT 'SKU ID',
+    product_id      BIGINT         COMMENT '商品ID',
+    name            STRING         COMMENT 'SKU名称（如：红色-M码）',
+    specs           STRING         COMMENT '规格值JSON',
+    price           DECIMAL(10,2)  COMMENT '价格',
+    original_price  DECIMAL(10,2)  COMMENT '原价',
+    stock           INT            COMMENT '库存',
+    image           STRING         COMMENT '图片URL',
+    create_time     STRING         COMMENT '创建时间',
+    update_time     STRING         COMMENT '更新时间',
+    deleted         TINYINT        COMMENT '逻辑删除：0未删 1已删'
+) PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ods/ods_sku_inc';
+
+-- ============================================================
+-- 5. ods_user_inc：用户表（增量）
+--    对应 MySQL：user
+--    增量字段：create_time（每天新增用户）
+--    拉链表驱动表：ods_user_inc 的新增/变更记录驱动 dim_user_zip 的版本更新
+-- ============================================================
+DROP TABLE IF EXISTS ods.ods_user_inc;
+CREATE EXTERNAL TABLE ods.ods_user_inc (
+    id           BIGINT       COMMENT '用户ID',
+    username     STRING       COMMENT '用户名',
+    password     STRING       COMMENT '密码（BCrypt加密）',
+    phone        STRING       COMMENT '手机号',
+    email        STRING       COMMENT '邮箱',
+    nickname     STRING       COMMENT '昵称',
+    avatar       STRING       COMMENT '头像URL',
+    status       TINYINT      COMMENT '状态：0正常 1停用 2注销中 3封禁中',
+    admin_level  TINYINT      COMMENT '管理员级别：0不是管理员 1普通管理员 2超级管理员',
+    create_time  STRING       COMMENT '创建时间',
+    update_time  STRING       COMMENT '更新时间',
+    deleted      TINYINT      COMMENT '逻辑删除：0未删 1已删'
+) PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ods/ods_user_inc';
+
+-- ============================================================
+-- 建表完成
+-- SHOW TABLES IN ods LIKE '*_inc';
+-- ============================================================

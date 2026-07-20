@@ -1,0 +1,33 @@
+/* ===================================================================
+   Shop 管理后台 — 设计语言
+   品牌色: 深墨蓝 #1a1a2e | 珊瑚红 #e94560 | 暖灰基调
+   共享基础见 shared/css/style-base.css，本文件仅保留后台专属覆盖
+   =================================================================== */
+@import "@shared/css/style-base.css";
+
+/* ====== 管理后台专属覆盖 ====== */
+
+/* 仪表盘需要更宽布局 */
+.page-container {
+  max-width: 1400px;
+  padding: 20px;
+  animation: fadeIn 0.3s ease;
+}
+
+/* 后台 flex-center 含水平居中（与用户端/商家端不同） */
+.flex-center {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* 后台卡片 20px 内边距 */
+.card {
+  padding: 20px;
+}
+
+/* 后台 fadeIn 动画速度略快、位移略小（适配后台紧凑布局） */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}

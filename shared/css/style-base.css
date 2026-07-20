@@ -1,0 +1,279 @@
+/* ===================================================================
+   Shop 电商系统 — 共享设计语言基础
+   三端统一品牌色: 深墨蓝 #1a1a2e | 珊瑚红 #e94560 | 暖灰基调
+   各端 style.css 通过 @import 引入本文件后叠加专属覆盖
+   =================================================================== */
+
+/* ====== Design Tokens ====== */
+:root {
+  /* Brand */
+  --ds-navy: #1a1a2e;
+  --ds-navy-light: #2d2d50;
+  --ds-coral: #e94560;
+  --ds-coral-light: #ff6b81;
+  --ds-gold: #f9a825;
+
+  /* Surfaces */
+  --ds-bg: #f5f3ef;
+  --ds-surface: #ffffff;
+  --ds-surface-hover: #faf9f7;
+  --ds-surface-raised: #ffffff;
+
+  /* Text */
+  --ds-text: #1a1a2e;
+  --ds-text-secondary: #636e72;
+  --ds-text-muted: #b2bec3;
+  --ds-text-inverse: #ffffff;
+
+  /* Borders */
+  --ds-border: #e8e6e1;
+  --ds-border-light: #f0eee9;
+
+  /* Functional */
+  --ds-success: #27ae60;
+  --ds-warning: #f39c12;
+  --ds-danger: #e94560;
+  --ds-info: #95a5a6;
+
+  /* Shadows */
+  --ds-shadow-sm: 0 1px 3px rgba(26, 26, 46, 0.06);
+  --ds-shadow-md: 0 4px 16px rgba(26, 26, 46, 0.08);
+  --ds-shadow-lg: 0 12px 40px rgba(26, 26, 46, 0.12);
+  --ds-shadow-xl: 0 20px 60px rgba(26, 26, 46, 0.15);
+
+  /* Radius */
+  --ds-radius-sm: 6px;
+  --ds-radius: 10px;
+  --ds-radius-lg: 16px;
+  --ds-radius-xl: 20px;
+  --ds-radius-round: 999px;
+
+  /* Transitions */
+  --ds-transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  --ds-transition-fast: all 0.15s ease;
+}
+
+/* ====== Element Plus Theme Override ====== */
+:root {
+  --el-color-primary: #1a1a2e;
+  --el-color-primary-light-3: #3d3d5c;
+  --el-color-primary-light-5: #7a7a9a;
+  --el-color-primary-light-7: #b8b8cc;
+  --el-color-primary-light-8: #d8d8e5;
+  --el-color-primary-light-9: #eeeef5;
+  --el-color-primary-dark-2: #0f0f1e;
+
+  --el-color-success: #27ae60;
+  --el-color-warning: #f39c12;
+  --el-color-danger: #e94560;
+  --el-color-info: #95a5a6;
+  --el-color-error: #e94560;
+
+  --el-border-radius-base: 8px;
+  --el-border-radius-small: 6px;
+  --el-border-radius-round: 20px;
+
+  --el-box-shadow: 0 1px 3px rgba(26, 26, 46, 0.06);
+  --el-box-shadow-light: 0 2px 12px rgba(26, 26, 46, 0.08);
+  --el-box-shadow-lighter: 0 1px 2px rgba(26, 26, 46, 0.04);
+
+  --el-font-size-base: 14px;
+  --el-font-size-small: 12px;
+  --el-font-size-large: 16px;
+
+  --el-bg-color: #f5f3ef;
+  --el-bg-color-overlay: #ffffff;
+  --el-border-color: #e8e6e1;
+  --el-border-color-lighter: #f0eee9;
+  --el-border-color-light: #f0eee9;
+  --el-text-color-primary: #1a1a2e;
+  --el-text-color-regular: #2d3436;
+  --el-text-color-secondary: #636e72;
+  --el-text-color-placeholder: #b2bec3;
+  --el-mask-color: rgba(26, 26, 46, 0.5);
+  --el-fill-color: #f5f3ef;
+  --el-fill-color-light: #faf9f7;
+  --el-fill-color-lighter: #fcfcfb;
+}
+
+/* ====== Reset & Base ====== */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  background: var(--ds-bg);
+  color: var(--ds-text);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a { text-decoration: none; color: inherit; }
+img { max-width: 100%; vertical-align: middle; }
+
+/* ====== Layout ====== */
+.page-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 20px;
+  animation: fadeIn 0.4s ease;
+}
+
+/* ====== Card ====== */
+.card {
+  background: var(--ds-surface);
+  border: 1px solid var(--ds-border-light);
+  border-radius: var(--ds-radius-lg);
+  padding: 24px;
+  margin-bottom: 16px;
+  transition: var(--ds-transition);
+}
+.card:hover {
+  box-shadow: var(--ds-shadow-md);
+}
+
+/* ====== Utility Classes ====== */
+.flex-between { display: flex; justify-content: space-between; align-items: center; }
+.flex-center { display: flex; align-items: center; }
+.flex-wrap { flex-wrap: wrap; }
+.gap-4 { gap: 4px; }
+.gap-8 { gap: 8px; }
+.gap-12 { gap: 12px; }
+.gap-16 { gap: 16px; }
+.gap-20 { gap: 20px; }
+.mt-4 { margin-top: 4px; }
+.mt-8 { margin-top: 8px; }
+.mt-12 { margin-top: 12px; }
+.mt-16 { margin-top: 16px; }
+.mt-20 { margin-top: 20px; }
+.mt-24 { margin-top: 24px; }
+.mb-4 { margin-bottom: 4px; }
+.mb-8 { margin-bottom: 8px; }
+.mb-12 { margin-bottom: 12px; }
+.mb-16 { margin-bottom: 16px; }
+.mb-20 { margin-bottom: 20px; }
+.mb-24 { margin-bottom: 24px; }
+.text-center { text-align: center; }
+.text-right { text-align: right; }
+.text-danger { color: var(--ds-danger); }
+.text-success { color: var(--ds-success); }
+.text-muted { color: var(--ds-text-muted); font-size: 13px; }
+.text-primary { color: var(--ds-navy); }
+
+/* ====== Animations ====== */
+.fade-in { animation: fadeIn 0.4s ease; }
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.slide-up { animation: slideUp 0.3s ease; }
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* ====== Button Override ====== */
+.el-button--primary {
+  --el-button-bg-color: #1a1a2e;
+  --el-button-border-color: #1a1a2e;
+  --el-button-hover-bg-color: #2d2d50;
+  --el-button-hover-border-color: #2d2d50;
+  --el-button-active-bg-color: #0f0f1e;
+  --el-button-active-border-color: #0f0f1e;
+  font-weight: 500;
+  border-radius: var(--ds-radius);
+}
+.el-button--primary.is-round {
+  border-radius: var(--ds-radius-round);
+}
+
+.el-button--danger {
+  --el-button-bg-color: #e94560;
+  --el-button-border-color: #e94560;
+  --el-button-hover-bg-color: #ff6b81;
+  --el-button-hover-border-color: #ff6b81;
+  font-weight: 500;
+  border-radius: var(--ds-radius);
+}
+
+/* ====== Input Override ====== */
+.el-input__wrapper {
+  border-radius: var(--ds-radius) !important;
+  box-shadow: 0 0 0 1px var(--ds-border) inset !important;
+}
+.el-input__wrapper:hover {
+  box-shadow: 0 0 0 1px var(--ds-text-muted) inset !important;
+}
+.el-input__wrapper.is-focus {
+  box-shadow: 0 0 0 2px var(--ds-navy) inset !important;
+}
+
+/* ====== Table Override ====== */
+.el-table th.el-table__cell {
+  font-weight: 600;
+  color: var(--ds-text);
+  background: var(--ds-fill-color);
+}
+.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
+  background: var(--ds-fill-color-light);
+}
+
+/* ====== Tag Override ====== */
+.el-tag {
+  border-radius: 4px;
+  font-weight: 500;
+}
+.el-tag--success { --el-tag-bg-color: #eafaf1; --el-tag-text-color: #27ae60; --el-tag-border-color: #d5f5e3; }
+.el-tag--warning { --el-tag-bg-color: #fef5e7; --el-tag-text-color: #f39c12; --el-tag-border-color: #fdebd0; }
+.el-tag--danger  { --el-tag-bg-color: #fdedec; --el-tag-text-color: #e94560; --el-tag-border-color: #fadbd8; }
+.el-tag--info    { --el-tag-bg-color: #f2f4f4; --el-tag-text-color: #95a5a6; --el-tag-border-color: #e5e8e8; }
+.el-tag--primary { --el-tag-bg-color: #ebebf0; --el-tag-text-color: #1a1a2e; --el-tag-border-color: #d8d8e5; }
+
+/* ====== Dialog Override ====== */
+.el-dialog {
+  border-radius: var(--ds-radius-lg) !important;
+}
+.el-dialog__header {
+  padding: 20px 24px 0;
+  font-weight: 600;
+}
+.el-dialog__body {
+  padding: 20px 24px;
+}
+.el-dialog__footer {
+  padding: 0 24px 20px;
+}
+
+/* ====== Drawer Override ====== */
+.el-drawer {
+  border-radius: var(--ds-radius-lg) 0 0 var(--ds-radius-lg) !important;
+}
+
+/* ====== Page Title ====== */
+.page-title {
+  font-size: 22px;
+  font-weight: 700;
+  margin-bottom: 24px;
+  color: var(--ds-navy);
+  letter-spacing: -0.3px;
+}
+
+.page-title-sub {
+  font-size: 14px;
+  color: var(--ds-text-secondary);
+  font-weight: 400;
+  margin-top: 4px;
+}
+
+/* ====== Skeleton loading pulse ====== */
+.skeleton-pulse {
+  animation: pulse 2s ease-in-out infinite;
+  background: var(--ds-fill-color-light);
+  border-radius: var(--ds-radius-sm);
+}

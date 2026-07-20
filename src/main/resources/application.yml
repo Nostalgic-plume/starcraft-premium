@@ -1,0 +1,73 @@
+spring:
+  application:
+    name: shop
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/shop?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: ***REMOVED***
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 0
+      timeout: 3000ms
+
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+
+  web:
+    resources:
+      add-mappings: false            # 关闭默认静态资源映射（Nginx 托管前端静态文件）
+  mvc:
+    throw-exception-if-no-handler-found: true   # 无匹配 Handler 时抛异常而非回退到静态资源
+
+mybatis-plus:
+  mapper-locations: classpath:mapper/**/*.xml
+  type-aliases-package: com.shop.model.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: ASSIGN_ID
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+server:
+  port: 8080
+
+sa-token:
+  token-name: token
+  timeout: 2592000
+  active-timeout: -1
+  is-concurrent: true
+  is-share: true
+  token-style: uuid
+  is-log: false
+
+langchain4j:
+  ollama:
+    base-url: http://localhost:11434
+    chat-model:
+      model-name: qwen3.5:0.8b
+      temperature: 0.7
+    embedding-model:
+      model-name: qwen3.5:0.8b
+
+rag:
+  qdrant:
+    host: localhost
+    port: 6334
+    collection-name: products
+    dimension: 1024

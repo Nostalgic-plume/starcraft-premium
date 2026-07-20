@@ -1,0 +1,5 @@
+type=command
+command=hive -f ads_etl.hql -hivevar dt=${dt}
+dependencies=04_dws_etl
+retries=1
+retry.backoff=120000

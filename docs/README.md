@@ -9,7 +9,8 @@
 | 前端 | Vue 3 + Vite + Element Plus + Pinia + ECharts | 5.x |
 | 反向代理 | Nginx | 1.20.2 |
 | JDK | OpenJDK 22 | 22.0.1 |
-| RAG / 智能客服 | Spring Boot SSE + 向量检索 | — |
+| RAG 语义搜索 | LangChain4j + Qdrant + Ollama（bge-m3 嵌入） | — |
+| 智能客服 | SSE 流式 + Qwen3.5:0.8b（Ollama 大模型）+ RAG | — |
 | Mock 工具 | 纯 Java（独立项目） | Hutool JDBC |
 
 ---

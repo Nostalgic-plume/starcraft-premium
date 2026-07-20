@@ -13,6 +13,7 @@ import com.shop.common.PageResult;
 import com.shop.common.PaginationHelper;
 import com.shop.constant.ProductConstants;
 import com.shop.mapper.CategoryMapper;
+import com.shop.mapper.OrderItemMapper;
 import com.shop.mapper.ProductMapper;
 import com.shop.mapper.ShopMapper;
 import com.shop.mapper.SkuMapper;
@@ -49,6 +50,7 @@ public class ProductServiceImpl implements ProductService {
     private final SkuMapper skuMapper;
     private final CategoryMapper categoryMapper;
     private final ShopMapper shopMapper;
+    private final OrderItemMapper orderItemMapper;
     private final ProductIndexer productIndexer;
 
     @Override
@@ -219,6 +221,9 @@ public class ProductServiceImpl implements ProductService {
             }).collect(Collectors.toList());
             vo.setSkuList(skuVOList);
         }
+
+        Integer sold = orderItemMapper.sumQuantityByProductId(product.getId());
+        vo.setSoldCount(sold != null ? sold : 0);
 
         return vo;
     }

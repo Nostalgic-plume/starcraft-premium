@@ -29,6 +29,7 @@ public class RagSearchService {
     private final QdrantEmbeddingStore embeddingStore;
 
     private static final double MIN_RELEVANCE_SCORE = 0.6;
+    private static final int EXPECTED_DIMENSION = 1024;
 
     /**
      * 语义搜索商品
@@ -41,23 +42,45 @@ public class RagSearchService {
      * @return 语义匹配结果列表
      */
     public List<RagHitVO> search(String query, int topK,
-                                 Long categoryId, BigDecimal minPrice, BigDecimal maxPrice) {
+                                  Long categoryId, BigDecimal minPrice, BigDecimal maxPrice) {
         if (query == null || query.isBlank()) {
             return Collections.emptyList();
         }
 
         // 1. 生成查询向量
-        Embedding queryEmbedding = embeddingModel.embed(query).content();
+        Embedding queryEmbedding;
+        try {
+            queryEmbedding = embeddingModel.embed(query).content();
+        } catch (Exception e) {
+            log.warn("Ollama 嵌入模型调用失败（Ollama 未运行或模型未加载）: {}", e.getMessage());
+            return Collections.emptyList();
+        }
 
-        // 2. Qdrant 检索（多取一些，留给过滤余量）
-        List<EmbeddingMatch<TextSegment>> matches = embeddingStore.findRelevant(
-                queryEmbedding, topK * 3, MIN_RELEVANCE_SCORE);
+        // 2. 校验向量有效性：非空、维度匹配
+        if (queryEmbedding == null || queryEmbedding.vector() == null || queryEmbedding.vector().length == 0) {
+            log.warn("Ollama 返回空向量（可能模型未加载或返回异常），跳过 RAG 检索");
+            return Collections.emptyList();
+        }
+        if (queryEmbedding.vector().length != EXPECTED_DIMENSION) {
+            log.warn("向量维度不匹配：期望 {}，实际 {}，跳过 RAG 检索", EXPECTED_DIMENSION, queryEmbedding.vector().length);
+            return Collections.emptyList();
+        }
+
+        // 3. Qdrant 检索
+        List<EmbeddingMatch<TextSegment>> matches;
+        try {
+            matches = embeddingStore.findRelevant(
+                    queryEmbedding, topK * 3, MIN_RELEVANCE_SCORE);
+        } catch (Exception e) {
+            log.warn("RAG 检索失败（向量维度不匹配或 Qdrant 未就绪）: {}", e.getMessage());
+            return Collections.emptyList();
+        }
 
         if (CollUtil.isEmpty(matches)) {
             return Collections.emptyList();
         }
 
-        // 3. 元数据过滤 + 转 VO
+        // 4. 元数据过滤 + 转 VO
         return matches.stream()
                 .filter(Objects::nonNull)
                 .filter(m -> m.embedded() != null)

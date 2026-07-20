@@ -20,6 +20,8 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
+import java.net.HttpURLConnection;
+import java.net.URI;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -51,6 +53,33 @@ public class ProductIndexer {
         long start = System.currentTimeMillis();
         pointIdMap.clear();
 
+        // 清理并重建 Qdrant 集合（用 REST API 确保清除旧脏数据）
+        try {
+            URI del = URI.create("http://localhost:6333/collections/products");
+            HttpURLConnection conn = (HttpURLConnection) del.toURL().openConnection();
+            conn.setRequestMethod("DELETE");
+            conn.setConnectTimeout(3000);
+            conn.setReadTimeout(3000);
+            int code = conn.getResponseCode();
+            log.info("清理 Qdrant 旧集合, HTTP {}", code);
+            conn.disconnect();
+
+            URI create = URI.create("http://localhost:6333/collections/products?wait=true");
+            HttpURLConnection conn2 = (HttpURLConnection) create.toURL().openConnection();
+            conn2.setRequestMethod("PUT");
+            conn2.setRequestProperty("Content-Type", "application/json");
+            conn2.setDoOutput(true);
+            conn2.setConnectTimeout(3000);
+            conn2.setReadTimeout(3000);
+            String body = "{\"vectors\":{\"size\":1024,\"distance\":\"Cosine\"}}";
+            conn2.getOutputStream().write(body.getBytes());
+            int code2 = conn2.getResponseCode();
+            log.info("创建 Qdrant 新集合, HTTP {}", code2);
+            conn2.disconnect();
+        } catch (Exception e) {
+            log.warn("重建 Qdrant 集合失败: {}", e.getMessage());
+        }
+
         // 查所有上架商品
         List<ProductDO> products = productMapper.selectList(
                 new LambdaQueryWrapper<ProductDO>()
@@ -70,8 +99,27 @@ public class ProductIndexer {
         // 批量生成 embedding
         List<Embedding> embeddings = embeddingModel.embedAll(segments).content();
 
+        // 校验：跳过空向量（Ollama 未就绪时可能返回 0 维向量）
+        List<Embedding> validEmbeddings = new ArrayList<>();
+        List<TextSegment> validSegments = new ArrayList<>();
+        for (int i = 0; i < embeddings.size(); i++) {
+            if (embeddings.get(i).vector() != null && embeddings.get(i).vector().length > 0) {
+                validEmbeddings.add(embeddings.get(i));
+                validSegments.add(segments.get(i));
+            } else {
+                log.warn("商品 '{}' 向量化为空，跳过索引", products.get(i).getName());
+            }
+        }
+
+        if (validEmbeddings.isEmpty()) {
+            log.warn("所有商品向量化结果均为空，请检查 Ollama 服务是否正常运行");
+            indexedCount = 0;
+            lastRebuildTime = System.currentTimeMillis();
+            return;
+        }
+
         // 批量存入 Qdrant，记录返回的 pointId
-        List<String> pointIds = embeddingStore.addAll(embeddings, segments);
+        List<String> pointIds = embeddingStore.addAll(validEmbeddings, validSegments);
         for (int i = 0; i < products.size() && i < pointIds.size(); i++) {
             pointIdMap.put(products.get(i).getId(), pointIds.get(i));
         }
@@ -97,6 +145,10 @@ public class ProductIndexer {
         // 构建 embedding 并存储
         TextSegment segment = buildTextSegment(product);
         Embedding embedding = embeddingModel.embed(segment.text()).content();
+        if (embedding.vector() == null || embedding.vector().length == 0) {
+            log.warn("商品 '{}' 向量化为空，跳过索引更新", product.getName());
+            return;
+        }
         String pointId = embeddingStore.add(embedding, segment);
         pointIdMap.put(product.getId(), pointId);
         indexedCount++;

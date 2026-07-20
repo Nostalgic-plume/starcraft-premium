@@ -5,8 +5,10 @@ import cn.dev33.satoken.exception.NotPermissionException;
 import cn.dev33.satoken.exception.NotRoleException;
 import com.shop.common.BusinessException;
 import com.shop.common.Result;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.MediaType;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.BindException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -87,8 +89,15 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    public Result<Void> handleException(Exception e) {
+    public Result<Void> handleException(Exception e, HttpServletRequest request) {
         log.error("系统异常: ", e);
+
+        // SSE 接口不返回 Result JSON，避免序列化冲突
+        String accept = request.getHeader("Accept");
+        if (accept != null && accept.contains(MediaType.TEXT_EVENT_STREAM_VALUE)) {
+            // 对于 SSE，直接抛出让容器处理，或返回空 Result（前端通过 SSE error 事件感知）
+            return Result.error("系统繁忙，请稍后再试");
+        }
         return Result.error("系统繁忙，请稍后再试");
     }
 }

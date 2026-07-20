@@ -7,6 +7,8 @@
 /* ====== Design Tokens ====== */
 :root {
   /* Brand */
+  --primary: #1a1a2e;
+  --primary-dark: #0f0f1f;
   --ds-navy: #1a1a2e;
   --ds-navy-light: #2d2d50;
   --ds-coral: #e94560;

@@ -44,8 +44,8 @@ public class ChatController {
             return emitter;
         }
 
-        // 超时 60s
-        SseEmitter emitter = new SseEmitter(60_000L);
+        // 超时 5 分钟（大模型生成可能较慢）
+        SseEmitter emitter = new SseEmitter(300_000L);
         chatService.ask(conversationId, message, emitter);
         return emitter;
     }

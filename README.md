@@ -11,7 +11,8 @@ B2C 电商系统，Spring Boot 单体后端 + 三端分离前端（用户端/管
 | 数据库 | MySQL 8 + Redis |
 | 反向代理 | Nginx 1.20.2 |
 | JDK | OpenJDK 22 |
-| 向量检索 | RAG 语义搜索 + 智能客服 SSE |
+| 向量检索 | LangChain4j + Qdrant（向量数据库）+ Ollama（bge-m3 嵌入模型） |
+| 智能客服 | SSE 流式响应 + Qwen3.5:0.8b（Ollama 大模型）+ RAG 检索增强生成 |
 | 离线数仓 | Hive + Sqoop + Azkaban 调度 |
 
 ## 快速启动

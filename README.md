@@ -1,4 +1,4 @@
-# Starcraft Premium — 电商系统
+# 星创优品 — 电商系统
 
 B2C 电商系统，Spring Boot 单体后端 + 三端分离前端（用户端/管理后台/商家中心），Nginx 托管静态资源并反代 API。
 

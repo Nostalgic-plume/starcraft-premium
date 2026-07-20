@@ -16,57 +16,47 @@
 ## 项目架构
 
 ```
-D:/claudecode/shop/
+shop/
 ├── pom.xml                         # Maven 父项目
-├── CLAUDE.md                       # Claude Code 指引
 ├── docs/
-│   ├── README.md                     # 本文档
-│   └── bugs-and-skill-reference.md   # Bug 清单 & Skill 参考
+│   └── README.md                     # 本文档
 │
 ├── deploy/                           # 内嵌 Nginx + 预构建静态文件
-│   ├── nginx.exe                     # Nginx 可执行文件
 │   ├── start.bat                     # 一键启动脚本
 │   ├── stop.bat
-│   ├── mime.types
 │   ├── conf/
-│   │   └── nginx.conf                # Nginx 配置（端口 8088）
-│   ├── logs/                         # 运行时日志（自动生成）
-│   ├── temp/                         # 运行时临时文件（自动生成）
+│   │   └── nginx.conf                # Nginx 配置
 │   └── html/
-│       ├── admin/                    # 管理后台预构建文件
-│       ├── merchant/                 # 商家中心预构建文件
-│       └── user/                     # 用户端预构建文件
+│       ├── admin/                    # 管理后台构建产物
+│       ├── merchant/                 # 商家中心构建产物
+│       └── user/                     # 用户端构建产物
 │
 ├── src/main/java/com/shop/
-│   ├── ShopApplication.java        # 启动类（含 @EnableScheduling）
+│   ├── ShopApplication.java        # 启动类
 │   ├── controller/                 # REST 接口层
-│   │   ├── AdminController.java    # 管理员（用户/订单管理）
-│   │   ├── AdminStatsController.java # 管理员统计看板
-│   │   ├── MerchantController.java # 商家（订单/商品，shop_id 隔离）
-│   │   ├── OrderController.java    # 用户端订单
-│   │   ├── ProductController.java  # 商品浏览/管理
+│   │   ├── AdminController.java    # 管理员接口
+│   │   ├── AdminStatsController.java # 统计看板
+│   │   ├── MerchantController.java # 商家接口
+│   │   ├── OrderController.java    # 订单接口
+│   │   ├── ProductController.java  # 商品接口
 │   │   ├── CartController.java     # 购物车
-│   │   ├── CategoryController.java # 分类列表
-│   │   ├── UserController.java     # 注册/登录/信息
+│   │   ├── CategoryController.java # 分类
+│   │   ├── UserController.java     # 用户
 │   │   └── PaymentController.java  # 支付回调
-│   ├── service/ + impl/            # 业务接口与实现
+│   ├── service/ + impl/            # 业务逻辑
 │   ├── mapper/                     # MyBatis-Plus Mapper
 │   ├── model/
-│   │   ├── entity/                 # 数据库实体（DO）
+│   │   ├── entity/                 # 数据库实体
 │   │   ├── dto/                    # 请求参数
 │   │   ├── vo/                     # 返回视图
-│   │   └── query/                  # 分页查询参数
-│   ├── common/                     # Result, PageResult, BusinessException, StpInterfaceImpl
-│   ├── config/                     # 全局配置/异常处理/定时任务
+│   │   └── query/                  # 分页查询
+│   ├── common/                     # 通用工具类
+│   ├── config/                     # 全局配置
 │   └── constant/                   # 枚举/常量
 │
-├── frontend/                       # 用户端 Vue 3（用户商城）
-├── frontend-admin/                 # 管理后台 Vue 3（管理员面板）
-└── frontend-merchant/              # 商家中心 Vue 3（商家面板）
-
-D:/claudecode/shop-data-mocker/          # Mock 数据工具（纯 Java，独立项目）
-D:/claudecode/shop-dashboard/            # 数据看板后端（Spring Boot，port 8081）
-D:/software/nginx-1.20.2/conf/nginx.conf # 外部 Nginx 配置（端口 80，生产用）
+├── frontend/                       # 用户端 Vue 3
+├── frontend-admin/                 # 管理后台 Vue 3
+└── frontend-merchant/              # 商家中心 Vue 3
 ```
 
 ### 架构模式
@@ -103,28 +93,24 @@ Nginx 前缀匹配按**最长匹配优先**：
 **启动：**
 
 ```bash
-# 方式 A：双击 deploy/start.bat
-# 方式 B：手动启动
-cd "D:/claudecode/shop"
-mvn spring-boot:run                    # 终端 1：后端
-"D:/claudecode/shop/deploy/nginx.exe" \
-  -c "D:/claudecode/shop/deploy/conf/nginx.conf" \
-  -p "D:/claudecode/shop/deploy"       # 终端 2：Nginx
+# 终端 1：启动后端
+mvn spring-boot:run
+
+# 终端 2：启动 Nginx
+cd deploy && nginx.exe -c conf/nginx.conf -p .
 ```
 
 **重载配置：**
 
 ```bash
-"D:/claudecode/shop/deploy/nginx.exe" \
-  -c "D:/claudecode/shop/deploy/conf/nginx.conf" \
-  -p "D:/claudecode/shop/deploy" -s reload
+cd deploy && nginx.exe -c conf/nginx.conf -p . -s reload
 ```
 
 > **注意：** Windows 上 `-s reload` 可能残留旧进程。若配置更改后不生效，先用 `taskkill /f /im nginx.exe` 完全杀掉再重启。
 
 ### 方式二：外部 Nginx（:80 — 生产）
 
-生产环境使用独立安装的 Nginx（`D:/software/nginx-1.20.2/`），配置内容与内嵌一致但监听 80 端口。
+生产环境使用独立安装的 Nginx，配置内容与内嵌一致但监听 80 端口。
 
 ---
 
@@ -171,28 +157,21 @@ sendfile      off;   # Windows 上 sendfile 可能导致大文件 404，必须�
 
 确保 MySQL（localhost:3306）和 Redis（localhost:6379）已启动，数据库 `shop` 已创建。
 
-### 2. 设置 JDK
+### 2. 初始化 Mock 数据
 
 ```bash
-export JAVA_HOME="C:/Users/26373/.jdks/openjdk-22.0.1"
-export PATH="$JAVA_HOME/bin:D:/software/maven/apache-maven-3.9.9/bin:$PATH"
-```
-
-### 3. 初始化 Mock 数据
-
-```bash
-cd "D:/claudecode/shop-data-mocker"
+cd shop-data-mocker
 mvn compile exec:java -Dexec.mainClass="com.shop.mocker.DataMockerApplication"
 ```
 
-### 4. 运行
+### 3. 运行
 
 ```bash
-# 终端 1：启动后端（或在 IntelliJ 直接 Run ShopApplication）
-cd "D:/claudecode/shop" && mvn spring-boot:run
+# 终端 1：启动后端
+cd shop && mvn spring-boot:run
 
-# 终端 2：启动 Nginx 内嵌服务
-cd "D:/claudecode/shop/deploy" && ./nginx.exe -c conf/nginx.conf -p .
+# 终端 2：启动 Nginx
+cd shop/deploy && nginx.exe -c conf/nginx.conf -p .
 ```
 
 ### 5. 访问
@@ -449,10 +428,10 @@ order_item 记录下单时的名称、价格、图片，后续商品信息变更
 
 ## Mock 数据工具
 
-独立项目 `D:\claudecode\shop-data-mocker\`，纯 Java + Hutool JDBC：
+独立项目 `shop-data-mocker`，纯 Java + Hutool JDBC：
 
 ```bash
-cd "D:/claudecode/shop-data-mocker"
+cd shop-data-mocker
 mvn compile exec:java -Dexec.mainClass="com.shop.mocker.DataMockerApplication"
 ```
 
@@ -479,15 +458,12 @@ mvn compile exec:java -Dexec.mainClass="com.shop.mocker.DataMockerApplication"
 
 ```bash
 # 后端
-cd "D:/claudecode/shop"
-mvn clean package -DskipTests -q
+cd shop && mvn clean package -DskipTests -q
 
 # 前端
-cd "D:/claudecode/shop/frontend"        && npm run build
-cd "D:/claudecode/shop/frontend-admin"  && npm run build
-cd "D:/claudecode/shop/frontend-merchant" && npm run build
-
-# 部署到 deploy/html（构建产物自动输出到各 dist/，手动复制到 deploy/html/ 对应目录）
+cd frontend            && npm run build
+cd frontend-admin      && npm run build
+cd frontend-merchant   && npm run build
 ```
 
 ---
@@ -534,27 +510,7 @@ cd "D:/claudecode/shop/frontend-merchant" && npm run build
 
 ---
 
-## 已知坑点
 
-### 前端
-
-| 问题 | 原因 | 修复 |
-|------|------|------|
-| `parentId === 0` 永远 false | Jackson Long→String 序列化，`parentId` 变成字符串 | 改为 `== 0` |
-| 分页不显示 | `total` 是字符串 `"50"`，`total > pageSize` 始终 false | `Number(res.data.total)` |
-| 管理后台数据空白 | 响应拦截器返回 `{code,data,msg}`，页面直接取 `res.list` | 改为 `res.data?.list` |
-
-### Nginx
-
-| 问题 | 原因 | 修复 |
-|------|------|------|
-| 静态资源 404（全局正则拦截） | `location ~* \.(js\|css\|...)$` 无 root/alias，请求被匹配到该规则但无文件源 | 按前端拆分独立的 regex location，分别指定 root |
-| `-s reload` 后新配置不生效 | Windows 上旧 worker 进程未完全退出 | 先 `taskkill /f /im nginx.exe` 再重启 |
-| 管理后台/商家中心 JS/CSS 301 重定向 | regex location 内使用 `alias` 导致路径拼接异常 | regex location 统一使用 `root`（而非 alias） |
-| Windows sendfile 导致大文件 404 | Nginx 1.20.2 on Windows sendfile 实现有 bug | `sendfile off` |
-| `-p` 路径不对导致 log/temp 目录找不到 | `-p` 指向了项目根而非 `deploy/` 目录 | 改为 `-p "D:/claudecode/shop/deploy"` |
-
----
 
 ## 离线数仓管线（已实施）
 
@@ -597,4 +553,4 @@ shop 数据库 ──→ Sqoop 增量/全量采集 ──→ Hive ODS 层 ──
        02:40 Sqoop 导出至 MySQL shop_ads（分区表增量 + 全量表全量）
 ```
 
-> **代码仓库：** `D:\claudecode\shop\azkaban\shop_warehouse\` 包含全部 HQL 脚本、Shell 脚本、Azkaban Job 定义和打包后的 .zip 文件。
+> **代码仓库：** `azkaban/shop_warehouse/` 包含全部 HQL 脚本、Shell 脚本、Azkaban Job 定义。

@@ -10,16 +10,40 @@
 
     <!-- 聊天面板 -->
     <transition name="chat-slide">
-      <div v-if="visible" class="chat-panel">
-        <!-- 头部 -->
-        <div class="chat-header">
+      <div
+        v-if="visible"
+        ref="panelRef"
+        class="chat-panel"
+        :class="{
+          'is-zoomed': isZoomed,
+          'is-dragging': isDragging
+        }"
+        :style="panelStyle"
+      >
+        <!-- 头部（拖拽手柄） -->
+        <div class="chat-header" @mousedown.prevent="startDrag">
           <div class="chat-header-left">
+            <span class="drag-indicator">⠿</span>
             <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
             </svg>
             <span>智能客服</span>
           </div>
           <div class="chat-header-actions">
+            <button class="header-btn" :title="isZoomed ? '还原大小' : '放大'" @click="toggleZoom">
+              <svg v-if="!isZoomed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                <polyline points="15 3 21 3 21 9"/>
+                <polyline points="9 21 3 21 3 15"/>
+                <line x1="21" y1="3" x2="14" y2="10"/>
+                <line x1="3" y1="21" x2="10" y2="14"/>
+              </svg>
+              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                <polyline points="4 14 10 14 10 20"/>
+                <polyline points="20 10 14 10 14 4"/>
+                <line x1="14" y1="10" x2="21" y2="3"/>
+                <line x1="3" y1="21" x2="10" y2="14"/>
+              </svg>
+            </button>
             <button class="header-btn" title="清空对话" @click="clearChat">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
                 <polyline points="3 6 5 6 21 6"/>
@@ -61,9 +85,12 @@
               {{ msg.role === 'user' ? '👤' : '🤖' }}
             </div>
             <div class="message-bubble">
-              <div v-if="msg.loading" class="message-loading">
+              <div v-if="msg.loading && !msg.content" class="message-loading">
+                <span class="dot-pulse"></span>
+                <span class="dot-pulse"></span>
                 <span class="dot-pulse"></span>
               </div>
+              <div v-else-if="msg.loading && msg.content" class="message-content streaming" v-html="renderContent(msg.content)"></div>
               <div v-else class="message-content" v-html="renderContent(msg.content)"></div>
             </div>
           </div>
@@ -97,7 +124,7 @@
 </template>
 
 <script setup>
-import { ref, nextTick, watch, onUnmounted } from 'vue'
+import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { postAsk, clearConversation } from '@/api/chat'
 
 // 生成会话ID（持久化到 SessionStorage）
@@ -114,6 +141,49 @@ const loading = ref(false)
 const unreadCount = ref(0)
 const messagesRef = ref(null)
 const inputRef = ref(null)
+const panelRef = ref(null)
+
+// ====== 拖拽状态 ======
+const dragOffset = ref({ x: 0, y: 0 })
+const isDragging = ref(false)
+const dragStart = ref({ x: 0, y: 0 })
+const initialOffset = ref({ x: 0, y: 0 })
+
+// ====== 放大状态 ======
+const isZoomed = ref(false)
+
+const panelStyle = computed(() => {
+  if (dragOffset.value.x !== 0 || dragOffset.value.y !== 0) {
+    return { transform: `translate(${dragOffset.value.x}px, ${dragOffset.value.y}px)` }
+  }
+  return {}
+})
+
+function startDrag(e) {
+  // 只响应左键
+  if (e.button !== 0) return
+  isDragging.value = true
+  dragStart.value = { x: e.clientX, y: e.clientY }
+  initialOffset.value = { ...dragOffset.value }
+}
+
+function onDragMove(e) {
+  if (!isDragging.value) return
+  const dx = e.clientX - dragStart.value.x
+  const dy = e.clientY - dragStart.value.y
+  dragOffset.value = {
+    x: initialOffset.value.x + dx,
+    y: initialOffset.value.y + dy
+  }
+}
+
+function stopDrag() {
+  isDragging.value = false
+}
+
+function toggleZoom() {
+  isZoomed.value = !isZoomed.value
+}
 
 const quickQuestions = [
   '推荐热门商品',
@@ -132,6 +202,8 @@ function openChat() {
 
 function closeChat() {
   visible.value = false
+  // 还原拖拽位置
+  dragOffset.value = { x: 0, y: 0 }
   // 有未读新消息才计数
   const lastMsg = messages.value[messages.value.length - 1]
   if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.isRead) {
@@ -140,10 +212,56 @@ function closeChat() {
   }
 }
 
+/**
+ * 将 AI 返回文本渲染为带基本 Markdown 样式的 HTML
+ */
 function renderContent(text) {
   if (!text) return ''
-  // 简单处理：换行转 <br>
-  return text.replace(/\n/g, '<br>')
+
+  // 1) 转义 HTML 防 XSS
+  let html = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+
+  // 2) 行内样式：粗体、斜体
+  html = html
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/__(.+?)__/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+
+  // 3) 按行解析列表
+  const lines = html.split('\n')
+  const result = []
+  let inUl = false
+  let inOl = false
+
+  for (const line of lines) {
+    const ulMatch = line.match(/^[-*]\s+(.+)/)
+    const olMatch = line.match(/^\d+[.、]\s+(.+)/)
+
+    if (ulMatch) {
+      if (!inUl) { result.push('<ul>'); inUl = true }
+      if (inOl) { result.push('</ol>'); inOl = false }
+      result.push(`<li>${ulMatch[1]}</li>`)
+    } else if (olMatch) {
+      if (!inOl) { result.push('<ol>'); inOl = true }
+      if (inUl) { result.push('</ul>'); inUl = false }
+      result.push(`<li>${olMatch[1]}</li>`)
+    } else {
+      if (inUl) { result.push('</ul>'); inUl = false }
+      if (inOl) { result.push('</ol>'); inOl = false }
+      if (line.trim()) {
+        result.push(`<p>${line}</p>`)
+      } else {
+        result.push('<br>')
+      }
+    }
+  }
+  if (inUl) result.push('</ul>')
+  if (inOl) result.push('</ol>')
+
+  return result.join('')
 }
 
 function scrollToBottom() {
@@ -217,6 +335,17 @@ function clearChat() {
   clearConversation(conversationId).catch(() => {})
 }
 
+// 全局拖拽监听
+onMounted(() => {
+  document.addEventListener('mousemove', onDragMove)
+  document.addEventListener('mouseup', stopDrag)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('mousemove', onDragMove)
+  document.removeEventListener('mouseup', stopDrag)
+})
+
 // 监听新消息自动滚动
 watch(messages, () => { scrollToBottom() }, { deep: true })
 </script>
@@ -283,11 +412,23 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
   flex-direction: column;
   overflow: hidden;
   transform-origin: bottom right;
+  /* 放大/缩小时过渡宽度和高度 */
+  transition: width 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+              height 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.chat-panel.is-zoomed {
+  width: 540px;
+  height: 680px;
+}
+.chat-panel.is-dragging {
+  transition: none; /* 拖拽时禁用所有过渡，避免卡顿 */
+  box-shadow: 0 16px 60px rgba(0, 0, 0, 0.22);
 }
 
 .chat-slide-enter-active,
 .chat-slide-leave-active {
-  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: opacity 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+              transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .chat-slide-enter-from,
 .chat-slide-leave-to {
@@ -295,25 +436,35 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
   transform: scale(0.6) translateY(40px);
 }
 
-/* ====== 头部 ====== */
+/* ====== 头部（拖拽手柄） ====== */
 .chat-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 18px;
+  padding: 12px 16px;
   background: var(--ds-navy, #1a1a2e);
   color: #fff;
   flex-shrink: 0;
+  cursor: grab;
+  user-select: none;
 }
+.chat-header:active { cursor: grabbing; }
 .chat-header-left {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 15px;
   font-weight: 600;
+  min-width: 0;
 }
-.header-icon { width: 20px; height: 20px; }
-.chat-header-actions { display: flex; gap: 6px; }
+.drag-indicator {
+  font-size: 14px;
+  opacity: 0.5;
+  margin-right: 2px;
+  letter-spacing: 2px;
+}
+.header-icon { width: 18px; height: 18px; flex-shrink: 0; }
+.chat-header-actions { display: flex; gap: 4px; }
 .header-btn {
   background: rgba(255, 255, 255, 0.1);
   border: none;
@@ -348,9 +499,16 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
 .welcome-icon { font-size: 48px; margin-bottom: 12px; }
 .welcome-title { font-size: 16px; font-weight: 600; color: #1a1a2e; margin-bottom: 4px; }
 .welcome-desc { font-size: 13px; color: #999; margin-bottom: 20px; }
-.quick-questions { display: flex; flex-direction: column; gap: 8px; max-width: 220px; margin: 0 auto; }
+.quick-questions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  max-width: 280px;
+  margin: 0 auto;
+}
 .quick-btn {
-  padding: 8px 16px;
+  padding: 7px 16px;
   border: 1.5px solid var(--ds-border-light, #e0ddd5);
   border-radius: 20px;
   background: #fff;
@@ -358,6 +516,7 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
   color: var(--ds-navy, #1a1a2e);
   cursor: pointer;
   transition: all 0.2s;
+  white-space: nowrap;
 }
 .quick-btn:hover {
   border-color: var(--ds-coral, #e94560);
@@ -374,13 +533,13 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
   align-items: flex-start;
 }
 .message-user { flex-direction: row-reverse; }
-.message-avatar { font-size: 24px; flex-shrink: 0; }
+.message-avatar { font-size: 24px; flex-shrink: 0; margin-top: 2px; }
 .message-bubble {
   max-width: 80%;
   padding: 10px 14px;
   border-radius: 14px;
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.65;
   word-break: break-word;
 }
 .message-user .message-bubble {
@@ -395,22 +554,63 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
 }
 
-.message-content { white-space: pre-wrap; }
+/* 消息内容增强样式（针对渲染的 Markdown） */
+.message-content { line-height: 1.7; }
+.message-content :deep(p) {
+  margin: 4px 0;
+}
+.message-content :deep(p:first-child) {
+  margin-top: 0;
+}
+.message-content :deep(p:last-child) {
+  margin-bottom: 0;
+}
+.message-content :deep(ul),
+.message-content :deep(ol) {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+.message-content :deep(li) {
+  margin: 3px 0;
+}
+.message-content :deep(strong) {
+  font-weight: 600;
+}
+.message-user .message-content :deep(strong) {
+  color: rgba(255, 255, 255, 0.95);
+}
+.message-ai .message-content :deep(strong) {
+  color: #e94560;
+}
+
+/* 流式输出光标 */
+.message-content.streaming::after {
+  content: '▊';
+  display: inline;
+  animation: blink-cursor 0.8s step-end infinite;
+  color: var(--ds-coral, #e94560);
+  font-size: 14px;
+  line-height: 1;
+  margin-left: 1px;
+  vertical-align: text-top;
+}
+.message-user .message-content.streaming::after {
+  color: rgba(255, 255, 255, 0.8);
+}
 
 /* loading 动画 */
-.message-loading { padding: 4px 0; }
+.message-loading { padding: 4px 0; display: flex; gap: 4px; align-items: center; }
 .dot-pulse {
   display: inline-block;
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: #999;
-  animation: pulse 1.2s infinite ease-in-out;
+  background: var(--ds-coral, #e94560);
+  animation: pulse 1.4s infinite ease-in-out both;
 }
-@keyframes pulse {
-  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
-  40% { opacity: 1; transform: scale(1); }
-}
+.dot-pulse:nth-child(1) { animation-delay: -0.32s; }
+.dot-pulse:nth-child(2) { animation-delay: -0.16s; }
+.dot-pulse:nth-child(3) { animation-delay: 0s; }
 
 /* ====== 输入区 ====== */
 .chat-input-area {
@@ -454,6 +654,16 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
 .send-btn:hover { background: #d63a52; }
 .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* ====== 动画关键帧 ====== */
+@keyframes pulse {
+  0%, 80%, 100% { opacity: 0; transform: scale(0.6); }
+  40% { opacity: 1; transform: scale(1); }
+}
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
 /* ====== 响应式 ====== */
 @media (max-width: 480px) {
   .chat-panel {
@@ -462,6 +672,10 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
     width: 100%;
     height: 100%;
     border-radius: 0;
+  }
+  .chat-panel.is-zoomed {
+    width: 100%;
+    height: 100%;
   }
   .floating-chat { bottom: 16px; right: 16px; }
 }

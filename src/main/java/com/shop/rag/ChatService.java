@@ -1,11 +1,17 @@
 package com.shop.rag;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.shop.mapper.CategoryMapper;
+import com.shop.mapper.ProductMapper;
+import com.shop.model.entity.CategoryDO;
+import com.shop.model.entity.ProductDO;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
-import dev.langchain4j.model.ollama.OllamaStreamingChatModel;
+import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.model.output.Response;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -13,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -28,8 +35,11 @@ import java.util.concurrent.Executors;
 @RequiredArgsConstructor
 public class ChatService {
 
-    private final OllamaStreamingChatModel streamingChatModel;
+    private final OpenAiStreamingChatModel streamingChatModel;
     private final RagSearchService ragSearchService;
+    private final ObjectMapper objectMapper;
+    private final CategoryMapper categoryMapper;
+    private final ProductMapper productMapper;
 
     /** 会话记忆池：conversationId → ChatMemory（保留最近 10 轮） */
     private final Map<String, MessageWindowChatMemory> chatMemoryMap = new ConcurrentHashMap<>();
@@ -38,16 +48,31 @@ public class ChatService {
 
     private static final int MAX_TOKENS = 10;
     private static final String SYSTEM_PROMPT_TEMPLATE = """
-            你是一个专业的电商智能客服助手，请基于以下商品信息回答用户的问题。
+            你是「星辰优选」商城的智能客服「小星」，性格热情耐心，像朋友一样帮用户挑商品。
 
-            如果信息足以回答，请给出专业、简洁的推荐或解答。
-            如果信息不足以回答，请诚实告知用户你不知道，不要编造信息。
+            ## 核心风格
+            - 语气自然亲切，像线下导购员一样说话，不要生硬堆砌参数
+            - 回答简洁不啰嗦，不用「您好」「感谢」「请问有什么可以帮助您」这类开场白
+            - 首句直接切入正题，用自然的口语
+
+            ## 当有商品信息时
+            根据下方商品列表向用户推荐，结合自己的理解说人话，例如：
+            - 「这款【商品名】性价比很高，才XX元，很多用户反馈不错💪」
+            - 「目前有这几款符合您的要求，我比较推荐第三款……」
+            - 用表情符号（😊👍💪🔥）适当点缀，别刷屏
+
+            ## 当没有商品信息时
+            下面商品列表为空，说明目前没有匹配到具体商品，你需要：
+            1. 判断用户是不是在问一个商品类别（如「手机」「电脑」「衣服」）
+            2. 如果是类别名，直接追问具体要求：「手机是吧，您想要什么价位的？主要用途是？」—— 像导购一样自然引导
+            3. 如果不是类别，就告知没找到，并反问具体需求：「没搜到您说的这个，您具体想找什么类型的东西？我帮您看看～」
+            4. 不要道歉，不要说「抱歉」「对不起」「还没有上架」这类话，直接追问引导
 
             ===== 相关商品信息 =====
             %s
             =========================
 
-            请用中文回答，语气友好专业。
+            记住：你是小星，不是机器人。说话要像真人导购。
             """;
 
     /**
@@ -63,7 +88,16 @@ public class ChatService {
                 // 1. RAG 检索 TOP-3
                 List<RagHitVO> hits = ragSearchService.search(userMessage, 3, null, null, null);
 
-                // 2. 构建商品上下文
+                // 2. RAG 无结果时，尝试按分类名回退查询数据库
+                if (hits == null || hits.isEmpty()) {
+                    List<RagHitVO> categoryHits = fallbackSearchByCategory(userMessage);
+                    if (categoryHits != null && !categoryHits.isEmpty()) {
+                        hits = categoryHits;
+                        log.info("分类回退命中: {} 条, query={}", hits.size(), userMessage);
+                    }
+                }
+
+                // 3. 构建商品上下文
                 String productContext = buildProductContext(hits);
 
                 // 3. 获取或创建会话记忆
@@ -90,8 +124,10 @@ public class ChatService {
 
                     @Override
                     public void onComplete(Response<AiMessage> response) {
-                        // 保存 AI 回复到记忆
-                        chatMemory.add(response.content());
+                        // 防止 langchain4j-ollama 空 response 的 bug（切到 OpenAi 后一般不会发生，但保留防御）
+                        if (response != null && response.content() != null) {
+                            chatMemory.add(response.content());
+                        }
                         sendEvent(emitter, "end", "");
                         try {
                             emitter.complete();
@@ -134,7 +170,7 @@ public class ChatService {
 
     private String buildProductContext(List<RagHitVO> hits) {
         if (hits == null || hits.isEmpty()) {
-            return "（未找到相关商品信息，请根据你的知识回答）";
+            return "（未找到相关商品信息）";
         }
 
         StringBuilder sb = new StringBuilder();
@@ -152,22 +188,72 @@ public class ChatService {
         return sb.toString();
     }
 
-    private void sendEvent(SseEmitter emitter, String type, String content) {
+    /**
+     * RAG 无结果时，尝试按分类名匹配回退查询数据库
+     * 支持一级分类和二级分类名匹配
+     */
+    private List<RagHitVO> fallbackSearchByCategory(String userMessage) {
         try {
-            emitter.send(SseEmitter.event()
-                    .name("message")
-                    .data("{\"type\":\"" + type + "\",\"content\":\"" + escapeJson(content) + "}"));
-        } catch (IOException | IllegalStateException e) {
-            log.warn("SSE 发送失败（连接可能已关闭）: {}", e.getMessage());
+            // 查所有分类（一级 + 二级）
+            List<CategoryDO> allCategories = categoryMapper.selectList(
+                    new LambdaQueryWrapper<CategoryDO>()
+                            .eq(CategoryDO::getStatus, 0));
+            if (allCategories == null || allCategories.isEmpty()) return null;
+
+            // 匹配分类名（优先精确包含，如「手机」「电脑」「衣服」）
+            CategoryDO matched = null;
+            for (CategoryDO cat : allCategories) {
+                if (userMessage.contains(cat.getName())) {
+                    matched = cat;
+                    break;
+                }
+            }
+            if (matched == null) return null;
+
+            // 确定一级分类ID：若匹配到二级分类，取其 parentId
+            Long targetFirstCategoryId;
+            if (matched.getParentId() != null && matched.getParentId() != 0) {
+                targetFirstCategoryId = matched.getParentId();
+            } else {
+                targetFirstCategoryId = matched.getId();
+            }
+
+            // 查询该一级分类下的上架商品（含子分类商品）
+            List<ProductDO> products = productMapper.selectList(
+                    new LambdaQueryWrapper<ProductDO>()
+                            .eq(ProductDO::getStatus, 1)
+                            .eq(ProductDO::getFirstCategoryId, targetFirstCategoryId)
+                            .last("LIMIT 10"));
+
+            if (products == null || products.isEmpty()) return null;
+
+            // 转为 RagHitVO
+            List<RagHitVO> hits = new ArrayList<>();
+            for (ProductDO p : products) {
+                hits.add(RagHitVO.builder()
+                        .score(1.0)
+                        .productId(p.getId())
+                        .name(p.getName())
+                        .excerpt(p.getDescription() != null ? p.getDescription() : "")
+                        .image(p.getMainImage())
+                        .build());
+            }
+            return hits;
+
+        } catch (Exception e) {
+            log.warn("分类回退查询异常: {}", e.getMessage());
+            return null;
         }
     }
 
-    private static String escapeJson(String s) {
-        if (s == null) return "";
-        return s.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
+    private void sendEvent(SseEmitter emitter, String type, String content) {
+        try {
+            String json = objectMapper.writeValueAsString(Map.of("type", type, "content", content));
+            emitter.send(SseEmitter.event()
+                    .name("message")
+                    .data(json));
+        } catch (IOException | IllegalStateException e) {
+            log.warn("SSE 发送失败（连接可能已关闭）: {}", e.getMessage());
+        }
     }
 }

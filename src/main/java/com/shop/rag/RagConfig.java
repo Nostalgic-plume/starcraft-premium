@@ -1,7 +1,7 @@
 package com.shop.rag;
 
-import dev.langchain4j.model.ollama.OllamaEmbeddingModel;
-import dev.langchain4j.model.ollama.OllamaStreamingChatModel;
+import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
+import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.store.embedding.qdrant.QdrantEmbeddingStore;
 import io.qdrant.client.QdrantClient;
 import io.qdrant.client.QdrantGrpcClient;
@@ -10,13 +10,14 @@ import io.qdrant.client.grpc.Collections.VectorParams;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import java.time.Duration;
 
 /**
- * LangChain4j + Qdrant + Ollama 配置
+ * LangChain4j + Qdrant + DashScope 配置
  */
 @Slf4j
 @Configuration
@@ -27,39 +28,51 @@ public class RagConfig {
     private final RagProperties ragProperties;
 
     /**
-     * 启动时重建 Qdrant 集合，确保向量维度一致（清除旧脏数据）
+     * 启动时确保 Qdrant 集合已存在，不存在则创建
      */
     @PostConstruct
     public void initCollection() {
         try (QdrantClient client = new QdrantClient(
                 QdrantGrpcClient.newBuilder(ragProperties.getHost(), ragProperties.getPort(), false).build())) {
 
-            log.info("正在重建 Qdrant 集合 '{}' ...", ragProperties.getCollectionName());
-            client.recreateCollectionAsync(ragProperties.getCollectionName(),
+            String name = ragProperties.getCollectionName();
+            boolean exists = client.collectionExistsAsync(name).get();
+            if (exists) {
+                log.info("Qdrant 集合 '{}' 已存在，跳过创建", name);
+                return;
+            }
+            log.info("Qdrant 集合 '{}' 不存在，正在创建...", name);
+            client.createCollectionAsync(name,
                     VectorParams.newBuilder()
                             .setSize(ragProperties.getDimension())
                             .setDistance(Distance.Cosine)
                             .build()).get();
-            log.info("Qdrant 集合 '{}' 重建完成（维度: {}）", ragProperties.getCollectionName(), ragProperties.getDimension());
+            log.info("Qdrant 集合 '{}' 创建完成（维度: {}）", name, ragProperties.getDimension());
         } catch (Exception e) {
-            log.error("Qdrant 集合重建失败，请确认 Qdrant gRPC 端口（6334）是否可访问: {}", e.getMessage());
+            log.warn("Qdrant 集合初始化跳过（已存在或无法连接）: {}", e.getMessage());
         }
     }
 
     @Bean
-    public OllamaEmbeddingModel ollamaEmbeddingModel() {
-        return OllamaEmbeddingModel.builder()
-                .baseUrl("http://localhost:11434")
-                .modelName("bge-m3")
+    public OpenAiEmbeddingModel openAiEmbeddingModel(
+            @Value("${rag.llm.api-key}") String apiKey,
+            @Value("${rag.llm.embedding-model:text-embedding-v1}") String modelName) {
+        return OpenAiEmbeddingModel.builder()
+                .baseUrl("https://dashscope.aliyuncs.com/compatible-mode/v1")
+                .apiKey(apiKey)
+                .modelName(modelName)
                 .timeout(Duration.ofMinutes(2))
                 .build();
     }
 
     @Bean
-    public OllamaStreamingChatModel ollamaStreamingChatModel() {
-        return OllamaStreamingChatModel.builder()
-                .baseUrl("http://localhost:11434")
-                .modelName("qwen3.5:0.8b")
+    public OpenAiStreamingChatModel openAiStreamingChatModel(
+            @Value("${rag.llm.api-key}") String apiKey,
+            @Value("${rag.llm.chat-model:qwen-plus}") String modelName) {
+        return OpenAiStreamingChatModel.builder()
+                .baseUrl("https://dashscope.aliyuncs.com/compatible-mode/v1")
+                .apiKey(apiKey)
+                .modelName(modelName)
                 .temperature(0.7)
                 .timeout(Duration.ofMinutes(3))
                 .build();

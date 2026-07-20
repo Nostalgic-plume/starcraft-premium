@@ -1,35 +1,46 @@
 package com.shop.rag;
 
-import cn.hutool.core.collection.CollUtil;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
-import dev.langchain4j.model.ollama.OllamaEmbeddingModel;
-import dev.langchain4j.store.embedding.EmbeddingMatch;
-import dev.langchain4j.store.embedding.qdrant.QdrantEmbeddingStore;
+import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.util.Collections;
-import java.util.List;
-import java.util.Objects;
-import java.util.stream.Collectors;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.*;
 
 /**
  * RAG 语义检索服务
- * 将用户查询转为向量 → Qdrant 检索 → 元数据过滤 → 返回结果
+ * 用户查询 → Ollama 向量化 → Qdrant REST API 检索 → 元数据过滤 → 返回结果
+ * <p>
+ * 注意：直接使用 Qdrant REST API（端口 6333）而非 gRPC（端口 6334），
+ * 因为 langchain4j-qdrant 0.36.1 依赖的 qdrant-client 1.11.0 与 Qdrant 服务端 1.18.3
+ * 的 SearchPoints protobuf 消息格式不兼容（repeated float → optional Vector），
+ * 导致检索时"Length of vector a (0)" 错误。REST API 绕过了 gRPC 序列化路径。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class RagSearchService {
 
-    private final OllamaEmbeddingModel embeddingModel;
-    private final QdrantEmbeddingStore embeddingStore;
+    private final OpenAiEmbeddingModel embeddingModel;
+    private final RagProperties ragProperties;
+    private final ObjectMapper objectMapper;
 
-    private static final double MIN_RELEVANCE_SCORE = 0.6;
-    private static final int EXPECTED_DIMENSION = 1024;
+    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(5))
+            .build();
+
+    private static final double MIN_RELEVANCE_SCORE = 0.3;
+    private static final int EXPECTED_DIMENSION = 1536;
 
     /**
      * 语义搜索商品
@@ -47,90 +58,200 @@ public class RagSearchService {
             return Collections.emptyList();
         }
 
-        // 1. 生成查询向量
+        // 1. 生成查询向量（embedAll 路径正常，仅 Qdrant gRPC 搜索路径有问题）
         Embedding queryEmbedding;
         try {
-            queryEmbedding = embeddingModel.embed(query).content();
+            List<Embedding> embeddings = embeddingModel.embedAll(List.of(TextSegment.from(query))).content();
+            if (embeddings == null || embeddings.isEmpty()) {
+                log.warn("Ollama 嵌入模型返回空列表");
+                return Collections.emptyList();
+            }
+            queryEmbedding = embeddings.get(0);
         } catch (Exception e) {
-            log.warn("Ollama 嵌入模型调用失败（Ollama 未运行或模型未加载）: {}", e.getMessage());
+            log.warn("Ollama 嵌入模型调用失败: {}", e.getMessage());
             return Collections.emptyList();
         }
 
-        // 2. 校验向量有效性：非空、维度匹配
+        // 2. 校验向量：非空、维度匹配
         if (queryEmbedding == null || queryEmbedding.vector() == null || queryEmbedding.vector().length == 0) {
-            log.warn("Ollama 返回空向量（可能模型未加载或返回异常），跳过 RAG 检索");
+            log.warn("Ollama 返回空向量，跳过 RAG 检索");
             return Collections.emptyList();
         }
         if (queryEmbedding.vector().length != EXPECTED_DIMENSION) {
-            log.warn("向量维度不匹配：期望 {}，实际 {}，跳过 RAG 检索", EXPECTED_DIMENSION, queryEmbedding.vector().length);
+            log.warn("向量维度不匹配：期望 {}，实际 {}，跳过 RAG 检索",
+                    EXPECTED_DIMENSION, queryEmbedding.vector().length);
             return Collections.emptyList();
         }
 
-        // 3. Qdrant 检索
-        List<EmbeddingMatch<TextSegment>> matches;
+        // 3. 通过 Qdrant REST API 检索（绕过 gRPC 版本不兼容问题）
+        return searchViaQdrantRest(queryEmbedding.vector(), topK * 3, MIN_RELEVANCE_SCORE,
+                categoryId, minPrice, maxPrice, topK);
+    }
+
+    /**
+     * 直接调用 Qdrant REST API 进行向量搜索
+     * <p>
+     * POST /collections/{name}/points/search
+     */
+    private List<RagHitVO> searchViaQdrantRest(float[] vector,
+                                                int queryLimit, double minScore,
+                                                Long categoryId, BigDecimal minPrice, BigDecimal maxPrice,
+                                                int topK) {
         try {
-            matches = embeddingStore.findRelevant(
-                    queryEmbedding, topK * 3, MIN_RELEVANCE_SCORE);
+            // 构建请求体
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("vector", floatArrayToList(vector));
+            body.put("limit", queryLimit);
+            body.put("score_threshold", minScore);
+            body.put("with_payload", true);
+            body.put("with_vector", false);
+
+            String jsonBody = objectMapper.writeValueAsString(body);
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("http://localhost:6333/collections/"
+                            + ragProperties.getCollectionName() + "/points/search"))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                    .timeout(Duration.ofSeconds(10))
+                    .build();
+
+            HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() != 200) {
+                log.warn("Qdrant REST API 返回非200: {} - {}",
+                        response.statusCode(), truncate(response.body(), 200));
+                return Collections.emptyList();
+            }
+
+            // 解析响应
+            JsonNode root = objectMapper.readTree(response.body());
+            JsonNode result = root.get("result");
+            if (result == null || !result.isArray() || result.isEmpty()) {
+                return Collections.emptyList();
+            }
+
+            // 遍历结果，过滤元数据，按 topK 截断
+            List<RagHitVO> hits = new ArrayList<>();
+            for (JsonNode point : result) {
+                if (hits.size() >= topK) break;
+
+                try {
+                    double score = point.get("score").asDouble();
+                    JsonNode payload = point.get("payload");
+                    if (payload == null || payload.isEmpty()) continue;
+
+                    // 业务元数据过滤（分类/价格）
+                    if (!passMetadataFilter(payload, categoryId, minPrice, maxPrice)) continue;
+
+                    // 构建 VO
+                    RagHitVO vo = RagHitVO.builder()
+                            .score((double) Math.round(score * 100) / 100)
+                            .excerpt(truncate(safeText(payload, "text_segment"), 120))
+                            .productId(safeLong(payload, "productId"))
+                            .name(safeText(payload, "name"))
+                            .image(safeText(payload, "mainImage"))
+                            .minPrice(safeBigDecimal(payload, "minPrice"))
+                            .maxPrice(safeBigDecimal(payload, "maxPrice"))
+                            .build();
+
+                    hits.add(vo);
+
+                } catch (Exception e) {
+                    log.debug("解析 Qdrant 搜索结果项异常: {}", e.getMessage());
+                }
+            }
+
+            return hits;
+
         } catch (Exception e) {
-            log.warn("RAG 检索失败（向量维度不匹配或 Qdrant 未就绪）: {}", e.getMessage());
+            log.warn("Qdrant REST API 检索失败: {}", e.getMessage());
             return Collections.emptyList();
         }
-
-        if (CollUtil.isEmpty(matches)) {
-            return Collections.emptyList();
-        }
-
-        // 4. 元数据过滤 + 转 VO
-        return matches.stream()
-                .filter(Objects::nonNull)
-                .filter(m -> m.embedded() != null)
-                .filter(m -> filterByMetadata(m.embedded(), categoryId))
-                .limit(topK)
-                .map(this::toHitVO)
-                .collect(Collectors.toList());
     }
 
-    /**
-     * 按分类过滤
-     */
-    private boolean filterByMetadata(TextSegment segment, Long categoryId) {
-        if (categoryId == null) {
-            return true;
+    // ========== 元数据过滤 ==========
+
+    /** 按分类 ID + 价格区间过滤搜索结果 */
+    private boolean passMetadataFilter(JsonNode payload, Long categoryId,
+                                        BigDecimal minPrice, BigDecimal maxPrice) {
+        // 分类过滤
+        if (categoryId != null) {
+            JsonNode catNode = payload.get("firstCategoryId");
+            if (catNode != null && !catNode.isNull()) {
+                String catVal = catNode.isNumber() ? catNode.asText() : catNode.asText();
+                if (!String.valueOf(categoryId).equals(catVal)) {
+                    return false;
+                }
+            }
         }
-        Object catId = segment.metadata().get("firstCategoryId");
-        if (catId == null) {
-            return true; // 无分类信息则通过
+
+        // 最低价过滤（商品的 maxPrice 必须 >= 查询的 minPrice）
+        if (minPrice != null) {
+            BigDecimal maxP = safeBigDecimal(payload, "maxPrice");
+            if (maxP != null && maxP.compareTo(minPrice) < 0) {
+                return false;
+            }
         }
-        // firstCategoryId 是 Number（Long → Jackson 可能转 Number）
-        return String.valueOf(catId).equals(String.valueOf(categoryId));
+
+        // 最高价过滤（商品的 minPrice 必须 <= 查询的 maxPrice）
+        if (maxPrice != null) {
+            BigDecimal minP = safeBigDecimal(payload, "minPrice");
+            if (minP != null && minP.compareTo(maxPrice) > 0) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
-    /**
-     * EmbeddingMatch 转 VO
-     */
-    private RagHitVO toHitVO(EmbeddingMatch<TextSegment> match) {
-        TextSegment segment = match.embedded();
-        var meta = segment.metadata();
+    // ========== JSON 安全取值辅助 ==========
 
-        RagHitVO.RagHitVOBuilder builder = RagHitVO.builder()
-                .score((double) Math.round(match.score() * 100) / 100)
-                .excerpt(truncate(segment.text(), 120));
+    private static String safeText(JsonNode payload, String key) {
+        JsonNode node = payload.get(key);
+        if (node == null || node.isNull()) return null;
+        return node.isTextual() ? node.asText() : node.toString();
+    }
 
-        // 从 metadata 还原字段
-        Object productId = meta.get("productId");
-        if (productId != null) {
-            builder.productId(Long.valueOf(String.valueOf(productId)));
+    private static Long safeLong(JsonNode payload, String key) {
+        JsonNode node = payload.get(key);
+        if (node == null || node.isNull()) return null;
+        if (node.canConvertToLong()) return node.asLong();
+        if (node.isTextual()) {
+            try {
+                return Long.parseLong(node.asText());
+            } catch (NumberFormatException ignored) {
+            }
         }
-        Object name = meta.get("name");
-        if (name != null) {
-            builder.name(String.valueOf(name));
-        }
-        Object image = meta.get("mainImage");
-        if (image != null) {
-            builder.image(String.valueOf(image));
-        }
+        return null;
+    }
 
-        return builder.build();
+    private static BigDecimal safeBigDecimal(JsonNode payload, String key) {
+        JsonNode node = payload.get(key);
+        if (node == null || node.isNull()) return null;
+        if (node.isNumber()) {
+            double val = node.asDouble();
+            // 浮点数精确转换，避免精度损失
+            return BigDecimal.valueOf(val);
+        }
+        if (node.isTextual()) {
+            try {
+                return new BigDecimal(node.asText());
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return null;
+    }
+
+    // ========== 工具方法 ==========
+
+    /** float[] → List<Float>，用于 JSON 序列化 */
+    private static List<Float> floatArrayToList(float[] arr) {
+        List<Float> list = new ArrayList<>(arr.length);
+        for (float v : arr) {
+            list.add(v);
+        }
+        return list;
     }
 
     private static String truncate(String text, int maxLen) {

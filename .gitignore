@@ -27,3 +27,4 @@ deploy/logs/
 logs/
 src/.claude/
 code_review_findings.json
+kill8080.ps1

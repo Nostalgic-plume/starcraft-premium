@@ -1,0 +1,121 @@
+-- ============================================================
+-- DWD 层 — 明细数据层 DDL（4 张表）
+-- 维度表：3 张拉链表（缓慢变化维 Type 2 — 保留全量历史版本）
+-- 事实表：1 张交易事实分区表
+--
+-- 拉链表设计：
+--   start_date — 版本生效日期
+--   end_date   — 版本失效日期（'9999-12-31' 表示当前有效版本）
+--   更新方式：关闭旧版本（end_date → 当天） + 插入新版本（start_date = 当天）
+-- ============================================================
+
+SET hive.execution.engine=mr;
+
+-- ============================================================
+-- 1. dwd_dim_product_zip：商品维度拉链表
+--    来源：ods_product_inc（增量变更驱动，每天合并版本）
+--    变更驱动表：ods_product_inc（update_time 变更触发）
+-- ============================================================
+DROP TABLE IF EXISTS dwd.dwd_dim_product_zip;
+CREATE EXTERNAL TABLE dwd.dwd_dim_product_zip (
+    product_id         BIGINT        COMMENT '商品ID',
+    product_name       STRING        COMMENT '商品名称',
+    brand              STRING        COMMENT '品牌',
+    category_id        BIGINT        COMMENT '分类ID',
+    first_category_id  BIGINT        COMMENT '一级分类ID',
+    category_name      STRING        COMMENT '分类名称（退化维度）',
+    shop_id            BIGINT        COMMENT '商家ID',
+    status             TINYINT       COMMENT '状态：0待审核 1上架 2下架',
+    start_date         STRING        COMMENT '版本生效日期',
+    end_date           STRING        COMMENT '版本失效日期（9999-12-31 表示当前版本）'
+) COMMENT '商品维度拉链表——保留商品变更历史版本'
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/dwd/dwd_dim_product_zip';
+
+-- ============================================================
+-- 2. dwd_dim_sku_zip：SKU 维度拉链表
+--    来源：ods_sku_inc（增量变更驱动）
+-- ============================================================
+DROP TABLE IF EXISTS dwd.dwd_dim_sku_zip;
+CREATE EXTERNAL TABLE dwd.dwd_dim_sku_zip (
+    sku_id          BIGINT         COMMENT 'SKU ID',
+    product_id      BIGINT         COMMENT '商品ID',
+    sku_name        STRING         COMMENT 'SKU名称',
+    specs           STRING         COMMENT '规格值JSON',
+    price           DECIMAL(10,2)  COMMENT '价格',
+    original_price  DECIMAL(10,2)  COMMENT '原价',
+    stock           INT            COMMENT '库存',
+    start_date      STRING         COMMENT '版本生效日期',
+    end_date        STRING         COMMENT '版本失效日期（9999-12-31 表示当前版本）'
+) COMMENT 'SKU 维度拉链表——保留 SKU 变更历史版本'
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/dwd/dwd_dim_sku_zip';
+
+-- ============================================================
+-- 3. dwd_dim_user_zip：用户维度拉链表
+--    来源：ods_user_inc（增量新增/变更驱动）
+-- ============================================================
+DROP TABLE IF EXISTS dwd.dwd_dim_user_zip;
+CREATE EXTERNAL TABLE dwd.dwd_dim_user_zip (
+    user_id      BIGINT       COMMENT '用户ID',
+    username     STRING       COMMENT '用户名',
+    phone        STRING       COMMENT '手机号',
+    nickname     STRING       COMMENT '昵称',
+    status       TINYINT      COMMENT '状态：0正常 1停用 2注销中 3封禁中',
+    admin_level  TINYINT      COMMENT '管理员级别：0不是管理员 1普通管理员 2超级管理员',
+    create_time  STRING       COMMENT '注册时间',
+    start_date   STRING       COMMENT '版本生效日期',
+    end_date     STRING       COMMENT '版本失效日期（9999-12-31 表示当前版本）'
+) COMMENT '用户维度拉链表——保留用户信息变更历史版本'
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/dwd/dwd_dim_user_zip';
+
+-- ============================================================
+-- 4. dwd_fact_order_detail：订单交易事实明细表（分区表）
+--    来源：
+--       ods_orders_inc（订单主体） JOIN
+--       ods_order_item_inc（商品明细） JOIN
+--       dwd_dim_user_zip（退化：用户名）
+--       dwd_dim_product_zip（退化：分类信息）
+--    主键：order_id（实际为 order_item.id，一个订单可能含多个商品项）
+--    分区：每天覆盖当天增量数据
+-- ============================================================
+DROP TABLE IF EXISTS dwd.dwd_fact_order_detail;
+CREATE EXTERNAL TABLE dwd.dwd_fact_order_detail (
+    order_id          BIGINT         COMMENT '商品项ID（关联 ods_order_item.id）',
+    order_no          STRING         COMMENT '订单编号',
+    user_id           BIGINT         COMMENT '用户ID',
+    username          STRING         COMMENT '用户名（退化维度）',
+    shop_id           BIGINT         COMMENT '商家ID',
+    product_id        BIGINT         COMMENT '商品ID',
+    product_name      STRING         COMMENT '商品名称（下单快照）',
+    sku_id            BIGINT         COMMENT 'SKU ID',
+    sku_name          STRING         COMMENT 'SKU名称（下单快照）',
+    category_id       BIGINT         COMMENT '分类ID（退化维度）',
+    first_category_id BIGINT         COMMENT '一级分类ID（退化维度）',
+    category_name     STRING         COMMENT '分类名称（退化维度）',
+    price             DECIMAL(10,2)  COMMENT '商品单价',
+    quantity          INT            COMMENT '购买数量',
+    subtotal          DECIMAL(10,2)  COMMENT '商品小计',
+    total_amount      DECIMAL(10,2)  COMMENT '订单总金额',
+    actual_amount     DECIMAL(10,2)  COMMENT '实际支付金额',
+    discount_amount   DECIMAL(10,2)  COMMENT '优惠金额',
+    order_status      TINYINT        COMMENT '订单状态：0待支付 1已支付 2已发货 3已收货 4已完成 5已取消 6已退款',
+    pay_type          TINYINT        COMMENT '支付方式：1微信 2支付宝',
+    pay_time          STRING         COMMENT '支付时间',
+    deliver_time      STRING         COMMENT '发货时间',
+    receive_time      STRING         COMMENT '收货时间',
+    create_time       STRING         COMMENT '下单时间'
+) COMMENT '订单交易事实明细表——每天增量覆盖'
+PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/dwd/dwd_fact_order_detail';
+
+-- ============================================================
+-- 建表完成
+-- SHOW TABLES IN dwd;
+-- ============================================================

@@ -1,0 +1,180 @@
+-- ============================================================
+-- ADS 层 — 应用数据层 DDL（9 张表）
+-- 分区表：6 张（每天一个分区，按 dt 检索后 Sqoop 导出）
+-- 非分区表：3 张（全量覆盖，导出时 TRUNCATE + 全量写入）
+--
+-- 数据流向：
+--   Hive ADS 表 → HDFS 临时目录（TEXTFILE） → Sqoop export → MySQL shop_ads 库
+--   分区表导出时带 dt 列用于 MySQL 分区
+--   非分区表导出为全量替换
+-- ============================================================
+
+SET hive.execution.engine=mr;
+
+-- ============================================================
+-- 【分区表 — 6 张】
+-- ============================================================
+
+-- ============================================================
+-- 1. ads_overview：全局概览
+--    累计指标（来自拉链表当前版本）+ 当日指标（来自 DWS）
+--    报表用途：首页看板核心数字
+-- ============================================================
+DROP TABLE IF EXISTS ads.ads_overview;
+CREATE EXTERNAL TABLE ads.ads_overview (
+    total_users      BIGINT          COMMENT '累计用户数（dim_user_zip 当前版本）',
+    total_products   BIGINT          COMMENT '累计商品数（dim_product_zip 当前版本）',
+    total_orders     BIGINT          COMMENT '当日订单数',
+    total_gmv        DECIMAL(16,2)   COMMENT '当日 GMV（实际支付金额）',
+    avg_order_price  DECIMAL(10,2)   COMMENT '当日客单价'
+) COMMENT '全局概览——累计指标+当日核心指标'
+PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ads/ads_overview';
+
+-- ============================================================
+-- 2. ads_gmv_daily：当日 GMV 日报
+--    报表用途：每日 GMV 趋势报表
+-- ============================================================
+DROP TABLE IF EXISTS ads.ads_gmv_daily;
+CREATE EXTERNAL TABLE ads.ads_gmv_daily (
+    gmv              DECIMAL(16,2)   COMMENT '当日 GMV',
+    order_count      BIGINT          COMMENT '当日订单数',
+    paid_order_count BIGINT          COMMENT '当日支付订单数（已付款含发货/收货/完成）',
+    paid_user_count  BIGINT          COMMENT '当日支付用户数',
+    avg_order_amount DECIMAL(10,2)   COMMENT '当日客单价'
+) COMMENT 'GMV 日报——每日 GMV 明细指标'
+PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ads/ads_gmv_daily';
+
+-- ============================================================
+-- 3. ads_order_stats_daily：当日订单状态分布
+--    报表用途：订单漏斗分析（支付→发货→完成→取消→退款）
+-- ============================================================
+DROP TABLE IF EXISTS ads.ads_order_stats_daily;
+CREATE EXTERNAL TABLE ads.ads_order_stats_daily (
+    total_orders     INT    COMMENT '当日总订单数',
+    paid_orders      INT    COMMENT '已支付订单数（状态1）',
+    shipped_orders   INT    COMMENT '已发货订单数（状态2）',
+    completed_orders INT    COMMENT '已完成订单数（状态4）',
+    cancelled_orders INT    COMMENT '已取消订单数（状态5）',
+    refund_orders    INT    COMMENT '已退款订单数（状态6）'
+) COMMENT '订单状态分布——当日各状态订单数量'
+PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ads/ads_order_stats_daily';
+
+-- ============================================================
+-- 4. ads_user_active：当日用户活跃
+--    报表用途：DAU 监控
+-- ============================================================
+DROP TABLE IF EXISTS ads.ads_user_active;
+CREATE EXTERNAL TABLE ads.ads_user_active (
+    dau              BIGINT  COMMENT '日活跃用户',
+    order_user_count BIGINT  COMMENT '下单用户数'
+) COMMENT '用户活跃——DAU 及下单用户数'
+PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ads/ads_user_active';
+
+-- ============================================================
+-- 5. ads_user_new_retain：用户新增与留存
+--    日报：当天新增用户数 + D1/D7/D30 留存
+--    留存计算：cohort 分析法
+--       day1_retain_users = 昨天注册 cohort 中今天下单的用户数
+--       day7_retain_users = 7天前注册 cohort 中今天下单的用户数
+--       day30_retain_users = 30天前注册 cohort 中今天下单的用户数
+-- ============================================================
+DROP TABLE IF EXISTS ads.ads_user_new_retain;
+CREATE EXTERNAL TABLE ads.ads_user_new_retain (
+    new_users         INT           COMMENT '当日新增用户数',
+    day1_retain_users INT           COMMENT '次日留存用户数',
+    day1_retain_rate  DECIMAL(5,2)  COMMENT '次日留存率（%）',
+    day7_retain_users INT           COMMENT '7日留存用户数',
+    day7_retain_rate  DECIMAL(5,2)  COMMENT '7日留存率（%）',
+    day30_retain_users INT          COMMENT '30日留存用户数',
+    day30_retain_rate DECIMAL(5,2)  COMMENT '30日留存率（%）'
+) COMMENT '用户新增与留存——日报（D1/D7/D30 留存率）'
+PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ads/ads_user_new_retain';
+
+-- ============================================================
+-- 6. ads_shop_daily：店铺日报
+--    报表用途：店铺维度 KPI 排行
+--    需关联 ods_shop_full 获取 shop_name
+-- ============================================================
+DROP TABLE IF EXISTS ads.ads_shop_daily;
+CREATE EXTERNAL TABLE ads.ads_shop_daily (
+    shop_name     STRING          COMMENT '店铺名称',
+    gmv           DECIMAL(16,2)   COMMENT 'GMV',
+    order_count   BIGINT          COMMENT '订单数',
+    product_count BIGINT          COMMENT '销售商品种类数'
+) COMMENT '店铺日报——各店铺每日 KPI'
+PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ads/ads_shop_daily';
+
+
+-- ============================================================
+-- 【非分区表 — 3 张（全量覆盖）】
+-- ============================================================
+
+-- ============================================================
+-- 7. ads_category_sales：分类销售排行
+--    全量覆盖（每天替换全部数据）
+--    报表用途：分类维度销售排行
+-- ============================================================
+DROP TABLE IF EXISTS ads.ads_category_sales;
+CREATE EXTERNAL TABLE ads.ads_category_sales (
+    category_name STRING          COMMENT '分类名称',
+    sale_amount   DECIMAL(16,2)   COMMENT '销售额',
+    sale_count    BIGINT          COMMENT '销量（商品件数）'
+) COMMENT '分类销售排行——全量覆盖，按销售额降序'
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ads/ads_category_sales';
+
+-- ============================================================
+-- 8. ads_product_top50：商品销量 TOP 50
+--    全量覆盖（每天替换）
+--    报表用途：热销商品排行榜
+-- ============================================================
+DROP TABLE IF EXISTS ads.ads_product_top50;
+CREATE EXTERNAL TABLE ads.ads_product_top50 (
+    product_name  STRING          COMMENT '商品名称',
+    sale_amount   DECIMAL(16,2)   COMMENT '销售额',
+    sale_quantity BIGINT          COMMENT '销售数量'
+) COMMENT '商品销量 TOP 50——按销售额降序，LIMIT 50'
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ads/ads_product_top50';
+
+-- ============================================================
+-- 9. ads_trend_weekly：近 8 周趋势
+--    全量覆盖（每天替换）
+--    时间范围：从 dt-55 天开始，按周聚合
+--    报表用途：周趋势折线图
+-- ============================================================
+DROP TABLE IF EXISTS ads.ads_trend_weekly;
+CREATE EXTERNAL TABLE ads.ads_trend_weekly (
+    week_start  STRING          COMMENT '周开始日期（周一）',
+    week_end    STRING          COMMENT '周结束日期（周日）',
+    gmv         DECIMAL(16,2)   COMMENT '当周 GMV',
+    order_count BIGINT          COMMENT '当周订单数'
+) COMMENT '近 8 周趋势——按周聚合的 GMV 和订单量'
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ads/ads_trend_weekly';
+
+-- ============================================================
+-- 建表完成
+-- SHOW TABLES IN ads;
+-- ============================================================

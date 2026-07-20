@@ -1,0 +1,93 @@
+-- ============================================================
+-- DWS 层 — 轻度聚合层 DDL（4 张分区表）
+-- 业务主题：订单、商品、店铺、用户
+-- 粒度：每日汇总
+-- 数据来源：dwd_fact_order_detail（交易事实明细）
+-- 处理方式：每天覆盖当天分区
+-- ============================================================
+
+SET hive.execution.engine=mr;
+
+-- ============================================================
+-- 1. dws_order_daily：订单日汇总
+--    粒度：1 条/天（全局订单指标）
+--    核心指标：订单量、支付量、GMV、客单价、销售商品数
+--    注意：订单级去重（DISTINCT order_id），避免多商品项重复累加
+-- ============================================================
+DROP TABLE IF EXISTS dws.dws_order_daily;
+CREATE EXTERNAL TABLE dws.dws_order_daily (
+    order_count       BIGINT          COMMENT '订单数（去重）',
+    paid_order_count  BIGINT          COMMENT '已支付订单数（状态1/2/3/4）',
+    completed_count   BIGINT          COMMENT '已完成订单数（状态4）',
+    cancelled_count   BIGINT          COMMENT '已取消订单数（状态5）',
+    total_amount      DECIMAL(16,2)   COMMENT '订单总金额',
+    actual_amount     DECIMAL(16,2)   COMMENT '实际支付总金额（GMV）',
+    discount_amount   DECIMAL(16,2)   COMMENT '优惠总金额',
+    user_count        BIGINT          COMMENT '下单用户数（去重）',
+    avg_order_amount  DECIMAL(10,2)   COMMENT '客单价（实际金额/订单数）',
+    product_sold      BIGINT          COMMENT '销售商品件数（总quantity）'
+) COMMENT '订单日汇总——全局订单指标'
+PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/dws/dws_order_daily';
+
+-- ============================================================
+-- 2. dws_product_sale_daily：商品销售日汇总
+--    粒度：1 条/天/商品（product_id）
+--    核心指标：销量、销售额、订单数
+-- ============================================================
+DROP TABLE IF EXISTS dws.dws_product_sale_daily;
+CREATE EXTERNAL TABLE dws.dws_product_sale_daily (
+    product_id    BIGINT          COMMENT '商品ID',
+    product_name  STRING          COMMENT '商品名称',
+    category_name STRING          COMMENT '分类名称',
+    sale_quantity BIGINT          COMMENT '销售数量',
+    sale_amount   DECIMAL(16,2)   COMMENT '销售额',
+    order_count   BIGINT          COMMENT '订单数（去重）'
+) COMMENT '商品销售日汇总——商品维度销售排行榜'
+PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/dws/dws_product_sale_daily';
+
+-- ============================================================
+-- 3. dws_shop_daily：店铺日汇总
+--    粒度：1 条/天/店铺（shop_id）
+--    核心指标：GMV、订单数、商品数、用户数
+-- ============================================================
+DROP TABLE IF EXISTS dws.dws_shop_daily;
+CREATE EXTERNAL TABLE dws.dws_shop_daily (
+    shop_id       BIGINT          COMMENT '店铺ID',
+    gmv           DECIMAL(16,2)   COMMENT 'GMV（排除已取消/退款订单）',
+    order_count   BIGINT          COMMENT '订单数（去重）',
+    product_count BIGINT          COMMENT '销售商品种类数（去重）',
+    user_count    BIGINT          COMMENT '下单用户数（去重）'
+) COMMENT '店铺日汇总——店铺维度销售KPI'
+PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/dws/dws_shop_daily';
+
+-- ============================================================
+-- 4. dws_user_active_daily：用户活跃日汇总
+--    粒度：1 条/天
+--    核心指标：DAU、新增用户、支付用户、人均订单
+-- ============================================================
+DROP TABLE IF EXISTS dws.dws_user_active_daily;
+CREATE EXTERNAL TABLE dws.dws_user_active_daily (
+    dau              BIGINT         COMMENT '日活跃用户数（下单用户去重）',
+    new_user_count   BIGINT         COMMENT '当日新增用户数（拉链表start_date=当天）',
+    order_user_count BIGINT         COMMENT '下单用户数（去重）',
+    paid_user_count  BIGINT         COMMENT '支付用户数（状态1/2/3/4）',
+    avg_user_order   DECIMAL(5,2)   COMMENT '人均下单数（总订单数/下单用户数）'
+) COMMENT '用户活跃日汇总——DAU及用户活跃指标'
+PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/dws/dws_user_active_daily';
+
+-- ============================================================
+-- 建表完成
+-- SHOW TABLES IN dws;
+-- ============================================================

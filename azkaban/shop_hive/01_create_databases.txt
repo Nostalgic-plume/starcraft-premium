@@ -1,0 +1,29 @@
+-- ============================================================
+-- 数仓分层：数据库建库语句
+-- 四层架构：ODS（源数据层）→ DWD（明细层）→ DWS（汇总层）→ ADS（应用层）
+-- ============================================================
+
+-- 1. ODS 层：源数据层，与 MySQL 结构保持一致，不做任何业务清洗
+CREATE DATABASE IF NOT EXISTS ods
+COMMENT '源数据层（Operational Data Store）—— 保持与 MySQL 原始结构一致'
+LOCATION '/warehouse/ods';
+
+-- 2. DWD 层：明细层，进行数据清洗、维度退化、拉链处理
+CREATE DATABASE IF NOT EXISTS dwd
+COMMENT '明细数据层（Data Warehouse Details）—— 清洗、维度退化、拉链表'
+LOCATION '/warehouse/dwd';
+
+-- 3. DWS 层：汇总层，按主题进行轻度聚合（日汇总）
+CREATE DATABASE IF NOT EXISTS dws
+COMMENT '数据汇总层（Data Warehouse Service）—— 轻度聚合，按日汇总'
+LOCATION '/warehouse/dws';
+
+-- 4. ADS 层：应用层，面向具体报表指标，供 Sqoop 导出至 MySQL
+CREATE DATABASE IF NOT EXISTS ads
+COMMENT '应用数据层（Application Data Store）—— 报表指标，导出至 MySQL shop_ads'
+LOCATION '/warehouse/ads';
+
+-- ============================================================
+-- 建库完成
+-- SHOW DATABASES LIKE 'o__';
+-- ============================================================

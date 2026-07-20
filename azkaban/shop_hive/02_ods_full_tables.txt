@@ -1,0 +1,210 @@
+-- ============================================================
+-- ODS 层 — 全量表 DDL（10 张）
+-- 分区类型：PARTITIONED BY (dt STRING) — 每天全量覆盖
+-- 数据格式：TEXTFILE，字段分隔符 '\001'（与 Sqoop 导入一致）
+-- 数据来源：MySQL shop 数据库，通过 Sqoop 全量导入
+-- ============================================================
+
+-- 使用 MR 引擎建表（兼容性最佳）
+SET hive.execution.engine=mr;
+
+-- ============================================================
+-- 1. ods_address_full：地址表
+--    对应 MySQL：address
+--    全量覆盖：每次导入完整数据至当天分区
+-- ============================================================
+DROP TABLE IF EXISTS ods.ods_address_full;
+CREATE EXTERNAL TABLE ods.ods_address_full (
+    id             BIGINT       COMMENT '地址ID',
+    user_id        BIGINT       COMMENT '用户ID',
+    receiver_name  STRING       COMMENT '收货人姓名',
+    receiver_phone STRING       COMMENT '收货人电话',
+    province       STRING       COMMENT '省份',
+    city           STRING       COMMENT '城市',
+    district       STRING       COMMENT '区县',
+    detail         STRING       COMMENT '详细地址',
+    is_default     TINYINT      COMMENT '是否默认地址：0否 1是',
+    create_time    STRING       COMMENT '创建时间',
+    update_time    STRING       COMMENT '更新时间',
+    deleted        TINYINT      COMMENT '逻辑删除：0未删 1已删'
+) PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ods/ods_address_full';
+
+-- ============================================================
+-- 2. ods_admin_full：管理员表
+--    对应 MySQL：admin
+-- ============================================================
+DROP TABLE IF EXISTS ods.ods_admin_full;
+CREATE EXTERNAL TABLE ods.ods_admin_full (
+    id           BIGINT       COMMENT '管理员ID',
+    username     STRING       COMMENT '用户名',
+    password     STRING       COMMENT '密码（BCrypt加密）',
+    nickname     STRING       COMMENT '昵称',
+    admin_level  TINYINT      COMMENT '管理员级别：1普通 2超级',
+    status       TINYINT      COMMENT '状态：0正常 1停用',
+    create_time  STRING       COMMENT '创建时间',
+    update_time  STRING       COMMENT '更新时间',
+    deleted      TINYINT      COMMENT '逻辑删除：0未删 1已删'
+) PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ods/ods_admin_full';
+
+-- ============================================================
+-- 3. ods_cart_full：购物车表
+--    对应 MySQL：cart
+-- ============================================================
+DROP TABLE IF EXISTS ods.ods_cart_full;
+CREATE EXTERNAL TABLE ods.ods_cart_full (
+    id           BIGINT       COMMENT '购物车项ID',
+    user_id      BIGINT       COMMENT '用户ID',
+    product_id   BIGINT       COMMENT '商品ID',
+    sku_id       BIGINT       COMMENT 'SKU ID',
+    quantity     INT          COMMENT '数量',
+    checked      TINYINT      COMMENT '是否勾选：0否 1是',
+    is_ordered   TINYINT      COMMENT '是否已下单：0否 1是',
+    create_time  STRING       COMMENT '创建时间',
+    update_time  STRING       COMMENT '更新时间',
+    deleted      TINYINT      COMMENT '逻辑删除：0未删 1已删'
+) PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ods/ods_cart_full';
+
+-- ============================================================
+-- 4. ods_category_full：分类表
+--    对应 MySQL：category
+-- ============================================================
+DROP TABLE IF EXISTS ods.ods_category_full;
+CREATE EXTERNAL TABLE ods.ods_category_full (
+    id           BIGINT       COMMENT '分类ID',
+    name         STRING       COMMENT '分类名称',
+    parent_id    BIGINT       COMMENT '父分类ID（一级分类为0）',
+    sort         INT          COMMENT '排序值（升序）',
+    icon         STRING       COMMENT '图标URL',
+    status       TINYINT      COMMENT '状态：0启用 1禁用',
+    create_time  STRING       COMMENT '创建时间',
+    update_time  STRING       COMMENT '更新时间',
+    deleted      TINYINT      COMMENT '逻辑删除：0未删 1已删'
+) PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ods/ods_category_full';
+
+-- ============================================================
+-- 5. ods_permission_full：权限表
+--    对应 MySQL：permission
+-- ============================================================
+DROP TABLE IF EXISTS ods.ods_permission_full;
+CREATE EXTERNAL TABLE ods.ods_permission_full (
+    id           BIGINT       COMMENT '权限ID',
+    name         STRING       COMMENT '权限名称',
+    code         STRING       COMMENT '权限编码',
+    parent_id    BIGINT       COMMENT '父权限ID',
+    sort         INT          COMMENT '排序值',
+    status       TINYINT      COMMENT '状态：0启用 1禁用',
+    create_time  STRING       COMMENT '创建时间',
+    update_time  STRING       COMMENT '更新时间',
+    deleted      TINYINT      COMMENT '逻辑删除：0未删 1已删'
+) PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ods/ods_permission_full';
+
+-- ============================================================
+-- 6. ods_role_full：角色表
+--    对应 MySQL：role
+-- ============================================================
+DROP TABLE IF EXISTS ods.ods_role_full;
+CREATE EXTERNAL TABLE ods.ods_role_full (
+    id           BIGINT       COMMENT '角色ID',
+    name         STRING       COMMENT '角色名称',
+    code         STRING       COMMENT '角色编码',
+    description  STRING       COMMENT '角色描述',
+    status       TINYINT      COMMENT '状态：0启用 1禁用',
+    create_time  STRING       COMMENT '创建时间',
+    update_time  STRING       COMMENT '更新时间',
+    deleted      TINYINT      COMMENT '逻辑删除：0未删 1已删'
+) PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ods/ods_role_full';
+
+-- ============================================================
+-- 7. ods_role_permission_full：角色-权限关联表
+--    对应 MySQL：role_permission
+-- ============================================================
+DROP TABLE IF EXISTS ods.ods_role_permission_full;
+CREATE EXTERNAL TABLE ods.ods_role_permission_full (
+    id             BIGINT       COMMENT '关联ID',
+    role_id        BIGINT       COMMENT '角色ID',
+    permission_id  BIGINT       COMMENT '权限ID',
+    create_time    STRING       COMMENT '创建时间'
+) PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ods/ods_role_permission_full';
+
+-- ============================================================
+-- 8. ods_shop_full：店铺表
+--    对应 MySQL：shop（商家登录信息+店铺基本信息）
+-- ============================================================
+DROP TABLE IF EXISTS ods.ods_shop_full;
+CREATE EXTERNAL TABLE ods.ods_shop_full (
+    id             BIGINT       COMMENT '店铺ID（关联商家用户ID）',
+    user_id        BIGINT       COMMENT '商家用户ID',
+    username       STRING       COMMENT '商家用户名',
+    password       STRING       COMMENT '商家登录密码',
+    shop_name      STRING       COMMENT '店铺名称',
+    shop_logo      STRING       COMMENT '店铺Logo URL',
+    shop_desc      STRING       COMMENT '店铺描述',
+    contact_name   STRING       COMMENT '联系人姓名',
+    contact_phone  STRING       COMMENT '联系电话',
+    status         INT          COMMENT '店铺状态',
+    create_time    STRING       COMMENT '创建时间',
+    update_time    STRING       COMMENT '更新时间',
+    deleted        INT          COMMENT '逻辑删除'
+) PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ods/ods_shop_full';
+
+-- ============================================================
+-- 9. ods_user_role_full：用户-角色关联表
+--    对应 MySQL：user_role
+-- ============================================================
+DROP TABLE IF EXISTS ods.ods_user_role_full;
+CREATE EXTERNAL TABLE ods.ods_user_role_full (
+    id           BIGINT       COMMENT '关联ID',
+    user_id      BIGINT       COMMENT '用户ID',
+    role_id      BIGINT       COMMENT '角色ID',
+    create_time  STRING       COMMENT '创建时间'
+) PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ods/ods_user_role_full';
+
+-- ============================================================
+-- 10. ods_user_status_log_full：用户状态变更日志表
+--     对应 MySQL：user_status_log
+-- ============================================================
+DROP TABLE IF EXISTS ods.ods_user_status_log_full;
+CREATE EXTERNAL TABLE ods.ods_user_status_log_full (
+    id           BIGINT       COMMENT '日志ID',
+    user_id      BIGINT       COMMENT '用户ID',
+    operator_id  BIGINT       COMMENT '操作人ID',
+    from_status  TINYINT      COMMENT '原状态',
+    to_status    TINYINT      COMMENT '新状态',
+    reason       STRING       COMMENT '变更原因',
+    create_time  STRING       COMMENT '创建时间'
+) PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ods/ods_user_status_log_full';
+
+-- ============================================================
+-- 建表完成
+-- SHOW TABLES IN ods LIKE '*_full';
+-- ============================================================

@@ -53,4 +53,8 @@ public class OrderItemDO {
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
+
+    @TableLogic
+    @TableField("deleted")
+    private Integer deleted;
 }

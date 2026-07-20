@@ -1,594 +1,239 @@
 # 星创优品 — 电商系统
 
-一个完整的 B2C 电商系统，**Spring Boot 单体后端 + Vue 3 三端分离前端**，Nginx 托管静态资源并反代 API。
+B2C 电商系统，**Spring Boot 单体后端 + Vue 3 三端分离前端**，Nginx 托管静态资源并反代 API。
 
 ---
 
 ## 目录
 
 - [技术栈](#技术栈)
-- [项目架构](#项目架构)
-- [部署方式](#部署方式)
-- [Nginx 配置要点](#nginx-配置要点)
 - [快速开始](#快速开始)
+- [项目结构](#项目结构)
 - [业务模块](#业务模块)
-- [管理后台路由](#管理后台路由结构)
+- [API 接口](#api-接口)
+- [数据库](#数据库)
 - [账号与权限](#账号与权限)
-- [API 接口文档](#api-接口文档)
-- [数据库](#数据库表-12-张业务--rbac--日志)
 - [核心设计](#核心设计)
-- [Mock 数据工具](#mock-数据工具)
-- [构建命令](#构建命令)
+- [离线数仓](#离线数仓)
 - [前端设计系统](#前端设计系统)
-- [数据看板组件](#数据看板组件体系-report)
-- [离线数仓管线](#离线数仓管线已实施)
 
 ---
 
 ## 技术栈
 
-| 组件 | 技术栈 | 版本 |
-|------|--------|------|
-| 后端 | Spring Boot + MyBatis-Plus + Sa-Token | 3.4.4 / 3.5.5 / 1.45.0 |
-| 数据库 | MySQL 8 + Redis | — |
-| 前端 | Vue 3 + Vite + Element Plus + Pinia + ECharts | 5.x |
-| 反向代理 | Nginx | 1.20.2 |
-| JDK | OpenJDK 22 | 22.0.1 |
-| RAG 语义搜索 | LangChain4j + Qdrant + Ollama（bge-m3 嵌入） | — |
-| 智能客服 | SSE 流式 + Qwen3.5:0.8b（Ollama 大模型）+ RAG | — |
-| Mock 工具 | 纯 Java（独立项目） | Hutool JDBC |
-
----
-
-## 项目架构
-
-```
-shop/
-├── pom.xml                         # Maven 父项目
-├── docs/
-│   └── README.md                     # 本文档
-│
-├── deploy/                           # 内嵌 Nginx + 预构建静态文件
-│   ├── start.bat                     # 一键启动脚本
-│   ├── stop.bat
-│   ├── conf/
-│   │   └── nginx.conf                # Nginx 配置
-│   └── html/
-│       ├── admin/                    # 管理后台构建产物
-│       ├── merchant/                 # 商家中心构建产物
-│       └── user/                     # 用户端构建产物
-│
-├── src/main/java/com/shop/
-│   ├── ShopApplication.java        # 启动类
-│   ├── controller/                 # REST 接口层
-│   │   ├── AdminController.java    # 管理员接口
-│   │   ├── AdminStatsController.java # 统计看板
-│   │   ├── MerchantController.java # 商家接口
-│   │   ├── OrderController.java    # 订单接口
-│   │   ├── ProductController.java  # 商品接口
-│   │   ├── CartController.java     # 购物车
-│   │   ├── CategoryController.java # 分类
-│   │   ├── UserController.java     # 用户
-│   │   └── PaymentController.java  # 支付回调
-│   ├── service/ + impl/            # 业务逻辑
-│   ├── mapper/                     # MyBatis-Plus Mapper
-│   ├── model/
-│   │   ├── entity/                 # 数据库实体
-│   │   ├── dto/                    # 请求参数
-│   │   ├── vo/                     # 返回视图
-│   │   └── query/                  # 分页查询
-│   ├── common/                     # 通用工具类
-│   ├── config/                     # 全局配置
-│   └── constant/                   # 枚举/常量
-│
-├── frontend/                       # 用户端 Vue 3
-├── frontend-admin/                 # 管理后台 Vue 3
-└── frontend-merchant/              # 商家中心 Vue 3
-```
-
-### 架构模式
-
-```
-用户浏览器 → Nginx (:8088 内嵌 / :80 生产)
-               ├── /api/dashboard/* → 反向代理 → 看板后端 (:8081) → shop_ads 数据库
-               ├── /api/* → 反向代理 → 主后端 (:8080) → shop 数据库
-               ├── /admin/* → 管理后台 SPA（alias → html/admin/）
-               ├── /merchant/* → 商家中心 SPA（alias → html/merchant/）
-               └── /* → 用户端 SPA（root → html/user/）
-```
-
-Nginx 前缀匹配按**最长匹配优先**：
-- `/api/dashboard/` 比 `/api/` 更具体，dashboard 请求优先匹配到看板后端（:8081）
-- `/admin/`、`/merchant/` 比 `/` 更具体，分别映射到各自前端目录
-
----
-
-## 部署方式
-
-### 方式一：内嵌 Nginx（deploy/ 目录 — 开发/演示）
-
-项目 `deploy/` 目录包含独立 Nginx + 预构建静态文件，双击 `start.bat` 即可：
-
-| 文件 | 作用 |
-|------|------|
-| `nginx.exe` | Nginx 可执行文件（Windows 1.20.2） |
-| `conf/nginx.conf` | 监听端口 8088，三端前端 + API 反向代理 + 静态缓存 |
-| `start.bat` | 一键启动：停止旧 Nginx → 启动 Nginx → `mvn spring-boot:run` |
-| `stop.bat` | 优雅停止 Nginx |
-| `html/{admin,merchant,user}/` | 三端前端构建产物（`npm run build` 输出） |
-
-**启动：**
-
-```bash
-# 终端 1：启动后端
-mvn spring-boot:run
-
-# 终端 2：启动 Nginx
-cd deploy && nginx.exe -c conf/nginx.conf -p .
-```
-
-**重载配置：**
-
-```bash
-cd deploy && nginx.exe -c conf/nginx.conf -p . -s reload
-```
-
-> **注意：** Windows 上 `-s reload` 可能残留旧进程。若配置更改后不生效，先用 `taskkill /f /im nginx.exe` 完全杀掉再重启。
-
-### 方式二：外部 Nginx（:80 — 生产）
-
-生产环境使用独立安装的 Nginx，配置内容与内嵌一致但监听 80 端口。
-
----
-
-## Nginx 配置要点
-
-### 三端 SPA 共存
-
-三个 Vue 3 前端共用同一域名，通过路径前缀区分：
-
-```nginx
-# 三端的 base 配置：
-# 用户端   → vite.config.js base: '/'           → HTML 引用 /assets/*
-# 管理后台 → vite.config.js base: '/admin/'     → HTML 引用 /admin/assets/*
-# 商家中心 → vite.config.js base: '/merchant/'  → HTML 引用 /merchant/assets/*
-```
-
-### 静态资源缓存
-
-每个前端使用独立的 `location ~*` 正则匹配 assets：
-
-| 前端 | Nginx 规则 | 磁盘路径 |
-|------|-----------|---------|
-| 用户端 | `~* ^/assets/.*\.(js\|css\|...)$` + `root html/user` | `html/user/assets/` |
-| 管理后台 | `~* ^/admin/assets/.*\.(js\|css\|...)$` + `root html` | `html/admin/assets/` |
-| 商家中心 | `~* ^/merchant/assets/.*\.(js\|css\|...)$` + `root html` | `html/merchant/assets/` |
-
-> **说明：** 正则（`~*`）location 优先于前缀 location。用户端 `/assets/*` 请求虽然也匹配 `location /`，但正则优先级更高，由缓存规则处理。管理后台和商家中心的 alias 块 + 正则缓存使用 `root`（而非 `alias`），因为正则 location 用完整 URI 拼路径。
-
-### SPA 回退
-
-每个前端都有 `try_files $uri $uri/ /index.html`（或 `/admin/index.html`、`/merchant/index.html`），确保前端路由刷新时不 404。
-
-### Windows 兼容
-
-```nginx
-sendfile      off;   # Windows 上 sendfile 可能导致大文件 404，必须关闭
-```
+| 组件 | 技术栈 |
+|------|--------|
+| 后端 | Spring Boot 3.4.4 + MyBatis-Plus 3.5.5 + Sa-Token 1.45.0 |
+| 数据库 | MySQL 8 + Redis |
+| 前端 | Vue 3 + Vite + Element Plus + Pinia + ECharts |
+| 反向代理 | Nginx 1.20.2 |
+| JDK | OpenJDK 22 |
+| RAG 语义搜索 | LangChain4j + Qdrant（向量库）+ Ollama（bge-m3 嵌入） |
+| 智能客服 | SSE 流式 + Qwen3.5:0.8b（大模型）+ RAG 检索增强 |
+| 离线数仓 | Hive 3.x + Sqoop 1.4.x + Azkaban 3.x |
 
 ---
 
 ## 快速开始
 
-### 1. 环境准备
-
-确保 MySQL（localhost:3306）和 Redis（localhost:6379）已启动，数据库 `shop` 已创建。
-
-### 2. 初始化 Mock 数据
-
 ```bash
-cd shop-data-mocker
-mvn compile exec:java -Dexec.mainClass="com.shop.mocker.DataMockerApplication"
-```
+# 1. 后端编译启动
+cd shop && mvn clean package -DskipTests -q && mvn spring-boot:run
 
-### 3. 运行
+# 2. 前后端构建（三端）
+cd frontend            && npm run build
+cd frontend-admin      && npm run build
+cd frontend-merchant   && npm run build
 
-```bash
-# 终端 1：启动后端
-cd shop && mvn spring-boot:run
-
-# 终端 2：启动 Nginx
+# 3. Nginx 启动
 cd shop/deploy && nginx.exe -c conf/nginx.conf -p .
 ```
 
-### 5. 访问
+| 地址 | 页面 | 默认账号 |
+|------|------|----------|
+| `http://localhost:8088` | 用户端 | zhangsan / lisi |
+| `http://localhost:8088/admin/` | 管理后台 | admin |
+| `http://localhost:8088/merchant/` | 商家中心 | merchant1 |
 
-| 地址 | 页面 | 默认账号 | 密码 |
-|------|------|---------|------|
-| `http://localhost:8088` | 用户端 | zhangsan / lisi | 123456 |
-| `http://localhost:8088/admin/` | 管理后台 | admin | 123456 |
-| `http://localhost:8088/merchant/` | 商家中心 | merchant1 | 123456 |
+> 所有账号密码统一 **`123456`**。
 
-> 生产环境通过外部 Nginx（:80）访问。
+---
+
+## 项目结构
+
+```
+shop/
+├── src/                        # 后端 Java 源码
+│   ├── controller/             #   REST 接口（Admin/User/Order/Product/Merchant...）
+│   ├── service/                #   业务逻辑
+│   ├── mapper/                 #   MyBatis-Plus 数据访问
+│   ├── model/entity/dto/vo     #   数据模型
+│   ├── rag/                    #   语义搜索 + 智能客服
+│   ├── common/                 #   通用工具 + 统一返回
+│   └── config/                 #   全局配置 + 异常处理 + 定时任务
+├── frontend/                   # 用户端 Vue 3
+├── frontend-admin/             # 管理后台 Vue 3
+├── frontend-merchant/          # 商家中心 Vue 3
+└── deploy/                     # Nginx + 静态资源
+
+独立项目：shop-data-mocker（Mock 数据工具）
+独立后端：shop-dashboard（数据看板 :8081，查询 shop_ads 报表库）
+```
 
 ---
 
 ## 业务模块
 
-| 模块 | 关键类 | 核心逻辑 |
-|------|--------|----------|
-| **用户** | UserController / UserServiceImpl | BCrypt 加密、Sa-Token 登录、注册自动绑 user 角色、4 种账号状态 |
-| **商品** | ProductController / ProductServiceImpl | SPU + SKU 分层、一级/二级分类联动（firstCategoryId）、shop_id 隔离、状态管理、语义搜索（RAG） |
-| **智能客服 + RAG 搜索** | ChatController / RagSearchController / RagSearchService | SSE 流式对话（ChatService）、向量语义搜索（RagSearchService）、ProductIndexer 索引管理 |
-| **分类** | CategoryController | 二级分类树 + 按父级查子分类（`/api/category/children`） |
-| **订单** | OrderController / OrderServiceImpl | Redis 防重令牌 → MySQL 行锁扣库存 → shop_id 绑定 → 购物车标记已下单 → 幂等支付回调 → 库存回滚取消 → 30 分钟后超时自动取消 |
-| **购物车** | CartController / CartServiceImpl | SKU 级别操作、is_ordered 过滤、库存校验 |
-| **支付** | PaymentController | 模拟回调、幂等处理 |
-| **管理员** | AdminController / AdminStatsController | 用户管理、状态变更日志、全平台订单查询、控制台 ECharts |
-| **商家** | MerchantController | **shop_id 自动注入（从 Sa-Token）**、订单管理（含发货）、商品管理、本店数据统计 |
-| **数据看板** | DataDashboard.vue + report/ 组件 | 独立后端（:8081）查询 shop_ads 库、6 组 ECharts 组件构成的全屏看板、非实时报表 |
+| 模块 | 核心逻辑 |
+|------|----------|
+| **用户** | BCrypt 注册登录、Sa-Token 会话、4 种账号状态 |
+| **商品** | SPU + SKU 分层、二级分类联动（firstCategoryId）、shop_id 隔离、RAG 语义搜索 |
+| **分类** | 二级分类树、按父级查询子分类 |
+| **订单** | Redis 防重令牌 → MySQL 行锁扣库存 → shop_id 绑定 → 购物车标记 → 幂等支付回调 → 库存回滚取消 → 30 分钟超时自动取消 |
+| **购物车** | SKU 级别管理、is_ordered 过滤已结算商品 |
+| **支付** | 模拟支付回调、幂等处理 |
+| **管理后台** | 用户/订单/商品管理、ECharts 统计看板、全平台数据查询 |
+| **商家中心** | shop_id 自动隔离、本店商品/订单管理、发货、本店 ECharts 看板 |
+| **数据看板** | 独立后端（:8081）查询 shop_ads，6 组 ECharts 报表组件 |
+| **智能客服** | SSE 流式对话（ChatService），RAG 检索 TOP-3 商品作为上下文 |
+| **RAG 搜索** | Ollama bge-m3 向量化 → Qdrant 检索 → 元数据过滤（分类/价格） |
 
 ---
 
-## 管理后台路由结构
+## API 接口
 
-```
-/login                    → Login.vue（管理员登录）
-/dashboard                → Layout.vue（侧边栏布局）
-  ├── /dashboard          → Dashboard.vue（控制台：5 统计卡 + 4 ECharts 图表）
-  ├── /dashboard/products → Products.vue（商品管理 CRUD）
-  ├── /dashboard/orders   → Orders.vue（订单管理全平台查询）
-  ├── /dashboard/users    → Users.vue（用户管理 + 状态变更）
-  └── /dashboard/report   → DataDashboard.vue（数据看板：6 组报表组件）
-```
-
----
-
-## 账号与权限
-
-### 三级角色 + 两级管理员
-
-| 角色 | 权限编码 | 登录端 | 说明 |
-|------|---------|--------|------|
-| **超级管理员** (admin_level=2) | product:add/edit/delete/status, order:all, user:manage | 管理后台 | 可操作所有账号 |
-| **普通管理员** (admin_level=1) | 同上 | 管理后台 | 不可操作超级管理员 |
-| **商家** (merchant) | product:add/edit/status | 商家中心 | **数据权限隔离**：仅管理自身商品和订单（shop_id），后端自动注入 |
-| **用户** (user) | 无管理权限 | 用户端 | 浏览/下单/购物车 |
-
-### 账号状态
-
-| 值 | 名称 | 登录行为 |
-|----|------|---------|
-| 0 | 正常 | ✅ 允许登录 |
-| 1 | 停用 | ❌ "账号已被停用" |
-| 2 | 注销中 | ❌ "账号正在注销中" |
-| 3 | 封禁中 | ❌ "账号已被封禁" |
-
-状态变更记录到 `user_status_log` 表（操作人、变更前后状态、原因）。
-
----
-
-## API 接口文档
-
-### 公开接口（无需登录）
+### 公开接口
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | /api/user/register | 用户注册 |
 | POST | /api/user/login | 用户登录 |
-| GET | /api/product/page | 商品分页（支持 categoryId/firstCategoryId/keyword） |
+| GET | /api/product/page | 商品分页（categoryId/firstCategoryId/keyword） |
 | GET | /api/product/detail/{id} | 商品详情（含 SKU） |
-| GET | /api/product/rag-search?q=&topK=&categoryId=&minPrice=&maxPrice= | 语义搜索商品（RAG 向量检索） |
-| GET | /api/category/list | 全部分类列表（平铺） |
-| GET | /api/category/children?parentId= | 指定父级下的子分类 |
+| GET | /api/product/rag-search | 语义搜索（RAG 向量检索） |
+| GET | /api/category/list | 全部分类 |
+| GET | /api/category/children?parentId= | 子分类 |
 | POST | /api/pay/callback | 支付回调 |
 
-### 用户端接口（需登录）
+### 用户端（需登录）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | /api/user/info | 当前用户信息 |
-| GET | /api/user/role | 当前用户角色列表 |
-| POST | /api/user/logout | 退出登录 |
-| GET | /api/order/token | 下单防重令牌（Redis 5 分钟） |
-| POST | /api/order/create | 创建订单（含 shop_id 绑定 + 购物车标记） |
-| GET | /api/order/my?page=&pageSize=&status= | 我的订单（分页+状态筛选） |
-| GET | /api/order/detail/{id} | 订单详情（含商品快照，归属校验） |
-| POST | /api/order/cancel/{id} | 取消订单（仅待支付，回滚库存） |
+| GET | /api/user/info | 用户信息 |
+| GET | /api/order/token | 下单防重令牌 |
+| POST | /api/order/create | 创建订单 |
+| GET | /api/order/my | 我的订单（分页+状态筛选） |
+| GET | /api/order/detail/{id} | 订单详情 |
+| POST | /api/order/cancel/{id} | 取消订单 |
 | POST | /api/order/receive/{id} | 确认收货 |
-| GET | /api/cart/list | 购物车列表（自动过滤 is_ordered=1） |
-| POST | /api/cart/add | 添加商品 |
-| PUT | /api/cart/quantity/{skuId}?quantity= | 修改数量 |
-| DELETE | /api/cart/remove/{skuId} | 删除购物车项 |
-| PUT | /api/cart/check/{skuId}?checked= | 选中/取消 |
+| GET/POST/PUT/DELETE | /api/cart/** | 购物车 CRUD |
 | POST | /api/pay/mock-pay | 模拟支付 |
 | POST | /api/chat/ask (SSE) | 智能客服流式对话 |
-| POST | /api/chat/clear | 清除对话历史 |
 
-### 管理后台接口（需 `@SaCheckPermission`）
+### 管理后台（需 `@SaCheckPermission`）
 
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
-| GET | /api/admin/users | user:manage | 用户分页（keyword/status） |
-| PUT | /api/admin/user/{id}/status | user:manage | 修改用户状态（含日志+权限校验） |
+| GET | /api/admin/users | user:manage | 用户分页 |
+| PUT | /api/admin/user/{id}/status | user:manage | 修改用户状态 |
 | PUT | /api/admin/user/batch-status | user:manage | 批量修改状态 |
-| GET | /api/admin/order/page | order:all | 订单分页（status/shopId/keyword/startTime/endTime） |
-| GET | /api/admin/order/detail/{id} | order:all | 订单详情（全平台可查） |
-| GET | /api/admin/stats/dashboard | — | 控制台概览 |
-| GET | /api/admin/stats/sales-trend?days= | — | 销售额趋势 |
-| GET | /api/admin/stats/product-sales | — | 商品销量排行 TOP10 |
-| GET | /api/admin/stats/user-growth | — | 用户增长趋势 |
-| GET | /api/admin/stats/order-distribution | — | 订单状态分布 |
+| GET | /api/admin/order/page | order:all | 订单分页（多条件） |
+| GET | /api/admin/order/detail/{id} | order:all | 订单详情 |
+| GET | /api/admin/stats/** | — | 控制台统计（5 个端点） |
 
-### 商家端接口（shop_id 自动注入，无需传参）
+### 商家端（shop_id 自动注入）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | /api/merchant/stats/dashboard | 本店控制台 |
-| GET | /api/merchant/order/page?status= | 本店订单分页 |
-| GET | /api/merchant/order/detail/{id} | 本店订单详情（shop_id 校验） |
-| POST | /api/merchant/order/deliver | 发货（shop_id 校验） |
-| GET | /api/merchant/product/page | 本店商品列表（自动 shop_id 过滤） |
-| POST | /api/merchant/product/add | 新增商品（自动绑定本店） |
-| PUT | /api/merchant/product/status/{id}?status= | 更新商品状态 |
-
-### 数据看板接口（独立后端 :8081）
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | /api/dashboard/all | 获取数据看板全部 9 类数据 |
-
-**返回结构：**
-
-```json
-{
-  "overview": { "totalGmv", "totalOrders", "totalUsers", "totalProducts", "totalShops" },
-  "gmvDaily": [ { "date", "gmv" } ],
-  "orderStats": [ { "status", "count" } ],
-  "categorySales": [ { "categoryName", "salesAmount" } ],
-  "productTop": [ { "productName", "salesAmount", "salesCount" } ],
-  "weeklyTrend": [ { "dayOfWeek", "gmv", "orderCount" } ],
-  "userActive": { "dau", "orderUserCount" },
-  "userNewRetain": { "newUsers", "day1RetainUsers", "day1RetainRate", "day7RetainUsers", "day7RetainRate", "day30RetainUsers", "day30RetainRate" },
-  "shopDaily": { "shopName", "gmv", "orderCount", "productCount" }
-}
-```
-
-**说明：**
-- `/api/dashboard/*` 由 Nginx 代理转发到 `:8081`（独立 Spring Boot 看板后端）
-- Nginx 配置中 `/api/dashboard/` 必须在 `/api/` 之前（Nginx 按最长前缀匹配，但明确写出更安全）
-- 数据来源为 `shop_ads` 数据库（9 张报表表，与主库 `shop` 分离）
+| GET | /api/merchant/order/page | 本店订单分页 |
+| POST | /api/merchant/order/deliver | 发货 |
+| GET/POST/PUT | /api/merchant/product/** | 本店商品管理 |
 
 ---
 
-## 数据库表（12 张业务 + RBAC + 日志）
+## 数据库
 
-### 业务表
+### 主库 `shop`（12 张表）
 
-| 表名 | 说明 | 关键字段 |
-|------|------|---------|
-| user | 用户表 | username, password(BCrypt), phone, nickname, avatar, status(0~3), admin_level(0~2) |
-| category | 商品分类表（二级，parent_id=0 为一级） | name, parent_id, sort, icon |
-| product | 商品表（SPU） | name, description, **category_id**, **first_category_id**, brand, main_image, **shop_id**, status(1/2/3) |
-| sku | 商品 SKU 表 | product_id, name, specs(JSON), price, original_price, stock |
-| orders | 订单表 | order_no(雪花ID), user_id, **shop_id**, total_amount, actual_amount, status(0~6), 收货信息快照 |
-| order_item | 订单商品项（订单快照） | order_id, product_id, sku_id, price, quantity, subtotal, product_name/image |
-| cart | 购物车表 | user_id, product_id, sku_id, quantity, checked, **is_ordered**(0=未下单/1=已下单) |
-| address | 收货地址表 | user_id, receiver_name, phone, province/city/district/detail, is_default |
+| 类别 | 表 | 说明 |
+|------|----|------|
+| 业务 | user / product / sku / orders / order_item / cart / category / address | 用户/商品/订单/购物车/分类/地址 |
+| RBAC | role / permission / user_role / role_permission | 三级角色 + 6 项权限 |
+| 日志 | user_status_log | 账号状态变更记录 |
 
-### RBAC 表（4 张）
+### 报表库 `shop_ads`（9 张表）
 
-| 表名 | 说明 |
-|------|------|
-| role | 角色表（admin/merchant/user） |
-| permission | 权限表（6 项：product:add/edit/delete/status, order:all, user:manage） |
-| user_role | 用户-角色关联 |
-| role_permission | 角色-权限关联 |
+概览 / GMV 日趋势 / 订单状态分布 / 用户活跃 / 新增留存 / 店铺日汇总 / 分类销售 / 商品 TOP50 / 周趋势。
 
-### 日志表
+> 所有表使用 MyBatis-Plus 逻辑删除（`deleted` 标记）。
 
-| 表名 | 说明 |
-|------|------|
-| user_status_log | 账号状态变更日志（user_id, operator_id, from_status, to_status, reason） |
+---
 
-### 报表库：shop_ads（9 张表，独立数据库）
+## 账号与权限
 
-数据看板专用数据库，与主库 `shop` 分离：
+| 角色 | admin_level | 权限 | 登录端 |
+|------|-------------|------|--------|
+| 超级管理员 | 2 | product:add/edit/delete/status, order:all, user:manage | 管理后台 |
+| 普通管理员 | 1 | 同上（不可操作超级管理员） | 管理后台 |
+| 商家 | 0 | product:add/edit/status（shop_id 隔离） | 商家中心 |
+| 用户 | 0 | 无管理权限 | 用户端 |
 
-| 表名 | 说明 | 关键字段 |
-|------|------|---------|
-| ads_overview | 平台概览汇总（单行，按天分区） | dt, total_users, total_products, total_orders, total_gmv, avg_order_price |
-| ads_gmv_daily | 每日 GMV 趋势（按天分区） | dt, gmv, order_count, paid_order_count, paid_user_count, avg_order_amount |
-| ads_order_stats_daily | 订单状态分布（按天分区） | dt, total_orders, paid_orders, shipped_orders, completed_orders, cancelled_orders, refund_orders |
-| ads_user_active | 用户活跃指标（按天分区） | dt, dau, order_user_count |
-| ads_user_new_retain | 新增用户留存（按天分区） | dt, new_users, day1～30_retain_users, day1～30_retain_rate |
-| ads_shop_daily | 店铺日汇总（按天分区） | dt, shop_id, shop_name, gmv, order_count, product_count |
-| ads_category_sales | 分类销售排行（全量覆盖） | dt, first_category_id, category_name, sale_count, sale_amount |
-| ads_product_top50 | 商品销量 TOP 50（全量覆盖） | dt, product_id, product_name, category_name, sale_quantity, sale_amount |
-| ads_trend_weekly | 近 8 周趋势（全量覆盖） | week_start, week_end, gmv, order_count, user_count, gmv_mom |
-
-> 数据来源：Hive ADS 层，通过 Sqoop 每日导出（全量表 TRUNCATE + 全量导出，分区表按 dt 增量导出）。
+| 状态 | 值 | 登录 |
+|------|----|------|
+| 正常 | 0 | 允许 |
+| 停用 | 1 | 拒绝 |
+| 注销中 | 2 | 拒绝 |
+| 封禁中 | 3 | 拒绝 |
 
 ---
 
 ## 核心设计
 
-### 并发控制
-
-```sql
-UPDATE sku SET stock = stock - #{quantity} WHERE id = #{skuId} AND stock >= #{quantity}
-```
-MySQL 行锁，影响行数为 0 时表示库存不足，事务回滚。
-
-### 幂等设计
-
-| 场景 | 方案 |
+| 设计 | 方案 |
 |------|------|
-| 下单防重 | Redis Token：先获取令牌，提交时原子 delete（一次有效） |
-| 支付回调 | 状态机校验：仅"待支付"状态才更新 |
-| 重复请求 | Sa-Token 保证同一用户同时只有一个请求通过 |
-
-### 商家数据隔离
-
-商家端所有接口强制从 `StpUtil.getLoginIdAsLong()` 自动注入 `shop_id`，前端不传参：
-- 订单管理 WHERE shop_id = ?
-- 商品管理 WHERE shop_id = ?
-- 详情/发货校验 `order.shop_id == shopId`
-
-### 订单超时取消
-
-`ScheduledTasks.java` 每 5 分钟扫描，取消下单超过 30 分钟未支付的订单，自动回滚 SKU 库存。
-
-### 商品快照
-
-order_item 记录下单时的名称、价格、图片，后续商品信息变更不影响历史订单。
-
-### 购物车下单标记
-
-下单成功后批量更新 `cart.is_ordered = 1`，购物车列表自动过滤 `is_ordered = 0`，用户看到的永远只有未结算商品。
-
-### RAG 语义搜索 & 智能客服
-
-- **语义搜索**：`/api/product/rag-search` 使用词向量检索替代传统 MySQL LIKE，支持按分类/价格过滤，前端用户端首页支持关键词/语义双模式切换
-- **智能客服**：`/api/chat/ask` 基于 SSE（Server-Sent Events）流式响应，支持多轮对话历史（conversationId），前端 FloatingChat 悬浮球组件
-- **索引管理**：`ProductIndexer` 负责商品向量索引的构建与更新
-
-### 统一返回格式
-
-```json
-{ "code": 200, "msg": "success", "data": { ... } }
-```
-
-所有异常由 `GlobalExceptionHandler` 接管，404 也返回 JSON 而非 HTML。
+| **防超卖** | `UPDATE sku SET stock = stock - n WHERE id = ? AND stock >= n`（MySQL 行锁） |
+| **下单幂等** | Redis Token 防重令牌，一次有效 |
+| **支付幂等** | 状态机校验，仅"待支付"状态可更新 |
+| **库存回滚** | 取消/超时订单自动 `UPDATE sku SET stock = stock + n` |
+| **订单超时** | 定时任务每 5 分钟扫描，取消 30 分钟未支付订单 |
+| **商家隔离** | 后端强制 `WHERE shop_id = ?`（从 Sa-Token loginId 注入） |
+| **商品快照** | order_item 记录下单时名称/价格/图片，不受后续变更影响 |
+| **购物车标记** | 下单后批量 `cart.is_ordered = 1`，列表过滤已结算 |
+| **RAG 搜索** | Ollama bge-m3 向量化 → Qdrant 检索 → 元数据过滤 |
+| **智能客服** | SSE 流式输出 → RAG 检索 TOP-3 → Qwen3.5 生成回答 |
+| **统一返回** | `{ code, msg, data }`，全局异常处理器接管所有异常 |
+| **Long→String** | Jackson 全局配置，解决雪花 ID 前端 JS 精度丢失 |
 
 ---
 
-## Mock 数据工具
+## 离线数仓
 
-独立项目 `shop-data-mocker`，纯 Java + Hutool JDBC：
-
-```bash
-cd shop-data-mocker
-mvn compile exec:java -Dexec.mainClass="com.shop.mocker.DataMockerApplication"
+```
+shop MySQL → Sqoop 采集 → Hive ODS → DWD（清洗拉链）→ DWS（日聚合）→ ADS（报表）→ Sqoop 导出 → shop_ads
 ```
 
-**DataGenerator 内部方法：**
-
-| 方法 | 生成数据 |
-|------|---------|
-| insertRoles() | 3 角色（admin/merchant/user） |
-| insertPermissions() | 6 项权限编码 |
-| insertRolePermissions() | 绑定角色权限关系 |
-| insertUsers() | 4 用户（BCrypt 加密密码） |
-| insertUserRoles() | 绑定用户角色 |
-| insertShop() | 创建商家店铺 |
-| insertAddresses() | 5 条收货地址 |
-| insertCategories() | 5 个一级 + 19 个子分类 |
-| insertProductsAndSkus() | 50 商品 + 200 SKU |
-| insertOrders() | 5 条带商品项订单（事务写入） |
-
-**生成数据量：** 4 用户 + 3 角色 + 6 权限 + 5 一级分类 + 19 子分类 + 50 商品 + 200 SKU + 5 地址 + 5 订单。
-
----
-
-## 构建命令
-
-```bash
-# 后端
-cd shop && mvn clean package -DskipTests -q
-
-# 前端
-cd frontend            && npm run build
-cd frontend-admin      && npm run build
-cd frontend-merchant   && npm run build
-```
+Azkaban 每日调度两条 DAG：
+- **全量**：address/category 等 10 张低频表
+- **增量**：orders/order_item/product 等 5 张高频表 → DWD/DWS/ADS 逐层 ETL
 
 ---
 
 ## 前端设计系统
 
-三端统一品牌设计语言（2026-07-01 重构）：
-
 | 维度 | 值 |
 |------|-----|
 | 品牌色 | 深墨蓝 `#1a1a2e` + 珊瑚红 `#e94560` |
 | 背景 | 暖灰 `#f5f3ef` |
-| 字体 | system-ui / PingFang SC |
 | 卡片 | 16px 圆角 + 暖阴影 |
-| 图表 | ECharts（深墨蓝/珊瑚红/金色配色） |
+| 图表 | ECharts（深墨蓝/珊瑚红/金色渐变） |
 
-**ECharts 图表分布：**
-
-| 页面 | 图表 |
-|------|------|
-| 用户端 - 商品详情 | 价格走势图（14日模拟 + 均价参考线） |
-| 用户端 - 首页 | 关键词/语义搜索双模式切换、FloatingChat 智能客服悬浮球 |
-| 管理后台 - 控制台 | 销售额趋势、订单分布饼图、商品销量TOP10、用户增长 |
-| 管理后台 - 数据看板 | KPI 指标卡 5 项、GMV 折线图 + 订单分布环形图、分类销售水平柱状图、商品排行垂直柱状图、周趋势双轴折线图、用户指标卡片 |
-| 商家中心 - 概览 | 销售额趋势、订单分布饼图、商品销量TOP5、每日订单数 |
+| 页面 | 可视化内容 |
+|------|-----------|
+| 用户端 - 商品详情 | 价格走势图 |
+| 用户端 - 首页 | 语义/关键词双模式搜索 + FloatingChat 智能客服 |
+| 管理后台 - 控制台 | 销售额趋势 / 订单分布 / 商品TOP10 / 用户增长 |
+| 管理后台 - 数据看板 | 6 组 ECharts 报表组件（KPI / GMV / 分类 / 排行 / 周趋势 / 用户） |
+| 商家中心 - 概览 | 销售额趋势 / 订单分布 / 商品TOP5 / 每日订单数 |
 
 ---
-
-## 数据看板组件体系（report/）
-
-管理端 `frontend-admin/src/components/report/` 下的 6 个 ECharts 组件：
-
-| 组件 | 文件 | 可视化类型 | 数据来源 |
-|------|------|-----------|---------|
-| KPI 指标卡 | KpiCards.vue | 数字卡 5 项（GMV/订单/用户/商品/店铺） | data.overview |
-| GMV + 订单分布 | GmvAndOrderCharts.vue | 折线图 + 环形图 | data.gmvDaily + data.orderStats |
-| 分类销售排行 | CategorySales.vue | 水平柱状图 | data.categorySales |
-| 商品排行 | ProductTop.vue | 垂直柱状图 | data.productTop |
-| 周趋势 | WeeklyTrend.vue | 双轴折线图（GMV + 订单量） | data.weeklyTrend |
-| 用户指标 | UserMetrics.vue | 数字卡片（DAU/留存率/店铺信息） | data.userActive + data.userNewRetain + data.shopDaily |
-
-**状态处理：** 每个组件均覆盖 加载骨架屏 → 错误重试 → 空数据占位 → 正常渲染 四种状态。
-
-**数据流：** DataDashboard.vue → `api/report.js` → Axios → `/api/dashboard/all` → Nginx → 看板后端 :8081 → shop_ads 数据库
-
----
-
-
-
-## 离线数仓管线（已实施）
-
-每日定时从 MySQL shop 采集数据，经 Hive 分层建模后导出至 MySQL `shop_ads` 库，供数据看板后端（:8081）查询：
-
-```
-shop 数据库 ──→ Sqoop 增量/全量采集 ──→ Hive ODS 层 ──→ Hive DWD 层 ──→ Hive DWS 层 ──→ Hive ADS 层 ──→ Sqoop 导出 ──→ MySQL shop_ads 库
-                      (增量+全量)            (原始数据)      (清洗拉链)        (轻度聚合)        (报表宽表)
-```
-
-### 架构组件
-
-| 组件 | 版本 | 用途 |
-|------|------|------|
-| Hadoop HDFS | 3.x | 分布式存储（虚拟机集群） |
-| Hive | 3.x | 数据仓库分层建模（ODS/DWD/DWS/ADS），Spark 执行引擎 |
-| Sqoop | 1.4.x | MySQL ↔ HDFS 双向数据迁移 |
-| Azkaban | 3.x | 定时调度（日任务 DAG） |
-
-### Hive 分层建模
-
-| 层 | 说明 | 典型表 |
-|----|------|--------|
-| **ODS** | 原始数据，与 MySQL 结构一致（按增量/全量分表） | ods_orders_inc, ods_order_item_inc, ods_product_full/inc, ods_user_full/inc, ods_sku_inc, ods_address_full（共 15 张） |
-| **DWD** | 清洗去重 + 拉链表（SCD Type 2） | dwd_fact_order_detail（订单事实宽表）, dwd_dim_user_zip（用户拉链）, dwd_dim_product_zip（商品拉链）, dwd_dim_sku_zip（SKU 拉链） |
-| **DWS** | 轻度聚合（天级） | dws_order_daily, dws_product_sale_daily, dws_shop_daily, dws_user_active_daily |
-| **ADS** | 报表宽表（Sqoop 导出至 MySQL shop_ads） | ads_overview, ads_gmv_daily, ads_order_stats_daily, ads_user_active, ads_user_new_retain, ads_shop_daily, ads_category_sales, ads_product_top50, ads_trend_weekly（共 9 张） |
-
-### 调度管线（Azkaban）
-
-```
-每日两条 DAG：
-  ┌─ shop_warehouse_full (全量表，1 次/d)：address, admin, cart, category 等 10 张低频变化表
-  └─ shop_warehouse_daily (增量 + 计算，1 次/d)：
-       01:00 Sqoop 全量采集（10 张全量表，并行 3 表/批）
-       01:15 Sqoop 增量采集（5 张增量表，并行 3 表/批）
-       01:30 DWD 层 ETL：订单事实宽表 + 维度拉链表
-       02:00 DWS 层 ETL：订单/商品/店铺/用户日汇总
-       02:20 ADS 层 ETL：9 张报表宽表（Spark 引擎）
-       02:40 Sqoop 导出至 MySQL shop_ads（分区表增量 + 全量表全量）
-```
-
-> **代码仓库：** `azkaban/shop_warehouse/` 包含全部 HQL 脚本、Shell 脚本、Azkaban Job 定义。

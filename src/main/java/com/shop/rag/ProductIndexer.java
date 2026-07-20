@@ -5,12 +5,14 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.shop.constant.ProductConstants;
 import com.shop.mapper.CategoryMapper;
 import com.shop.mapper.ProductMapper;
+import com.shop.mapper.SkuMapper;
 import com.shop.model.entity.CategoryDO;
 import com.shop.model.entity.ProductDO;
+import com.shop.model.entity.SkuDO;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.segment.TextSegment;
-import dev.langchain4j.model.ollama.OllamaEmbeddingModel;
+import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
 import dev.langchain4j.store.embedding.qdrant.QdrantEmbeddingStore;
 import jakarta.annotation.PostConstruct;
@@ -20,6 +22,7 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.util.*;
@@ -37,7 +40,8 @@ public class ProductIndexer {
 
     private final ProductMapper productMapper;
     private final CategoryMapper categoryMapper;
-    private final OllamaEmbeddingModel embeddingModel;
+    private final SkuMapper skuMapper;
+    private final OpenAiEmbeddingModel embeddingModel;
     private final QdrantEmbeddingStore embeddingStore;
 
     /** productId → Qdrant pointId 映射，用于删除时定位 */
@@ -47,13 +51,39 @@ public class ProductIndexer {
     private volatile int indexedCount = 0;
     private volatile long lastRebuildTime = 0;
 
-    @EventListener(ApplicationReadyEvent.class)
-    public void rebuildAll() {
-        log.info("===== 开始全量重建商品向量索引 =====");
-        long start = System.currentTimeMillis();
-        pointIdMap.clear();
+    /**
+     * 检查 Qdrant 集合是否已有向量数据
+     */
+    private boolean hasExistingData() {
+        try {
+            URI uri = URI.create("http://localhost:6333/collections/products");
+            HttpURLConnection conn = (HttpURLConnection) uri.toURL().openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(3000);
+            conn.setReadTimeout(3000);
 
-        // 清理并重建 Qdrant 集合（用 REST API 确保清除旧脏数据）
+            int code = conn.getResponseCode();
+            if (code != 200) {
+                conn.disconnect();
+                return false;
+            }
+
+            // 解析 JSON 获取 points_count
+            byte[] bytes = conn.getInputStream().readAllBytes();
+            conn.disconnect();
+            String json = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+            return json.contains("\"points_count\":")
+                    && !json.contains("\"points_count\":0");
+        } catch (Exception e) {
+            log.warn("检查 Qdrant 集合状态失败: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 清理并重建 Qdrant 集合（用 REST API 确保清除旧脏数据）
+     */
+    private void recreateCollection() {
         try {
             URI del = URI.create("http://localhost:6333/collections/products");
             HttpURLConnection conn = (HttpURLConnection) del.toURL().openConnection();
@@ -71,7 +101,7 @@ public class ProductIndexer {
             conn2.setDoOutput(true);
             conn2.setConnectTimeout(3000);
             conn2.setReadTimeout(3000);
-            String body = "{\"vectors\":{\"size\":1024,\"distance\":\"Cosine\"}}";
+            String body = "{\"vectors\":{\"size\":1536,\"distance\":\"Cosine\"}}";
             conn2.getOutputStream().write(body.getBytes());
             int code2 = conn2.getResponseCode();
             log.info("创建 Qdrant 新集合, HTTP {}", code2);
@@ -79,6 +109,22 @@ public class ProductIndexer {
         } catch (Exception e) {
             log.warn("重建 Qdrant 集合失败: {}", e.getMessage());
         }
+    }
+
+    @EventListener(ApplicationReadyEvent.class)
+    public void rebuildAll() {
+        // 检查 Qdrant 是否已有数据，有则跳过全量重建
+        if (hasExistingData()) {
+            log.info("Qdrant 集合已有向量数据，跳过索引重建");
+            return;
+        }
+
+        log.info("===== 开始全量重建商品向量索引 =====");
+        long start = System.currentTimeMillis();
+        pointIdMap.clear();
+
+        // 清理并重建 Qdrant 集合
+        recreateCollection();
 
         // 查所有上架商品
         List<ProductDO> products = productMapper.selectList(
@@ -93,11 +139,26 @@ public class ProductIndexer {
             return;
         }
 
-        // 批量构建 TextSegment（携元数据）
-        List<TextSegment> segments = products.stream().map(this::buildTextSegment).collect(Collectors.toList());
+        // 批量查询 SKU 价格
+        Map<Long, BigDecimal[]> priceMap = loadPriceMap(products);
 
-        // 批量生成 embedding
-        List<Embedding> embeddings = embeddingModel.embedAll(segments).content();
+        // 批量构建 TextSegment（携元数据）
+        List<TextSegment> segments = products.stream()
+                .map(p -> buildTextSegment(p, priceMap.get(p.getId())))
+                .collect(Collectors.toList());
+
+        // 批量生成 embedding（分批，text-embedding-v1 单次最多 25 条）
+        List<Embedding> embeddings = new ArrayList<>();
+        int batchSize = 25;
+        for (int i = 0; i < segments.size(); i += batchSize) {
+            int end = Math.min(i + batchSize, segments.size());
+            List<TextSegment> batch = segments.subList(i, end);
+            List<Embedding> batchResult = embeddingModel.embedAll(batch).content();
+            if (batchResult != null) {
+                embeddings.addAll(batchResult);
+            }
+            log.debug("向量化进度: {}/{}", end, segments.size());
+        }
 
         // 校验：跳过空向量（Ollama 未就绪时可能返回 0 维向量）
         List<Embedding> validEmbeddings = new ArrayList<>();
@@ -139,11 +200,14 @@ public class ProductIndexer {
             return;
         }
 
+        // 查询该商品 SKU 价格
+        BigDecimal[] prices = loadProductPrice(product.getId());
+
         // 移除旧索引
         remove(product.getId());
 
         // 构建 embedding 并存储
-        TextSegment segment = buildTextSegment(product);
+        TextSegment segment = buildTextSegment(product, prices);
         Embedding embedding = embeddingModel.embed(segment.text()).content();
         if (embedding.vector() == null || embedding.vector().length == 0) {
             log.warn("商品 '{}' 向量化为空，跳过索引更新", product.getName());
@@ -195,19 +259,80 @@ public class ProductIndexer {
     /**
      * 构建带元数据的 TextSegment
      */
-    private TextSegment buildTextSegment(ProductDO product) {
+    private TextSegment buildTextSegment(ProductDO product, BigDecimal[] prices) {
         return TextSegment.from(buildIndexText(product),
-                Metadata.from(toMetadataMap(product)));
+                Metadata.from(toMetadataMap(product, prices)));
     }
 
-    private Map<String, Object> toMetadataMap(ProductDO product) {
+    private Map<String, Object> toMetadataMap(ProductDO product, BigDecimal[] prices) {
         Map<String, Object> meta = new HashMap<>();
         meta.put("productId", product.getId());
         meta.put("name", product.getName());
         meta.put("firstCategoryId", product.getFirstCategoryId());
         meta.put("shopId", product.getShopId());
         meta.put("mainImage", product.getMainImage());
+        if (prices != null && prices.length == 2) {
+            meta.put("minPrice", prices[0].doubleValue());
+            meta.put("maxPrice", prices[1].doubleValue());
+        }
         return meta;
+    }
+
+    /**
+     * 批量查询商品 SKU 价格，返回 productId → [minPrice, maxPrice]
+     */
+    private Map<Long, BigDecimal[]> loadPriceMap(List<ProductDO> products) {
+        Map<Long, BigDecimal[]> priceMap = new HashMap<>();
+        if (CollUtil.isEmpty(products)) {
+            return priceMap;
+        }
+
+        List<Long> productIds = products.stream().map(ProductDO::getId).collect(Collectors.toList());
+        List<SkuDO> skus = skuMapper.selectList(
+                new LambdaQueryWrapper<SkuDO>()
+                        .in(SkuDO::getProductId, productIds)
+                        .select(SkuDO::getProductId, SkuDO::getPrice));
+
+        if (CollUtil.isNotEmpty(skus)) {
+            Map<Long, List<SkuDO>> grouped = skus.stream()
+                    .collect(Collectors.groupingBy(SkuDO::getProductId));
+            for (Map.Entry<Long, List<SkuDO>> entry : grouped.entrySet()) {
+                BigDecimal min = entry.getValue().stream()
+                        .map(SkuDO::getPrice)
+                        .filter(Objects::nonNull)
+                        .min(BigDecimal::compareTo)
+                        .orElse(BigDecimal.ZERO);
+                BigDecimal max = entry.getValue().stream()
+                        .map(SkuDO::getPrice)
+                        .filter(Objects::nonNull)
+                        .max(BigDecimal::compareTo)
+                        .orElse(BigDecimal.ZERO);
+                priceMap.put(entry.getKey(), new BigDecimal[]{min, max});
+            }
+        }
+        return priceMap;
+    }
+
+    /**
+     * 查询单个商品 SKU 价格范围
+     */
+    private BigDecimal[] loadProductPrice(Long productId) {
+        List<SkuDO> skus = skuMapper.selectList(
+                new LambdaQueryWrapper<SkuDO>()
+                        .eq(SkuDO::getProductId, productId)
+                        .select(SkuDO::getPrice));
+        if (CollUtil.isEmpty(skus)) {
+            return null;
+        }
+        BigDecimal min = skus.stream().map(SkuDO::getPrice)
+                .filter(Objects::nonNull)
+                .min(BigDecimal::compareTo)
+                .orElse(BigDecimal.ZERO);
+        BigDecimal max = skus.stream().map(SkuDO::getPrice)
+                .filter(Objects::nonNull)
+                .max(BigDecimal::compareTo)
+                .orElse(BigDecimal.ZERO);
+        return new BigDecimal[]{min, max};
     }
 
     private static String safe(String s) {

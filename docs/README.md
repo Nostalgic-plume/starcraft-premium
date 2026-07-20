@@ -9,6 +9,7 @@
 | 前端 | Vue 3 + Vite + Element Plus + Pinia + ECharts | 5.x |
 | 反向代理 | Nginx | 1.20.2 |
 | JDK | OpenJDK 22 | 22.0.1 |
+| RAG / 智能客服 | Spring Boot SSE + 向量检索 | — |
 | Mock 工具 | 纯 Java（独立项目） | Hutool JDBC |
 
 ---
@@ -191,7 +192,8 @@ cd shop/deploy && nginx.exe -c conf/nginx.conf -p .
 | 模块 | 关键类 | 核心逻辑 |
 |------|--------|----------|
 | **用户** | UserController / UserServiceImpl | BCrypt 加密、Sa-Token 登录、注册自动绑 user 角色、4 种账号状态 |
-| **商品** | ProductController / ProductServiceImpl | SPU + SKU 分层、一级/二级分类联动（firstCategoryId）、shop_id 隔离、状态管理 |
+| **商品** | ProductController / ProductServiceImpl | SPU + SKU 分层、一级/二级分类联动（firstCategoryId）、shop_id 隔离、状态管理、语义搜索（RAG） |
+| **智能客服 + RAG 搜索** | ChatController / RagSearchController / RagSearchService | SSE 流式对话（ChatService）、向量语义搜索（RagSearchService）、ProductIndexer 索引管理 |
 | **分类** | CategoryController | 二级分类树 + 按父级查子分类（`/api/category/children`） |
 | **订单** | OrderController / OrderServiceImpl | Redis 防重令牌 → MySQL 行锁扣库存 → shop_id 绑定 → 购物车标记已下单 → 幂等支付回调 → 库存回滚取消 → 30 分钟后超时自动取消 |
 | **购物车** | CartController / CartServiceImpl | SKU 级别操作、is_ordered 过滤、库存校验 |
@@ -250,6 +252,7 @@ cd shop/deploy && nginx.exe -c conf/nginx.conf -p .
 | POST | /api/user/login | 用户登录 |
 | GET | /api/product/page | 商品分页（支持 categoryId/firstCategoryId/keyword） |
 | GET | /api/product/detail/{id} | 商品详情（含 SKU） |
+| GET | /api/product/rag-search?q=&topK=&categoryId=&minPrice=&maxPrice= | 语义搜索商品（RAG 向量检索） |
 | GET | /api/category/list | 全部分类列表（平铺） |
 | GET | /api/category/children?parentId= | 指定父级下的子分类 |
 | POST | /api/pay/callback | 支付回调 |
@@ -273,6 +276,8 @@ cd shop/deploy && nginx.exe -c conf/nginx.conf -p .
 | DELETE | /api/cart/remove/{skuId} | 删除购物车项 |
 | PUT | /api/cart/check/{skuId}?checked= | 选中/取消 |
 | POST | /api/pay/mock-pay | 模拟支付 |
+| POST | /api/chat/ask (SSE) | 智能客服流式对话 |
+| POST | /api/chat/clear | 清除对话历史 |
 
 ### 管理后台接口（需 `@SaCheckPermission`）
 
@@ -416,6 +421,12 @@ order_item 记录下单时的名称、价格、图片，后续商品信息变更
 
 下单成功后批量更新 `cart.is_ordered = 1`，购物车列表自动过滤 `is_ordered = 0`，用户看到的永远只有未结算商品。
 
+### RAG 语义搜索 & 智能客服
+
+- **语义搜索**：`/api/product/rag-search` 使用词向量检索替代传统 MySQL LIKE，支持按分类/价格过滤，前端用户端首页支持关键词/语义双模式切换
+- **智能客服**：`/api/chat/ask` 基于 SSE（Server-Sent Events）流式响应，支持多轮对话历史（conversationId），前端 FloatingChat 悬浮球组件
+- **索引管理**：`ProductIndexer` 负责商品向量索引的构建与更新
+
 ### 统一返回格式
 
 ```json
@@ -485,6 +496,7 @@ cd frontend-merchant   && npm run build
 | 页面 | 图表 |
 |------|------|
 | 用户端 - 商品详情 | 价格走势图（14日模拟 + 均价参考线） |
+| 用户端 - 首页 | 关键词/语义搜索双模式切换、FloatingChat 智能客服悬浮球 |
 | 管理后台 - 控制台 | 销售额趋势、订单分布饼图、商品销量TOP10、用户增长 |
 | 管理后台 - 数据看板 | KPI 指标卡 5 项、GMV 折线图 + 订单分布环形图、分类销售水平柱状图、商品排行垂直柱状图、周趋势双轴折线图、用户指标卡片 |
 | 商家中心 - 概览 | 销售额趋势、订单分布饼图、商品销量TOP5、每日订单数 |

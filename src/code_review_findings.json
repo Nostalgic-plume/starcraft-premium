@@ -1,0 +1,38 @@
+[
+  {
+    "file": "backend/routers/character_router.py",
+    "line": 46,
+    "summary": "Scene 模型没有 is_deleted 字段，自动分配场景时引发 AttributeError",
+    "failure_scenario": "用户创建角色（不选起始场景）→ 后端执行 select(Scene).where(Scene.is_deleted == False) → Scene 类无 is_deleted 属性 → AttributeError 传播 → 全局异常处理器返回 500 + 异常详情泄露。所有角色创建都走此路径（前端 UI 无 start_scene_id 输入），导致创建角色接口 100% 崩溃。应该改为 Scene.is_active == True。"
+  },
+  {
+    "file": "backend/routers/character_router.py",
+    "line": 44,
+    "summary": "自动分配场景时如果场景表为空，角色被创建但 current_scene_id 为 None",
+    "failure_scenario": "修复 C1 后，若数据库 Scene 表为空 → first_scene=None → scene_id=None → 角色创建成功但 current_scene_id=None → GameMain.vue 调用 exploreScene(null) → game_engine.py:130 scene = None → 返回 400 错误 → 用户看到降级叙事，无法正常开始游戏。无初始场景时角色处于死胡同状态。"
+  },
+  {
+    "file": "frontend/src/views/CharacterCreate.vue",
+    "line": 181,
+    "summary": "属性滑条默认值 null 显示为 1，但后端默认值是 5，显示与实际值不符",
+    "failure_scenario": "用户不拖动的属性保持 null → 显示 {{ attrs[key] || 1 }} = '1' → 实际提交时 submitAttrs 为空对象 → 后端使用 AttributeInfo() 默认值（全部 5）→ 用户看到的滑条显示 1 但角色实际属性是 5，造成认知偏差。"
+  },
+  {
+    "file": "backend/main.py",
+    "line": 52,
+    "summary": "isinstance(exc, HTTPException) 检查是死代码，永远不会执行",
+    "failure_scenario": "FastAPI 默认注册了特化的 HTTPException 处理器。Starlette 异常中间件按 MRO 查找：HTTPException 的 MRO 是 HTTPException→Exception→BaseException，HTTPException 首先匹配默认处理器。自定义 Exception 处理器永远收不到 HTTPException。导致 HTTPException 响应格式为 {\"detail\": \"...\"}（FastAPI 默认），而其他异常响应格式为 {\"code\": ..., \"message\": ..., \"data\": None}（自定义），两套格式不一致增加前端维护成本。"
+  },
+  {
+    "file": "backend/main.py",
+    "line": 64,
+    "summary": "全局异常处理器在响应体中泄露异常详情信息",
+    "failure_scenario": "当未预期的异常发生时（如 C1 中的 AttributeError、数据库连接失败等），str(exc) 包含实现细节（如 'type object 'Scene' has no attribute 'is_deleted''、SQL 语句、文件路径等），被直接写入 HTTP 响应返回给前端。生产环境中攻击者可利用此信息进行进一步攻击。应改为记录日志后返回通用错误消息。"
+  },
+  {
+    "file": "backend/routers/character_router.py",
+    "line": 38,
+    "summary": "前端 UI 没有 start_scene_id 输入，自动分配逻辑是唯一路径但存在缺陷",
+    "failure_scenario": "CharacterCreate.vue 的表单和载荷没有 start_scene_id 字段 → payload 缺失该字段 → 后端始终走自动分配分支 → 但自动分配逻辑使用了 Scene.is_deleted（不存在）导致崩溃。API 层设计支持用户指定起始场景，但前端从未暴露此能力，属于半拉子功能。"
+  }
+]

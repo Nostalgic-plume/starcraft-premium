@@ -1,0 +1,4 @@
+type=command
+command=sh sqoop_ods_inc.sh ${dt}
+retries=2
+retry.backoff=60000

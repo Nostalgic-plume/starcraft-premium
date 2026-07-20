@@ -50,6 +50,9 @@ public class ProductVO {
     @Schema(description = "总库存")
     private Integer totalStock;
 
+    @Schema(description = "累计销量")
+    private Integer soldCount;
+
     @Schema(description = "状态")
     private Integer status;
 

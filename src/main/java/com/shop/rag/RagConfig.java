@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import java.time.Duration;
 
 /**
  * LangChain4j + Qdrant + Ollama 配置
@@ -26,27 +27,22 @@ public class RagConfig {
     private final RagProperties ragProperties;
 
     /**
-     * 启动时检查并创建 Qdrant 集合（LangChain4j QdrantEmbeddingStore 不会自动创建）
+     * 启动时重建 Qdrant 集合，确保向量维度一致（清除旧脏数据）
      */
     @PostConstruct
     public void initCollection() {
         try (QdrantClient client = new QdrantClient(
                 QdrantGrpcClient.newBuilder(ragProperties.getHost(), ragProperties.getPort(), false).build())) {
 
-            boolean exists = client.collectionExistsAsync(ragProperties.getCollectionName()).get();
-            if (!exists) {
-                log.info("Qdrant 集合 '{}' 不存在，正在创建...", ragProperties.getCollectionName());
-                client.createCollectionAsync(ragProperties.getCollectionName(),
-                        VectorParams.newBuilder()
-                                .setSize(ragProperties.getDimension())
-                                .setDistance(Distance.Cosine)
-                                .build()).get();
-                log.info("Qdrant 集合 '{}' 创建成功", ragProperties.getCollectionName());
-            } else {
-                log.info("Qdrant 集合 '{}' 已存在", ragProperties.getCollectionName());
-            }
+            log.info("正在重建 Qdrant 集合 '{}' ...", ragProperties.getCollectionName());
+            client.recreateCollectionAsync(ragProperties.getCollectionName(),
+                    VectorParams.newBuilder()
+                            .setSize(ragProperties.getDimension())
+                            .setDistance(Distance.Cosine)
+                            .build()).get();
+            log.info("Qdrant 集合 '{}' 重建完成（维度: {}）", ragProperties.getCollectionName(), ragProperties.getDimension());
         } catch (Exception e) {
-            log.error("Qdrant 集合初始化失败: {}", e.getMessage());
+            log.error("Qdrant 集合重建失败，请确认 Qdrant gRPC 端口（6334）是否可访问: {}", e.getMessage());
         }
     }
 
@@ -55,6 +51,7 @@ public class RagConfig {
         return OllamaEmbeddingModel.builder()
                 .baseUrl("http://localhost:11434")
                 .modelName("bge-m3")
+                .timeout(Duration.ofMinutes(2))
                 .build();
     }
 
@@ -64,6 +61,7 @@ public class RagConfig {
                 .baseUrl("http://localhost:11434")
                 .modelName("qwen3.5:0.8b")
                 .temperature(0.7)
+                .timeout(Duration.ofMinutes(3))
                 .build();
     }
 

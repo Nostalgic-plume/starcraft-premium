@@ -104,10 +104,11 @@ public class ChatService {
                     public void onError(Throwable error) {
                         log.error("Ollama 流式调用失败", error);
                         sendEvent(emitter, "error", "AI 回复生成失败，请稍后重试");
+                        sendEvent(emitter, "end", "");
                         try {
-                            emitter.completeWithError(error);
+                            emitter.complete();
                         } catch (Exception e) {
-                            log.warn("SSE completeWithError 异常: {}", e.getMessage());
+                            log.warn("SSE complete 异常: {}", e.getMessage());
                         }
                     }
                 });
@@ -115,8 +116,9 @@ public class ChatService {
             } catch (Exception e) {
                 log.error("ChatService 处理异常", e);
                 sendEvent(emitter, "error", "服务异常，请稍后重试");
+                sendEvent(emitter, "end", "");
                 try {
-                    emitter.completeWithError(e);
+                    emitter.complete();
                 } catch (Exception ignored) {
                 }
             }
@@ -155,8 +157,8 @@ public class ChatService {
             emitter.send(SseEmitter.event()
                     .name("message")
                     .data("{\"type\":\"" + type + "\",\"content\":\"" + escapeJson(content) + "}"));
-        } catch (IOException e) {
-            log.warn("SSE 发送失败: {}", e.getMessage());
+        } catch (IOException | IllegalStateException e) {
+            log.warn("SSE 发送失败（连接可能已关闭）: {}", e.getMessage());
         }
     }
 

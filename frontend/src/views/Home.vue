@@ -60,47 +60,50 @@
           <div
             v-for="cat in topCategories"
             :key="cat.id"
-            class="category-item"
-            :class="{
-              active: expandedCategoryId === cat.id && !currentCategory,
-              expanded: expandedCategoryId === cat.id
-            }"
-            @click="toggleCategory(cat)"
+            class="category-item-wrap"
           >
-            <span class="category-name">{{ cat.name }}</span>
-            <svg
-              class="category-arrow"
-              :class="{ rotated: expandedCategoryId === cat.id }"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
+            <div
+              class="category-item"
+              :class="{
+                active: expandedCategoryId === cat.id && !currentCategory,
+                expanded: expandedCategoryId === cat.id
+              }"
+              @click="toggleCategory(cat)"
             >
-              <polyline points="9 18 15 12 9 6"/>
-            </svg>
+              <span class="category-name">{{ cat.name }}</span>
+              <svg
+                class="category-arrow"
+                :class="{ rotated: expandedCategoryId === cat.id }"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <polyline points="9 18 15 12 9 6"/>
+              </svg>
+            </div>
+            <!-- 子分类展开在当前一级分类下 -->
+            <transition name="sub-slide">
+              <div v-if="expandedCategoryId === cat.id" class="subcategory-panel">
+                <div
+                  class="subcategory-item active"
+                  @click="selectSubCategory(null)"
+                >
+                  全部{{ cat.name }}
+                </div>
+                <div
+                  v-for="sub in subCategories"
+                  :key="sub.id"
+                  class="subcategory-item"
+                  :class="{ selected: currentCategory === sub.id }"
+                  @click="selectSubCategory(sub)"
+                >
+                  {{ sub.name }}
+                </div>
+              </div>
+            </transition>
           </div>
         </div>
-
-        <!-- 展开的子分类 -->
-        <transition name="sub-slide">
-          <div v-if="expandedCategoryId" class="subcategory-panel">
-            <div
-              class="subcategory-item active"
-              @click="selectSubCategory(null)"
-            >
-              全部{{ getTopCategoryName(expandedCategoryId) }}
-            </div>
-            <div
-              v-for="sub in subCategories"
-              :key="sub.id"
-              class="subcategory-item"
-              :class="{ selected: currentCategory === sub.id }"
-              @click="selectSubCategory(sub)"
-            >
-              {{ sub.name }}
-            </div>
-          </div>
-        </transition>
 
         <!-- 热门标签 -->
         <div v-if="hotTags.length" class="hot-tags">
@@ -110,7 +113,7 @@
               v-for="tag in hotTags"
               :key="tag.id"
               class="hot-tag"
-              :class="{ active: currentCategory === tag.id && expandedCategoryId !== tag.id }"
+              :class="{ active: expandedCategoryId === tag.id }"
               @click="selectHotTag(tag)"
             >{{ tag.name }}</span>
           </div>
@@ -228,11 +231,6 @@ function formatPrice(val) {
   return Number.isInteger(n) ? n.toString() : n.toFixed(2)
 }
 
-function getTopCategoryName(id) {
-  const cat = categories.value.find(c => c.id === id)
-  return cat ? cat.name : ''
-}
-
 async function loadProducts() {
   loading.value = true
   try {
@@ -294,8 +292,8 @@ function selectSubCategory(sub) {
 }
 
 function selectHotTag(tag) {
-  expandedCategoryId.value = null
-  currentCategory.value = tag.id
+  expandedCategoryId.value = tag.id
+  currentCategory.value = null
   page.value = 1
   loadProducts()
 }
@@ -517,6 +515,7 @@ onMounted(() => {
   border-radius: 0 3px 3px 0;
 }
 .category-item .category-name { flex: 1; }
+.category-item-wrap { position: relative; }
 
 .category-arrow {
   width: 14px;
@@ -527,10 +526,12 @@ onMounted(() => {
 }
 .category-arrow.rotated { transform: rotate(90deg); color: var(--ds-coral, #e94560); }
 
-/* 子分类面板 - 过渡动画 */
+/* 子分类面板 - 在当前一级分类下方展开 */
 .subcategory-panel {
-  border-top: 1px solid var(--ds-border-light, #f0eee9);
   background: var(--ds-surface-hover, #faf9f7);
+  border-left: 2px solid var(--ds-coral, #e94560);
+  margin: 0 8px 4px;
+  border-radius: 8px;
   overflow: hidden;
 }
 .sub-slide-enter-active,

@@ -22,7 +22,8 @@
 }
 
 /* 后台卡片 20px 内边距 */
-.card {
+.card,
+.card-elevated {
   padding: 20px;
 }
 

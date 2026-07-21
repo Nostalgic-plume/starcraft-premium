@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <!-- 搜索与批量操作栏 -->
-    <div class="card mb-16">
+    <div class="card-elevated mb-16">
       <div class="flex-between" style="flex-wrap: wrap; gap: 12px">
         <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap">
           <el-input
@@ -21,14 +21,14 @@
           >
             批量修改状态
           </el-button>
-          <span v-if="selectedIds.length > 0" style="margin-left: 8px; font-size: 13px; color: #999">
+          <span v-if="selectedIds.length > 0" style="margin-left: 8px; font-size: 13px; color: var(--ds-text-muted, #999)">
             已选 {{ selectedIds.length }} 项
           </span>
         </div>
       </div>
     </div>
 
-    <div class="card">
+    <div class="card-elevated">
       <!-- 状态筛选标签 -->
       <el-tabs v-model="statusFilter" @tab-change="handleTabChange" class="mb-16">
         <el-tab-pane label="全部" name="" />
@@ -56,7 +56,7 @@
           <template #default="{ row }">
             <el-tag v-if="row.adminLevel === 2" type="danger" size="small" effect="dark">超级管理员</el-tag>
             <el-tag v-else-if="row.adminLevel === 1" type="primary" size="small" effect="dark">普通管理员</el-tag>
-            <span v-else style="color: #999; font-size: 12px">非管理员</span>
+            <span v-else style="color: var(--ds-text-muted, #999); font-size: 12px">非管理员</span>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="90" align="center">
@@ -97,10 +97,10 @@
       width="440px"
       :close-on-click-modal="false"
     >
-      <p v-if="dialogMode === 'batch'" style="margin-bottom: 16px; color: #666">
+      <p v-if="dialogMode === 'batch'" style="margin-bottom: 16px; color: var(--ds-text-muted, #666)">
         已选择 <span style="color: var(--ds-coral, #e94560); font-weight: 600">{{ selectedIds.length }}</span> 位用户
       </p>
-      <p v-else-if="currentUser" style="margin-bottom: 16px; color: #666">
+      <p v-else-if="currentUser" style="margin-bottom: 16px; color: var(--ds-text-muted, #666)">
         用户: <strong>{{ currentUser.username }}</strong>（{{ currentUser.nickname }}）
       </p>
       <el-form :model="dialogForm" label-width="80px">
@@ -245,3 +245,35 @@ async function submitModify() {
 
 onMounted(loadUsers)
 </script>
+
+<style scoped>
+.page-container {
+  height: 100%;
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+}
+.page-container > .card-elevated:last-child {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.el-tabs { flex-shrink: 0; }
+.el-table {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Table header & row hover */
+:deep(.el-table) {
+  --el-table-header-bg-color: var(--ds-bg, #f5f3ef);
+  --el-table-row-hover-bg-color: var(--ds-bg, #f5f3ef);
+}
+
+/* Dialog title */
+:deep(.el-dialog__title) {
+  color: var(--ds-navy, #1a1a2e);
+}
+</style>
+

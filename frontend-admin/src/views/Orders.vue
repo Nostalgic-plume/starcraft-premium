@@ -301,8 +301,8 @@ onMounted(loadOrders)
 
 /* ====== Table :deep overrides ====== */
 .table-wrap :deep(.el-table) {
-  --el-table-header-bg-color: var(--ds-bg);
-  --el-table-row-hover-bg-color: var(--ds-bg);
+  --el-table-header-bg-color: var(--ds-bg, #f5f3ef);
+  --el-table-row-hover-bg-color: var(--ds-bg, #f5f3ef);
 }
 
 /* ====== Drawer title ====== */

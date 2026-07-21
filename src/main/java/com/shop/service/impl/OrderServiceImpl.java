@@ -13,6 +13,7 @@ import com.shop.common.BusinessException;
 import com.shop.common.PageResult;
 import com.shop.common.PaginationHelper;
 import com.shop.constant.OrderConstants;
+import com.shop.constant.ProductConstants;
 import com.shop.mapper.CartMapper;
 import com.shop.mapper.OrderItemMapper;
 import com.shop.mapper.OrderMapper;
@@ -188,6 +189,11 @@ public class OrderServiceImpl implements OrderService {
                 "order:detail:" + order.getId(), orderNo,
                 OrderConstants.PAY_TIMEOUT_MINUTES, TimeUnit.MINUTES);
 
+        // ⑨ 淘汰商品缓存（库存已变，详情页展示最新库存）
+        for (SkuDO sku : skuList) {
+            redisTemplate.delete(ProductConstants.CACHE_PRODUCT + sku.getProductId());
+        }
+
         log.info("订单创建成功, orderNo: {}, userId: {}, shopId: {}, amount: {}", orderNo, userId, shopId, totalAmount);
         return order.getId();
     }
@@ -228,6 +234,7 @@ public class OrderServiceImpl implements OrderService {
                 new LambdaQueryWrapper<OrderItemDO>().eq(OrderItemDO::getOrderId, orderId));
         for (OrderItemDO item : items) {
             skuMapper.restoreStock(item.getSkuId(), item.getQuantity());
+            redisTemplate.delete(ProductConstants.CACHE_PRODUCT + item.getProductId());
         }
         order.setStatus(OrderConstants.STATUS_CANCELLED);
         orderMapper.updateById(order);

@@ -8,5 +8,11 @@ Phase 2: complete (base 45fc9b6, fix commits 025be71 + 5ff1eb4, re-review clean 
   - M2: `card-elevated` hover 与 `.product-card` hover 视觉效果冲突（设计意图保留）
   - M3: `frontend-admin/index.html` 和 `frontend-merchant/index.html` 变更超出 Phase 2 范围（不动）
   - M4: 导航按钮使用 `--ds-radius`(10px) 未遵循令牌规范（已记录，低优先）
-Phase 3: pending
+Phase 3:
+  Task 1: complete (commits 0d596e8..1d2e8eb, review clean)
+  Task 2: pending
+  Task 3: pending
+  Task 4: pending
+  Task 5: pending
+  Task 6: pending
 Phase 4: pending

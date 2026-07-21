@@ -29,12 +29,14 @@ import com.shop.service.ProductService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -52,6 +54,7 @@ public class ProductServiceImpl implements ProductService {
     private final ShopMapper shopMapper;
     private final OrderItemMapper orderItemMapper;
     private final ProductIndexer productIndexer;
+    private final RedisTemplate<String, String> redisTemplate;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -159,11 +162,21 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     public ProductVO getDetail(Long id) {
+        String cacheKey = ProductConstants.CACHE_PRODUCT + id;
+        String cached = redisTemplate.opsForValue().get(cacheKey);
+        if (cached != null) {
+            ProductVO vo = JSONUtil.toBean(cached, ProductVO.class);
+            if (vo != null) {
+                return vo;
+            }
+        }
         ProductDO product = productMapper.selectById(id);
         if (product == null) {
             throw new BusinessException("商品不存在");
         }
-        return convertToVO(product);
+        ProductVO vo = convertToVO(product);
+        redisTemplate.opsForValue().set(cacheKey, JSONUtil.toJsonStr(vo), 5, TimeUnit.MINUTES);
+        return vo;
     }
 
     @Override
@@ -174,6 +187,7 @@ public class ProductServiceImpl implements ProductService {
         }
         product.setStatus(status);
         productMapper.updateById(product);
+        redisTemplate.delete(ProductConstants.CACHE_PRODUCT + id);
         log.info("商品状态更新, productId: {}, status: {}", id, status);
 
         // 同步 RAG 索引

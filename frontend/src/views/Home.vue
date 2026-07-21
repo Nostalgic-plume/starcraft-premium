@@ -217,6 +217,7 @@ import { useUserStore } from '@/stores/user'
 import { ElMessage } from 'element-plus'
 
 const cartStore = useCartStore()
+const userStore = useUserStore()
 
 const productList = ref([])
 const categories = ref([])
@@ -349,7 +350,6 @@ async function handleSearch() {
 
 function addToCart(product) {
   if (!product.id) return
-  const userStore = useUserStore()
   if (!userStore.isLoggedIn()) {
     ElMessage.warning('请先登录')
     return
@@ -682,7 +682,7 @@ onUnmounted(() => {
   border-radius: 12px;
   font-size: 11px;
   cursor: pointer;
-  background: #f5f3ef;
+  background: var(--ds-bg, #f5f3ef);
   color: var(--ds-text-secondary, #636e72);
   transition: all 0.2s;
 }
@@ -720,15 +720,10 @@ onUnmounted(() => {
 
 /* 商品卡片 */
 .product-card {
-  background: var(--ds-surface, #fff);
-  border: 1px solid var(--ds-border-light, #f0eee9);
-  border-radius: var(--ds-radius-lg, 16px);
   overflow: hidden;
   cursor: pointer;
-  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
   display: flex;
   flex-direction: column;
-  box-shadow: var(--ds-shadow-sm, 0 1px 3px rgba(26,26,46,0.06));
 }
 .product-card:hover {
   transform: translateY(-6px);

@@ -1,5 +1,5 @@
 <template>
-  <div class="page-container fade-in">
+  <div class="page-container fade-in" ref="pageRef">
     <!-- ====== Hero 横幅 ====== -->
     <section class="hero">
       <div class="hero-content">
@@ -25,6 +25,8 @@
             clearable
             class="hero-search-input"
             :prefix-icon="Search"
+            @focus="onSearchFocus"
+            @blur="onSearchBlur"
             @keyup.enter="handleSearch"
           />
           <el-button type="primary" class="hero-search-btn" @click="handleSearch">
@@ -138,9 +140,10 @@
         <!-- 商品网格 -->
         <div v-loading="loading" class="product-grid" element-loading-text="加载商品中…">
           <div
-            v-for="p in productList"
+            v-for="(p, index) in productList"
             :key="p.id"
             class="product-card"
+            :class="{ 'product-card--wide': index % 4 === 0 }"
             @click="$router.push('/product/' + p.id)"
           >
             <div class="product-image-wrap">
@@ -156,6 +159,11 @@
               </el-image>
               <div class="product-badge" v-if="p.status === 1">
                 <span>在售</span>
+              </div>
+              <div class="product-cart-hover">
+                <el-button size="small" round @click.stop="addToCart(p)">
+                  加入购物车
+                </el-button>
               </div>
             </div>
 
@@ -199,10 +207,15 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { Search } from '@element-plus/icons-vue'
+import gsap from 'gsap'
 import { productApi } from '@/api/product'
 import { categoryApi } from '@/api/category'
+import { useCartStore } from '@/stores/cart'
+import { ElMessage } from 'element-plus'
+
+const cartStore = useCartStore()
 
 const productList = ref([])
 const categories = ref([])
@@ -214,6 +227,9 @@ const expandedCategoryId = ref(null)
 const page = ref(1)
 const pageSize = ref(12)
 const total = ref(0)
+
+const pageRef = ref(null)
+let ctx = null
 
 const topCategories = computed(() =>
   categories.value.filter(c => c.parentId == 0 || c.parentId === null)
@@ -330,9 +346,93 @@ async function handleSearch() {
   loadProducts()
 }
 
+function addToCart(product) {
+  if (!product.id) return
+  const userId = Number(document.cookie.match(/satoken=([^;]+)/)?.[1] || 0)
+  if (!userId) {
+    ElMessage.warning('请先登录')
+    return
+  }
+  cartStore.addItem({
+    productId: product.id,
+    name: product.name,
+    image: product.mainImage,
+    price: product.minPrice,
+    quantity: 1
+  })
+  ElMessage.success('已加入购物车')
+}
+
+/* ====== GSAP 动画 ====== */
+function initHeroAnimation() {
+  if (!pageRef.value) return
+  ctx = gsap.context(() => {
+    // Hero 标题/描述交错入场
+    const tl = gsap.timeline({ defaults: { ease: 'power3.out' } })
+    tl.from('.hero-title', { y: 30, opacity: 0, duration: 0.7 })
+      .from('.hero-desc', { y: 20, opacity: 0, duration: 0.6 }, '-=0.35')
+      .from('.hero-search', { y: 15, opacity: 0, duration: 0.5 }, '-=0.25')
+
+    // 装饰圆点浮动动画
+    gsap.to('.dot-1', { y: -14, duration: 3.5, repeat: -1, yoyo: true, ease: 'sine.inOut' })
+    gsap.to('.dot-2', { y: 10, duration: 3, repeat: -1, yoyo: true, ease: 'sine.inOut', delay: 0.6 })
+    gsap.to('.dot-3', { y: -8, duration: 2.5, repeat: -1, yoyo: true, ease: 'sine.inOut', delay: 1.2 })
+  }, pageRef.value)
+}
+
+function onSearchFocus() {
+  gsap.to('.hero-search-input', {
+    scale: 1.03,
+    transformOrigin: 'left center',
+    duration: 0.35,
+    ease: 'power2.out'
+  })
+  gsap.to('.hero-search-input .el-input__wrapper', {
+    boxShadow: '0 0 0 2px rgba(233,69,96,0.25), 0 4px 20px rgba(233,69,96,0.15)',
+    duration: 0.35,
+    ease: 'power2.out'
+  })
+}
+
+function onSearchBlur() {
+  gsap.to('.hero-search-input', {
+    scale: 1,
+    transformOrigin: 'left center',
+    duration: 0.35,
+    ease: 'power2.out'
+  })
+  gsap.to('.hero-search-input .el-input__wrapper', {
+    boxShadow: '0 0 0 1px rgba(255,255,255,0.15)',
+    duration: 0.35,
+    ease: 'power2.out'
+  })
+}
+
+function initProductAnimation() {
+  if (!pageRef.value) return
+  gsap.from('.product-card', {
+    y: 24,
+    opacity: 0,
+    duration: 0.45,
+    stagger: 0.04,
+    ease: 'power2.out'
+  })
+}
+
 onMounted(() => {
   loadCategories()
   loadProducts()
+  nextTick(() => initHeroAnimation())
+})
+
+watch(productList, (newList) => {
+  if (newList && newList.length > 0) {
+    nextTick(() => initProductAnimation())
+  }
+})
+
+onUnmounted(() => {
+  ctx?.revert()
 })
 </script>
 
@@ -465,7 +565,12 @@ onMounted(() => {
   overflow: hidden;
   position: sticky;
   top: 20px;
-  transition: var(--ds-transition, all 0.3s);
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
+  box-shadow: var(--ds-shadow-sm, 0 1px 3px rgba(26,26,46,0.06));
+}
+.category-panel:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--ds-shadow-md, 0 4px 16px rgba(26,26,46,0.08));
 }
 
 .category-header {
@@ -599,12 +704,17 @@ onMounted(() => {
 /* ====== 主内容区 ====== */
 .main-content { flex: 1; min-width: 0; }
 
-/* ====== 商品网格 ====== */
+/* ====== 商品网格（Bento Grid） ====== */
 .product-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 20px;
   min-height: 200px;
+  grid-auto-flow: dense;
+}
+/* 宽卡片（跨2列） */
+.product-card--wide {
+  grid-column: span 2;
 }
 
 /* 商品卡片 */
@@ -617,19 +727,23 @@ onMounted(() => {
   transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
   display: flex;
   flex-direction: column;
+  box-shadow: var(--ds-shadow-sm, 0 1px 3px rgba(26,26,46,0.06));
 }
 .product-card:hover {
   transform: translateY(-6px);
   box-shadow: var(--ds-shadow-lg, 0 12px 40px rgba(26,26,46,0.12));
 }
 
-/* 商品图片 */
+/* 商品图片 — 占卡片 70%+ 面积 */
 .product-image-wrap {
   position: relative;
   width: 100%;
-  aspect-ratio: 1;
+  aspect-ratio: 4 / 3;
   overflow: hidden;
   background: #f8f7f4;
+}
+.product-card--wide .product-image-wrap {
+  aspect-ratio: 7 / 3;
 }
 .product-image {
   width: 100%;
@@ -655,6 +769,33 @@ onMounted(() => {
   padding: 2px 10px;
   border-radius: 4px;
   letter-spacing: 0.3px;
+}
+
+/* Hover 加购按钮 */
+.product-cart-hover {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  opacity: 0;
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.product-card:hover .product-cart-hover {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.product-cart-hover :deep(.el-button) {
+  background: var(--ds-coral-gradient, linear-gradient(135deg, #e94560, #ff6b81));
+  border: none;
+  color: #fff;
+  font-size: 12px;
+  padding: 8px 18px;
+  font-weight: 600;
+  box-shadow: 0 4px 16px rgba(233,69,96,0.3);
+}
+.product-cart-hover :deep(.el-button:hover) {
+  box-shadow: 0 6px 24px rgba(233,69,96,0.4);
+  transform: translateY(-1px);
 }
 
 /* 商品信息 */

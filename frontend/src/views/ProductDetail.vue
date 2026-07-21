@@ -1,6 +1,6 @@
 <template>
   <div class="page-container fade-in">
-    <div v-loading="loading" class="detail-wrapper">
+    <div v-loading="loading" class="detail-wrapper" ref="detailRef">
       <template v-if="product">
         <!-- 面包屑导航 -->
         <nav class="breadcrumb">
@@ -85,8 +85,8 @@
               </div>
             </div>
 
-            <!-- 数量 + 操作 -->
-            <div class="action-area">
+            <!-- 购买操作区 (独立卡片) -->
+            <div class="purchase-card">
               <div class="quantity-row">
                 <span class="quantity-label">数量</span>
                 <el-input-number
@@ -142,6 +142,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
+import gsap from 'gsap'
 import { productApi } from '@/api/product'
 import { cartApi } from '@/api/cart'
 import { useUserStore } from '@/stores/user'
@@ -159,6 +160,8 @@ const quantity = ref(1)
 const activeImage = ref(0)
 const trendChartRef = ref(null)
 let trendChart = null
+const detailRef = ref(null)
+let detailCtx = null
 
 const displayPrice = computed(() => {
   if (selectedSku.value) return selectedSku.value.price
@@ -179,6 +182,7 @@ async function loadProduct() {
     }
     await nextTick()
     initTrendChart()
+    initDetailAnimation()
   } finally {
     loading.value = false
   }
@@ -187,6 +191,37 @@ async function loadProduct() {
 function selectSku(sku) {
   selectedSku.value = sku
   quantity.value = 1
+}
+
+/* ====== GSAP 动画 ====== */
+function initDetailAnimation() {
+  if (!detailRef.value) return
+  detailCtx = gsap.context(() => {
+    // 面包屑交错入场
+    gsap.from('.breadcrumb-item', { x: -12, opacity: 0, duration: 0.4, stagger: 0.08, ease: 'power2.out' })
+    gsap.from('.breadcrumb-current', { x: -12, opacity: 0, duration: 0.4, ease: 'power2.out', delay: 0.2 })
+
+    // 主图淡入 + 微缩放
+    gsap.from('.gallery-image', { scale: 0.92, opacity: 0, duration: 0.6, ease: 'power2.out' })
+
+    // 缩略图从底部入场
+    gsap.from('.gallery-thumb', { y: 12, opacity: 0, duration: 0.35, stagger: 0.06, ease: 'power2.out' })
+
+    // 价格卡片淡入
+    gsap.from('.price-card', { y: 16, opacity: 0, duration: 0.45, ease: 'power2.out' })
+
+    // 属性行淡入
+    gsap.from('.attr-row', { y: 8, opacity: 0, duration: 0.3, stagger: 0.06, ease: 'power2.out' })
+
+    // SKU 规格芯片交错入场
+    gsap.from('.selector-chip', { y: 12, opacity: 0, duration: 0.35, stagger: 0.05, ease: 'back.out(1.2)' })
+
+    // 操作按钮淡入
+    gsap.from('.action-buttons .el-button', { y: 10, opacity: 0, duration: 0.3, stagger: 0.08, ease: 'power2.out' })
+
+    // 底部面板卡片入场
+    gsap.from('.detail-card', { y: 20, opacity: 0, duration: 0.4, stagger: 0.1, ease: 'power2.out' })
+  }, detailRef.value)
 }
 
 // ECharts 价格走势图（基于当前价格生成模拟曲线）
@@ -299,6 +334,7 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
   trendChart?.dispose()
+  detailCtx?.revert()
 })
 </script>
 
@@ -328,7 +364,7 @@ onUnmounted(() => {
 .gallery-section { flex: 0 0 460px; }
 .gallery-main {
   position: relative;
-  border-radius: var(--ds-radius-lg, 16px);
+  border-radius: var(--ds-radius-xl, 24px);
   overflow: hidden;
   background: #f8f7f4;
   border: 1px solid var(--ds-border-light, #f0eee9);
@@ -440,8 +476,14 @@ onUnmounted(() => {
 .chip-price { font-size: 12px; color: var(--ds-coral, #e94560); margin-top: 2px; }
 .selector-chip.active .chip-name { color: var(--ds-coral, #e94560); }
 
-/* 操作 */
-.action-area { margin-top: 20px; }
+/* 购买卡 */
+.purchase-card {
+  background: var(--ds-surface-hover, #faf9f7);
+  border: 1px solid var(--ds-border-light, #f0eee9);
+  border-radius: var(--ds-radius-lg, 16px);
+  padding: 20px;
+  margin-top: 20px;
+}
 .quantity-row {
   display: flex; align-items: center;
   gap: 12px; margin-bottom: 20px;
@@ -449,6 +491,10 @@ onUnmounted(() => {
 .quantity-label { font-size: 14px; color: var(--ds-text, #1a1a2e); }
 .action-buttons { display: flex; gap: 12px; }
 .btn-cart, .btn-buy { flex: 1; height: 52px; border-radius: var(--ds-radius, 10px); font-size: 16px; font-weight: 600; }
+.btn-cart { background: var(--ds-coral-gradient, linear-gradient(135deg, #e94560, #ff6b81)); border: none; color: #fff; }
+.btn-cart:hover { background: var(--ds-coral-light, #ff6b81); box-shadow: var(--ds-shadow-coral, 0 4px 20px rgba(233,69,96,0.2)); transform: translateY(-1px); }
+.btn-buy { background: var(--ds-navy, #1a1a2e); border-color: var(--ds-navy, #1a1a2e); }
+.btn-buy:hover { background: var(--ds-navy-light, #2d2d50); border-color: var(--ds-navy-light, #2d2d50); transform: translateY(-1px); box-shadow: var(--ds-shadow-md); }
 
 /* ====== 底部面板 ====== */
 .detail-panels { display: flex; gap: 20px; }

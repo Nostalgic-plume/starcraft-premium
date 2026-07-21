@@ -142,7 +142,7 @@
           <div
             v-for="(p, index) in productList"
             :key="p.id"
-            class="product-card"
+            class="product-card card-elevated"
             :class="{ 'product-card--wide': index % 4 === 0 }"
             @click="$router.push('/product/' + p.id)"
           >
@@ -213,6 +213,7 @@ import gsap from 'gsap'
 import { productApi } from '@/api/product'
 import { categoryApi } from '@/api/category'
 import { useCartStore } from '@/stores/cart'
+import { useUserStore } from '@/stores/user'
 import { ElMessage } from 'element-plus'
 
 const cartStore = useCartStore()
@@ -348,8 +349,8 @@ async function handleSearch() {
 
 function addToCart(product) {
   if (!product.id) return
-  const userId = Number(document.cookie.match(/satoken=([^;]+)/)?.[1] || 0)
-  if (!userId) {
+  const userStore = useUserStore()
+  if (!userStore.isLoggedIn()) {
     ElMessage.warning('请先登录')
     return
   }

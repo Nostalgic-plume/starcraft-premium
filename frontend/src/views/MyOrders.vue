@@ -16,10 +16,10 @@
 
     <!-- 订单列表 -->
     <div v-loading="loading">
-      <div v-for="order in orderList" :key="order.id" class="order-card card" :class="{ expanded: expandedOrder === order.id }">
+      <div v-for="order in orderList" :key="order.id" class="order-card card" :class="{ expanded: expandedOrder == order.id }">
         <div class="order-header" @click="toggleExpand(order.id)">
           <div class="order-header-left">
-            <svg class="expand-arrow" :class="{ rotated: expandedOrder === order.id }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg class="expand-arrow" :class="{ rotated: expandedOrder == order.id }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="9 18 15 12 9 6"/>
             </svg>
             <span class="order-no">订单号：{{ order.orderNo }}</span>
@@ -27,7 +27,7 @@
           <el-tag :type="statusType(order.status)" class="order-status-tag">{{ order.statusText }}</el-tag>
         </div>
         <transition name="order-slide">
-          <div v-show="expandedOrder === order.id" class="order-body">
+          <div v-show="expandedOrder == order.id" class="order-body">
             <div v-for="item in order.items" :key="item.skuId" class="order-item" @click.stop="goDetail(order)">
               <el-image :src="item.productImage || '/placeholder.png'" class="order-item-img" fit="cover" />
               <div class="order-item-info">
@@ -77,7 +77,7 @@ const total = ref(0)
 const expandedOrder = ref(null)
 
 function toggleExpand(id) {
-  expandedOrder.value = expandedOrder.value === id ? null : id
+  expandedOrder.value = expandedOrder.value == id ? null : id
 }
 
 const statusType = (s) => {

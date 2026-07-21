@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <!-- 顶部栏：筛选 + 批量操作 + 新增 -->
-    <div class="card mb-16">
+    <div class="card-elevated mb-16">
       <div class="flex-between" style="flex-wrap: wrap; gap: 12px">
         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
           <el-input
@@ -87,7 +87,7 @@
       </div>
 
       <!-- 右侧商品表格 -->
-      <div class="product-main card" style="flex: 1; overflow: hidden">
+      <div class="product-main card-elevated" style="flex: 1; overflow: hidden">
         <el-table
           :data="list"
           v-loading="loading"
@@ -102,7 +102,7 @@
               <div style="display: flex; align-items: center; gap: 10px">
                 <el-image
                   :src="row.mainImage"
-                  style="width: 48px; height: 48px; border-radius: 4px; flex-shrink: 0"
+                  style="width: 48px; height: 48px; border-radius: var(--ds-radius-sm, 8px); flex-shrink: 0"
                   fit="cover"
                 >
                   <template #error>
@@ -111,7 +111,7 @@
                 </el-image>
                 <div>
                   <div style="font-weight: 500; font-size: 14px">{{ row.name }}</div>
-                  <div v-if="row.brand" style="font-size: 12px; color: #999; margin-top: 2px">{{ row.brand }}</div>
+                  <div v-if="row.brand" style="font-size: 12px; color: var(--ds-text-muted, #999); margin-top: 2px">{{ row.brand }}</div>
                 </div>
               </div>
             </template>
@@ -201,7 +201,7 @@
           <el-input v-model="form.mainImage" placeholder="请输入商品主图URL" />
         </el-form-item>
         <el-form-item v-if="form.mainImage" label="预览">
-          <el-image :src="form.mainImage" style="width: 100px; height: 100px; border-radius: 4px" fit="cover" />
+          <el-image :src="form.mainImage" style="width: 100px; height: 100px; border-radius: var(--ds-radius-sm, 8px)" fit="cover" />
         </el-form-item>
 
         <el-divider>SKU 规格</el-divider>
@@ -502,11 +502,23 @@ onMounted(async () => {
 .category-side {
   width: 210px;
   flex-shrink: 0;
+  background: var(--ds-surface, #fff);
+}
+
+.category-side h4 {
+  color: var(--ds-navy, #1a1a2e);
+  font-weight: 600;
 }
 
 .product-main {
   flex: 1;
   min-width: 0;
+}
+
+/* el-table 表头 & 行 hover */
+.product-main :deep(.el-table) {
+  --el-table-header-bg-color: var(--ds-bg, #f5f3ef);
+  --el-table-row-hover-bg-color: var(--ds-bg, #f5f3ef);
 }
 
 .category-node {
@@ -515,6 +527,11 @@ onMounted(async () => {
   gap: 6px;
   font-size: 13px;
   padding: 3px 0;
+  border-radius: 4px;
+}
+
+.category-node:hover {
+  background-color: var(--ds-bg, #f5f3ef);
 }
 
 .category-node.active {
@@ -524,7 +541,7 @@ onMounted(async () => {
 
 .category-node .el-icon {
   font-size: 16px;
-  color: #bbb;
+  color: var(--ds-text-muted, #999);
 }
 
 .category-node.active .el-icon {
@@ -537,17 +554,27 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f5f5f5;
-  color: #ccc;
+  background: var(--ds-bg, #f5f3ef);
+  color: var(--ds-text-muted, #999);
   font-size: 12px;
-  border-radius: 4px;
+  border-radius: var(--ds-radius-sm, 8px);
 }
 
 .sku-row {
   margin-bottom: 10px;
   padding: 10px;
-  background: #fafafa;
+  background: var(--ds-bg, #f5f3ef);
   border-radius: 6px;
-  border: 1px solid #f0f0f0;
+  border: 1px solid var(--ds-border-light, #f0f0f0);
+}
+
+/* el-dialog 标题 */
+:deep(.el-dialog__title) {
+  color: var(--ds-navy, #1a1a2e);
+}
+
+/* el-form 标签 */
+:deep(.el-form-item__label) {
+  color: var(--ds-text, #333);
 }
 </style>

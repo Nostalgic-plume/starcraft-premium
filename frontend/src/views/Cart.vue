@@ -1,5 +1,5 @@
 <template>
-  <div class="page-container fade-in">
+  <div class="page-container fade-in" ref="cartRef">
     <h2 class="page-title">购物车</h2>
 
     <div v-loading="cartStore.loading || loadingStock">
@@ -86,17 +86,20 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useCartStore } from '@/stores/cart'
 import { productApi } from '@/api/product'
+import gsap from 'gsap'
 
 const router = useRouter()
 const cartStore = useCartStore()
 
 const stockMap = ref({})
 const loadingStock = ref(false)
+const cartRef = ref(null)
+let cartCtx = null
 
 // 全选状态
 const allChecked = computed(() => {
@@ -168,6 +171,29 @@ function toggleAll(checked) {
   })
 }
 
+/* ====== GSAP 动画 ====== */
+function initCartAnimation() {
+  if (!cartRef.value) return
+  cartCtx = gsap.context(() => {
+    // 购物车列表项从底部交错入场（弹跳感）
+    gsap.from('.cart-item', {
+      y: 20,
+      opacity: 0,
+      duration: 0.4,
+      stagger: 0.05,
+      ease: 'back.out(1.3)'
+    })
+    // 底部结算栏淡入
+    gsap.from('.cart-footer', {
+      y: 12,
+      opacity: 0,
+      duration: 0.35,
+      delay: 0.3,
+      ease: 'power2.out'
+    })
+  }, cartRef.value)
+}
+
 function goCheckout() {
   const selected = cartStore.selectedItems()
   if (selected.length === 0) {
@@ -188,6 +214,12 @@ function goCheckout() {
 onMounted(async () => {
   await cartStore.fetchList()
   checkStock()
+  await nextTick()
+  initCartAnimation()
+})
+
+onUnmounted(() => {
+  cartCtx?.revert()
 })
 
 // 商品列表变化时重新检查库存
@@ -197,30 +229,48 @@ watch(() => cartStore.items.length, () => {
 </script>
 
 <style scoped>
-.cart-items { display: flex; flex-direction: column; gap: 0; }
+.cart-items { display: flex; flex-direction: column; gap: 12px; }
 .cart-item {
   display: flex;
   align-items: center;
   gap: 16px;
   padding: 20px;
-  border-bottom: 1px solid #f5f5f5;
+  background: var(--ds-surface, #fff);
+  border: 1px solid var(--ds-border-light, #f0eee9);
+  border-radius: var(--ds-radius-lg, 16px);
   margin-bottom: 0;
-  border-radius: 0;
-  box-shadow: none;
+  transition: var(--ds-transition);
 }
-.cart-item:first-child { border-radius: 12px 12px 0 0; }
-.cart-item:last-child { border-radius: 0 0 12px 12px; border-bottom: none; }
+.cart-item:hover { box-shadow: var(--ds-shadow-md); }
 .cart-item.item-out-of-stock { background: #fff5f5; }
 .cart-checkbox { --el-checkbox-input-width: 18px; --el-checkbox-input-height: 18px; }
-.cart-img { width: 80px; height: 80px; border-radius: 8px; flex-shrink: 0; opacity: 1; }
+.cart-img { width: 80px; height: 80px; border-radius: var(--ds-radius, 10px); flex-shrink: 0; opacity: 1; }
 .item-out-of-stock .cart-img { opacity: 0.6; }
 .cart-info { flex: 1; min-width: 0; }
 .cart-name { font-size: 15px; font-weight: 600; color: #1a1a2e; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item-out-of-stock .cart-name { color: #999; }
 .cart-sku { font-size: 13px; color: #999; }
-.cart-price { width: 80px; color: var(--danger); font-weight: 600; }
-.cart-qty { width: 130px; }
-.cart-subtotal { width: 100px; color: var(--danger); font-weight: 700; text-align: right; }
+.cart-price { width: 80px; color: var(--ds-coral, #e94560); font-weight: 600; }
+/* 圆形加减按钮 + 墨蓝边框 */
+.cart-qty { width: 140px; }
+.cart-qty :deep(.el-input-number__decrease),
+.cart-qty :deep(.el-input-number__increase) {
+  border-radius: 50% !important;
+  width: 26px;
+  height: 26px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 1.5px solid var(--ds-navy, #1a1a2e);
+  background: #fff;
+  color: var(--ds-navy, #1a1a2e);
+  font-weight: 700;
+}
+.cart-qty :deep(.el-input-number__decrease) { left: 4px; right: auto; }
+.cart-qty :deep(.el-input-number__increase) { right: 4px; left: auto; }
+.cart-qty :deep(.el-input-number__decrease:hover),
+.cart-qty :deep(.el-input-number__increase:hover) { background: var(--ds-navy, #1a1a2e); color: #fff; }
+.cart-qty :deep(.el-input__wrapper) { padding-left: 32px; padding-right: 32px; }
+.cart-subtotal { width: 100px; color: var(--ds-coral, #e94560); font-weight: 700; text-align: right; }
 .cart-remove { font-weight: 500; }
 
 .stock-warning { margin-top: 4px; }
@@ -232,15 +282,27 @@ watch(() => cartStore.items.length, () => {
   padding: 20px 24px;
   position: sticky;
   bottom: 0;
-  border-radius: 12px;
+  border-radius: var(--ds-radius-lg, 16px);
   margin-top: 4px;
+  box-shadow: 0 -4px 20px rgba(26,26,46,0.06);
+  z-index: 10;
 }
 .footer-left { display: flex; align-items: center; gap: 8px; font-size: 15px; }
 .footer-sep { color: #e0e0e0; }
 .footer-right { display: flex; align-items: center; gap: 12px; }
 .check-all { font-size: 15px; }
 .total-amount { font-size: 22px; font-weight: 700; }
-.footer-btn { height: 48px; border-radius: 10px; padding: 0 32px; font-size: 16px; font-weight: 600; }
+.footer-btn {
+  height: 48px;
+  border-radius: var(--ds-radius, 10px);
+  padding: 0 32px;
+  font-size: 16px;
+  font-weight: 600;
+  background: var(--ds-coral-gradient, linear-gradient(135deg, #e94560, #ff6b81)) !important;
+  border: none !important;
+  color: #fff !important;
+}
+.footer-btn:hover { box-shadow: var(--ds-shadow-coral, 0 4px 20px rgba(233,69,96,0.2)) !important; transform: translateY(-1px); }
 .stock-err-hint { font-size: 12px; color: var(--danger); max-width: 160px; text-align: right; }
 .empty-wrap { text-align: center; padding: 40px 0; }
 .empty-state { margin-top: 0; }

@@ -74,7 +74,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Warning, CircleCheck, InfoFilled, Success, CircleClose, Timer, Location, Goods } from '@element-plus/icons-vue'
+import { Warning, CircleCheck, InfoFilled, SuccessFilled, CircleClose, Timer, Location, Goods } from '@element-plus/icons-vue'
 import { orderApi } from '@/api/order'
 
 const route = useRoute()
@@ -88,8 +88,8 @@ const statusIcon = computed(() => {
   return order.value?.status === 0 ? 'Warning'
     : order.value?.status === 1 ? 'CircleCheck'
     : order.value?.status === 2 ? 'InfoFilled'
-    : order.value?.status === 3 ? 'Success'
-    : order.value?.status === 4 ? 'Success'
+    : order.value?.status === 3 ? 'SuccessFilled'
+    : order.value?.status === 4 ? 'SuccessFilled'
     : order.value?.status === 5 ? 'CircleClose'
     : 'InfoFilled'
 })
@@ -185,14 +185,14 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* 状态栏 */
+/* 状态栏 ———— 品牌渐变色 + 圆角 */
 .status-bar {
   display: flex; align-items: center; gap: 20px; padding: 24px;
-  border-radius: 12px; color: #fff;
+  border-radius: var(--ds-radius-lg, 16px); color: #fff;
 }
-.status-0 { background: linear-gradient(135deg, #f56c6c, #e6a23c); }
-.status-1 { background: linear-gradient(135deg, #409eff, #337ecc); }
-.status-2 { background: linear-gradient(135deg, #67c23a, #529b2e); }
+.status-0 { background: var(--ds-coral-gradient, linear-gradient(135deg, #e94560, #ff6b81)); }
+.status-1 { background: linear-gradient(135deg, #1a1a2e, #2d2d5e); }
+.status-2 { background: linear-gradient(135deg, #1a1a2e, #3a3a6a); }
 .status-3 { background: linear-gradient(135deg, #67c23a, #529b2e); }
 .status-4 { background: linear-gradient(135deg, #909399, #73767a); }
 .status-5 { background: linear-gradient(135deg, #c0c4cc, #909399); }
@@ -207,28 +207,36 @@ onUnmounted(() => {
 .ops-btns { display: flex; gap: 8px; }
 
 /* 倒计时栏 */
-.countdown-bar { display: flex; align-items: center; gap: 8px; padding: 14px 24px; background: #fffbe6; border: 1px solid #ffe58f; }
+.countdown-bar { display: flex; align-items: center; gap: 8px; padding: 14px 24px; background: #fffbe6; border: 1px solid #ffe58f; border-radius: var(--ds-radius-lg, 16px); }
 .countdown-text { font-size: 15px; color: #ad6800; }
 .countdown-text strong { font-size: 18px; color: #d46b08; font-family: monospace; }
 .countdown-hint { font-size: 12px; color: #999; margin-left: auto; }
 
-.card-title { font-size: 16px; font-weight: 700; color: #1a1a2e; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+.card-title { font-size: 16px; font-weight: 700; color: var(--ds-navy, #1a1a2e); margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
 .addr-info p { font-size: 14px; line-height: 1.8; color: #555; }
 
-.detail-item { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #f8f8f8; }
+/* 商品列表 ———— 圆角图片 + 珊瑚红价格 */
+.detail-item { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--ds-border-light, #f0eee9); }
 .detail-item:last-child { border-bottom: none; }
-.detail-item-img { width: 56px; height: 56px; border-radius: 8px; flex-shrink: 0; }
+.detail-item-img { width: 56px; height: 56px; border-radius: var(--ds-radius, 10px); flex-shrink: 0; }
 .detail-item-info { flex: 1; }
-.detail-item-name { font-size: 14px; font-weight: 600; color: #1a1a2e; }
+.detail-item-name { font-size: 14px; font-weight: 600; color: var(--ds-navy, #1a1a2e); }
 .detail-item-sku { font-size: 12px; color: #999; margin-top: 2px; }
-.detail-item-price { width: 70px; text-align: right; color: var(--danger); }
+.detail-item-price { width: 70px; text-align: right; color: var(--ds-coral, #e94560); font-weight: 600; }
 .detail-item-qty { width: 50px; text-align: right; color: #666; }
-.detail-item-total { width: 90px; text-align: right; color: var(--danger); font-weight: 600; }
+.detail-item-total { width: 90px; text-align: right; color: var(--ds-coral, #e94560); font-weight: 700; }
 
+/* 金额卡片 ———— 品牌暖色 */
 .amount-card { text-align: right; }
 .amount-row { display: flex; justify-content: space-between; font-size: 14px; color: #555; margin-bottom: 8px; }
-.amount-final { margin-top: 12px; padding-top: 12px; border-top: 1px solid #f0f0f0; font-size: 16px; }
-.final-price { font-size: 24px; font-weight: 700; }
+.amount-final { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--ds-border-light, #f0eee9); font-size: 16px; }
+.final-price { font-size: 24px; font-weight: 700; color: var(--ds-coral, #e94560); }
+
+/* 所有卡片统一圆角 */
+.status-bar, .ops-card, .card:not(.status-bar):not(.ops-card) {
+  border-radius: var(--ds-radius-lg, 16px);
+}
+
 .empty-state { margin-top: 40px; }
 .empty-wrap { text-align: center; }
 .empty-btn { margin-top: 16px; }

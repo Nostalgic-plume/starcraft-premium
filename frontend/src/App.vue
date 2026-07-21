@@ -38,7 +38,15 @@
     <!-- 主内容 -->
     <main class="app-main">
       <router-view v-slot="{ Component }">
-        <transition name="page-fade" mode="out-in">
+        <transition
+          mode="out-in"
+          @before-leave="pageBeforeLeave"
+          @leave="pageLeave"
+          @after-leave="pageAfterLeave"
+          @before-enter="pageBeforeEnter"
+          @enter="pageEnter"
+          @after-enter="pageAfterEnter"
+        >
           <component :is="Component" />
         </transition>
       </router-view>
@@ -56,6 +64,7 @@ import { UserFilled, SwitchButton } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { useCartStore } from '@/stores/cart'
 import FloatingChat from '@/components/FloatingChat.vue'
+import gsap from 'gsap'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -74,23 +83,62 @@ function handleUserCommand(cmd) {
     router.push('/home')
   }
 }
+
+/* ====== GSAP 页面转场 ====== */
+function pageBeforeLeave(el) {
+  // 无特殊初始状态
+}
+
+function pageLeave(el, done) {
+  gsap.to(el, {
+    opacity: 0,
+    scale: 0.97,
+    y: -8,
+    duration: 0.2,
+    ease: 'power2.in',
+    onComplete: done
+  })
+}
+
+function pageAfterLeave(el) {
+  gsap.set(el, { clearProps: 'all' })
+}
+
+function pageBeforeEnter(el) {
+  gsap.set(el, {
+    opacity: 0,
+    scale: 0.97,
+    y: 12
+  })
+}
+
+function pageEnter(el, done) {
+  gsap.to(el, {
+    opacity: 1,
+    scale: 1,
+    y: 0,
+    duration: 0.35,
+    ease: 'power2.out',
+    onComplete: done
+  })
+}
+
+function pageAfterEnter(el) {
+  gsap.set(el, { clearProps: 'all' })
+}
 </script>
 
 <style>
-/* ====== 全局转场动画 ====== */
-.page-fade-enter-active, .page-fade-leave-active { transition: opacity 0.25s ease, transform 0.25s ease; }
-.page-fade-enter-from { opacity: 0; transform: translateY(12px); }
-.page-fade-leave-to { opacity: 0; transform: translateY(-8px); }
+/* GSAP 转场由 JavaScript 驱动，见 script 中 pageLeave/pageEnter */
 </style>
 
 <style scoped>
 .app-header {
-  background: #fff;
-  border-bottom: 1px solid #f0f0f0;
+  background: var(--ds-navy, #1a1a2e);
   position: sticky;
   top: 0;
   z-index: 100;
-  box-shadow: 0 1px 8px rgba(0,0,0,0.04);
+  box-shadow: var(--ds-shadow-md, 0 4px 16px rgba(26,26,46,0.08));
   height: 64px;
 }
 .header-inner {
@@ -107,33 +155,71 @@ function handleUserCommand(cmd) {
   align-items: center;
   gap: 10px;
   font-weight: 700;
+  text-decoration: none;
 }
 .logo-icon { font-size: 28px; }
-.logo-text { font-size: 22px; color: #1a1a2e; letter-spacing: -0.5px; }
+.logo-text {
+  font-size: 22px;
+  color: #fff;
+  letter-spacing: -0.5px;
+  font-weight: 800;
+}
 
-.nav-links { display: flex; align-items: center; gap: 6px; }
+.nav-links { display: flex; align-items: center; gap: 4px; }
 .nav-item {
   padding: 8px 16px;
-  color: #555;
+  color: rgba(255,255,255,0.75);
   font-size: 14px;
-  border-radius: 8px;
-  transition: all 0.2s;
-}
-.nav-item:hover { color: var(--primary); background: #f0f7ff; }
-.nav-btn {
-  background: var(--primary);
-  color: #fff !important;
-  padding: 8px 20px;
-  border-radius: 20px;
   font-weight: 500;
+  border-radius: var(--ds-radius-sm, 6px);
+  transition: var(--ds-transition);
+  position: relative;
+  text-decoration: none;
 }
-.nav-btn:hover { background: var(--primary-dark) !important; }
+.nav-item:hover {
+  color: #fff;
+  background: rgba(255,255,255,0.08);
+}
+/* 珊瑚红下划线 hover 动效 */
+.nav-item::after {
+  content: '';
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%) scaleX(0);
+  width: 20px;
+  height: 2.5px;
+  background: var(--ds-coral, #e94560);
+  border-radius: 2px;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.nav-item:hover::after {
+  transform: translateX(-50%) scaleX(1);
+}
+/* 活跃导航指示器 */
+.nav-item.router-link-exact-active {
+  color: var(--ds-coral, #e94560) !important;
+  font-weight: 600;
+}
+.nav-item.router-link-exact-active::after {
+  transform: translateX(-50%) scaleX(1);
+}
+.nav-btn {
+  padding: 8px 20px;
+  border-radius: var(--ds-radius, 10px);
+  font-weight: 600;
+  border: 1.5px solid rgba(255,255,255,0.6);
+  color: #fff !important;
+  background: transparent;
+}
+.nav-btn:hover { background: rgba(255,255,255,0.12) !important; border-color: #fff; transform: translateY(-1px); }
+/* 注册按钮：珊瑚红填充 */
 .nav-btn-reg {
-  background: #fff;
-  color: var(--primary) !important;
-  border: 1.5px solid var(--primary);
+  background: var(--ds-coral, #e94560) !important;
+  border-color: var(--ds-coral, #e94560);
+  color: #fff !important;
 }
-.nav-btn-reg:hover { background: #f0f7ff !important; }
+.nav-btn-reg:hover { background: var(--ds-coral-light, #ff6b81) !important; border-color: var(--ds-coral-light, #ff6b81) !important; }
 
 .user-info {
   display: flex;
@@ -141,16 +227,31 @@ function handleUserCommand(cmd) {
   gap: 8px;
   cursor: pointer;
   padding: 4px 12px 4px 4px;
-  border-radius: 20px;
-  transition: background 0.2s;
+  border-radius: var(--ds-radius, 10px);
+  transition: var(--ds-transition);
 }
-.user-info:hover { background: #f5f5f5; }
-.user-avatar { border: 2px solid #e8e8e8; }
-.user-name { font-size: 14px; color: #333; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.badge { margin-left: 2px; }
+.user-info:hover { background: rgba(255,255,255,0.08); }
+.user-avatar { border: 2px solid rgba(255,255,255,0.2); }
+.user-name {
+  font-size: 14px;
+  color: rgba(255,255,255,0.85);
+  font-weight: 500;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.badge :deep(.el-badge__content) {
+  background: var(--ds-coral, #e94560);
+  border: none;
+  color: #fff;
+  font-size: 11px;
+  height: 18px;
+  line-height: 18px;
+}
 
 .app-main {
-  min-height: calc(100vh - 64px);
+  min-height: calc(100dvh - 64px);
   animation: fadeIn 0.4s ease;
 }
 </style>

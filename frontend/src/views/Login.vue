@@ -77,24 +77,35 @@ async function handleLogin() {
 .auth-bg {
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  opacity: 0.05;
+  background: radial-gradient(ellipse at 20% 50%, rgba(233,69,96,0.06) 0%, transparent 60%),
+              radial-gradient(ellipse at 80% 50%, rgba(26,26,46,0.04) 0%, transparent 60%);
 }
 .auth-card {
   width: 420px;
-  border-radius: 16px;
+  border-radius: var(--ds-radius-lg, 16px);
   padding: 40px 32px 32px;
   position: relative;
   z-index: 1;
-  border: 1px solid #f0f0f0;
+  border: 1px solid var(--ds-border-light, #f0eee9);
+  box-shadow: var(--ds-shadow-lg, 0 8px 32px rgba(26,26,46,0.08));
 }
 .auth-header { text-align: center; margin-bottom: 32px; }
-.auth-logo { font-size: 48px; margin-bottom: 12px; }
-.auth-title { font-size: 24px; font-weight: 700; color: #1a1a2e; margin-bottom: 4px; }
+.auth-logo { font-size: 56px; margin-bottom: 12px; display: block; }
+.auth-title { font-size: 24px; font-weight: 700; color: var(--ds-navy, #1a1a2e); margin-bottom: 4px; }
 .auth-subtitle { font-size: 14px; color: #999; }
 .auth-input { --el-input-height: 48px; }
-.auth-input :deep(.el-input__wrapper) { border-radius: 10px; padding: 0 16px; }
-.auth-btn { width: 100%; height: 48px; border-radius: 10px; font-size: 16px; font-weight: 600; margin-top: 8px; }
+.auth-input :deep(.el-input__wrapper) { border-radius: var(--ds-radius, 10px); padding: 0 16px; }
+.auth-btn {
+  width: 100%; height: 48px;
+  border-radius: var(--ds-radius, 10px);
+  font-size: 16px; font-weight: 600;
+  margin-top: 8px;
+  background: var(--ds-coral-gradient, linear-gradient(135deg, #e94560, #ff6b81)) !important;
+  border: none !important;
+  color: #fff !important;
+}
+.auth-btn:hover { box-shadow: var(--ds-shadow-coral, 0 4px 20px rgba(233,69,96,0.2)) !important; transform: translateY(-1px); }
 .auth-footer { text-align: center; font-size: 14px; color: #999; margin-top: 20px; }
-.auth-footer a { color: var(--primary); font-weight: 500; }
+.auth-footer a { color: var(--ds-coral, #e94560); font-weight: 500; text-decoration: none; }
+.auth-footer a:hover { text-decoration: underline; }
 </style>

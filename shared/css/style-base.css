@@ -327,7 +327,7 @@ img { max-width: 100%; vertical-align: middle; }
 .el-table th.el-table__cell {
   font-weight: 600;
   color: var(--ds-text);
-  background: var(--ds-fill-color);
+  background: var(--el-fill-color);
 }
 .el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
   background: var(--ds-fill-color-light);

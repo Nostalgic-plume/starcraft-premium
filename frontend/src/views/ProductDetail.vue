@@ -116,14 +116,14 @@
         <!-- 底部：商品详情 + ECharts 价格走势 -->
         <div class="detail-panels">
           <div class="panel-left">
-            <div class="detail-card">
+            <div class="detail-card card-elevated">
               <h3 class="panel-title">商品详情</h3>
               <div class="panel-divider" />
               <div class="detail-html" v-html="product.detail || '暂无详情'" />
             </div>
           </div>
           <div class="panel-right">
-            <div class="detail-card">
+            <div class="detail-card card-elevated">
               <h3 class="panel-title">价格走势</h3>
               <div class="panel-divider" />
               <div ref="trendChartRef" class="trend-chart"></div>
@@ -409,7 +409,7 @@ onUnmounted(() => {
 /* 价格卡片 */
 .price-card {
   background: linear-gradient(135deg, #fff5f5 0%, #fff 100%);
-  border: 1px solid #fde8e8;
+  border: 1px solid var(--ds-border-light, #f0eee9);
   border-radius: var(--ds-radius-lg, 16px);
   padding: 20px;
   margin-bottom: 20px;
@@ -501,13 +501,6 @@ onUnmounted(() => {
 .panel-left { flex: 1; min-width: 0; }
 .panel-right { flex: 0 0 380px; }
 
-.detail-card {
-  background: var(--ds-surface, #fff);
-  border: 1px solid var(--ds-border-light, #f0eee9);
-  border-radius: var(--ds-radius-lg, 16px);
-  padding: 24px;
-  margin-bottom: 16px;
-}
 .panel-title {
   font-size: 17px; font-weight: 700;
   color: var(--ds-text, #1a1a2e);

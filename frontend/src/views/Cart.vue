@@ -303,7 +303,7 @@ watch(() => cartStore.items.length, () => {
   color: #fff !important;
 }
 .footer-btn:hover { box-shadow: var(--ds-shadow-coral, 0 4px 20px rgba(233,69,96,0.2)) !important; transform: translateY(-1px); }
-.stock-err-hint { font-size: 12px; color: var(--danger); max-width: 160px; text-align: right; }
+.stock-err-hint { font-size: 12px; color: var(--ds-danger, #e94560); max-width: 160px; text-align: right; }
 .empty-wrap { text-align: center; padding: 40px 0; }
 .empty-state { margin-top: 0; }
 .empty-btn { margin-top: 16px; }

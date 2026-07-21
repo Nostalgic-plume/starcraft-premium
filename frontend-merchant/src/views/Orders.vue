@@ -49,7 +49,7 @@
             >
               发货
             </el-button>
-            <span v-else style="color: var(--ds-text-muted, #999); font-size: 13px">--</span>
+            <span v-else style="color: var(--ds-text-muted, #b2bec3); font-size: 13px">--</span>
           </template>
         </el-table-column>
       </el-table>
@@ -110,7 +110,7 @@
           </el-table-column>
         </el-table>
       </template>
-      <div v-else class="text-center" style="padding: 60px 0; color: var(--ds-text-muted, #999)">加载中...</div>
+      <div v-else class="text-center" style="padding: 60px 0; color: var(--ds-text-muted, #b2bec3)">加载中...</div>
     </el-dialog>
 
     <!-- 发货弹窗 -->

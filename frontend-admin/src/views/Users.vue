@@ -259,8 +259,8 @@ onMounted(loadUsers)
   flex-direction: column;
   min-height: 0;
 }
-.el-tabs { flex-shrink: 0; }
-.el-table {
+:deep(.el-tabs) { flex-shrink: 0; }
+:deep(.el-table) {
   flex: 1;
   min-height: 0;
 }

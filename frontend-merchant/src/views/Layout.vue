@@ -144,7 +144,7 @@ onMounted(() => {
   --el-menu-bg-color: var(--ds-navy, #1a1a2e);
   --el-menu-text-color: var(--ds-text-inverse, #ffffff);
   --el-menu-active-color: var(--ds-coral, #e94560);
-  --el-menu-hover-bg-color: var(--ds-navy-light, #2a2a4a);
+  --el-menu-hover-bg-color: var(--ds-navy-light, #2d2d50);
   border-right: none;
 }
 
@@ -153,7 +153,7 @@ onMounted(() => {
 }
 
 :deep(.el-menu-item.is-active) {
-  background: var(--ds-navy-light, #2a2a4a) !important;
+  background: var(--ds-navy-light, #2d2d50) !important;
   border-left: 3px solid var(--ds-coral, #e94560) !important;
   font-weight: 600;
 }
@@ -163,6 +163,6 @@ onMounted(() => {
 }
 
 :deep(.el-menu-item.is-active:hover) {
-  background: var(--ds-navy-light, #2a2a4a) !important;
+  background: var(--ds-navy-light, #2d2d50) !important;
 }
 </style>

@@ -62,7 +62,7 @@ async function handleLogin() {
   justify-content: center;
   align-items: center;
   min-height: 100vh;
-  background: linear-gradient(135deg, #f5f3ef 0%, #f0e6e6 100%);
+  background: linear-gradient(135deg, var(--ds-bg, #f5f3ef) 0%, #f0e6e6 100%);
 }
 .login-card {
   width: 420px;
@@ -108,7 +108,7 @@ async function handleLogin() {
   font-weight: 600;
   letter-spacing: 0.5px;
   border-radius: var(--ds-radius, 10px);
-  color: #fff;
+  color: var(--ds-text-inverse, #fff);
   transition: var(--ds-transition, all 0.3s cubic-bezier(0.4,0,0.2,1));
 }
 .btn-coral:hover {

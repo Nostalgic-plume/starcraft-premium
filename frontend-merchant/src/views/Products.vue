@@ -20,7 +20,7 @@
 
     <!-- 批量操作栏 -->
     <div class="batch-bar mb-16" v-if="selectedIds.length > 0">
-      <span style="color: var(--ds-text-muted, #999); margin-right: 12px">已选 {{ selectedIds.length }} 项</span>
+      <span style="color: var(--ds-text-muted, #b2bec3); margin-right: 12px">已选 {{ selectedIds.length }} 项</span>
       <el-button size="small" type="success" plain @click="batchStatus(1)">批量上架</el-button>
       <el-button size="small" type="warning" plain @click="batchStatus(2)">批量下架</el-button>
       <el-button size="small" text @click="clearSelection">取消选择</el-button>
@@ -34,10 +34,10 @@
           <template #default="{ row }">
             <div style="display: flex; align-items: center; gap: 12px">
               <el-image v-if="row.mainImage" :src="row.mainImage" style="width: 60px; height: 60px; border-radius: 6px" fit="cover" />
-              <div v-else style="width:60px;height:60px;background:var(--ds-bg, #f5f3ef);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--ds-text-muted, #999);font-size:12px">暂无</div>
+              <div v-else style="width:60px;height:60px;background:var(--ds-bg, #f5f3ef);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--ds-text-muted, #b2bec3);font-size:12px">暂无</div>
               <div>
                 <div style="font-weight: 500; margin-bottom: 4px">{{ row.name }}</div>
-                <div style="color: var(--ds-text-muted, #999); font-size: 12px">{{ row.brand || '-' }}</div>
+                <div style="color: var(--ds-text-muted, #b2bec3); font-size: 12px">{{ row.brand || '-' }}</div>
               </div>
             </div>
           </template>

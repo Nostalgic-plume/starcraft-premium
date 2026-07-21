@@ -188,6 +188,12 @@ public class ProductServiceImpl implements ProductService {
         }
     }
 
+    @Override
+    public PageResult<ProductVO> merchantPage(ProductPageQuery query) {
+        query.setShopId(StpUtil.getLoginIdAsLong());
+        return page(query);
+    }
+
     /** 商品 DO 转 VO */
     private ProductVO convertToVO(ProductDO product) {
         ProductVO vo = new ProductVO();

@@ -31,6 +31,14 @@ public interface ProductService {
     PageResult<ProductVO> page(ProductPageQuery query);
 
     /**
+     * 商家商品分页（shop_id 从 StpUtil 自动获取，无需前端传入）
+     *
+     * @param query 分页参数 + 筛选条件
+     * @return 分页结果
+     */
+    PageResult<ProductVO> merchantPage(ProductPageQuery query);
+
+    /**
      * 获取商品详情（含 SKU 列表、价格区间、库存总量）
      *
      * @param id 商品 ID

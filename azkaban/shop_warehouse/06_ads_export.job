@@ -1,5 +1,0 @@
-type=command
-command=sh ads_export.sh ${dt}
-dependencies=05_ads_etl
-retries=1
-retry.backoff=120000

@@ -184,8 +184,8 @@ onMounted(loadOrders)
 .order-slide-leave-active { transition: all 0.25s ease; }
 .order-slide-enter-from { opacity: 0; max-height: 0; }
 .order-slide-leave-to { opacity: 0; max-height: 0; }
-.order-slide-enter-to { opacity: 1; max-height: 300px; }
-.order-slide-leave-from { opacity: 1; max-height: 300px; }
+.order-slide-enter-to { opacity: 1; max-height: 1000px; }
+.order-slide-leave-from { opacity: 1; max-height: 1000px; }
 
 .empty-state { margin-top: 40px; }
 .pagination-wrap { display: flex; justify-content: center; margin-top: 24px; }

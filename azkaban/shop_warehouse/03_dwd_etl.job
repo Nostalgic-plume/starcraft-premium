@@ -1,5 +1,0 @@
-type=command
-command=hive -f dwd_etl.hql -hivevar dt=${dt}
-dependencies=01_sqoop_ods_full,02_sqoop_ods_inc
-retries=1
-retry.backoff=120000

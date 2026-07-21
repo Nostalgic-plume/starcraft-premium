@@ -76,5 +76,5 @@ const barOption = computed(() => {
 
 <style scoped>
 .chart-box { width: 100%; height: 300px; }
-.card-title { font-size: 15px; font-weight: 600; }
+.card-title { font-size: 14px; font-weight: 600; color: var(--ds-text, #1a1a2e); }
 </style>

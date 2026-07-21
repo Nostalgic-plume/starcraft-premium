@@ -279,6 +279,7 @@ watch(() => cartStore.items.length, () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  background: var(--ds-surface, #fff);
   padding: 20px 24px;
   position: sticky;
   bottom: 0;

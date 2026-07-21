@@ -382,7 +382,7 @@ const orderPieOption = computed(() => {
   color: rgba(255, 255, 255, 0.6);
 }
 .hero-stat strong {
-  color: #e94560;
+  color: var(--ds-coral, #e94560);
   font-weight: 700;
   margin-left: 4px;
 }
@@ -478,8 +478,9 @@ const orderPieOption = computed(() => {
 
 /* 卡片标题复用 */
 :deep(.card-title) {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
+  color: var(--ds-text, #1a1a2e);
 }
 
 /* 弹性容器中 card-elevated 取消全局 margin-bottom */

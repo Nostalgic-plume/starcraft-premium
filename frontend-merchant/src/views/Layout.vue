@@ -95,7 +95,7 @@ onMounted(() => {
   justify-content: center;
   gap: 10px;
   color: var(--ds-text-inverse, #fff);
-  border-bottom: 1px solid rgba(255,255,255,0.08);
+  border-bottom: 1px solid var(--ds-navy-light, #2d2d50);
   flex-shrink: 0;
 }
 .logo-mark {
@@ -159,7 +159,7 @@ onMounted(() => {
 }
 
 :deep(.el-menu-item:hover) {
-  background: rgba(255,255,255,0.08) !important;
+  background: var(--ds-navy-light, #2d2d50) !important;
 }
 
 :deep(.el-menu-item.is-active:hover) {

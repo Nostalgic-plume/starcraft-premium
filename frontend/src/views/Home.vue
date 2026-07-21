@@ -518,7 +518,7 @@ onUnmounted(() => {
   border: 1px solid rgba(255, 255, 255, 0.15) !important;
   box-shadow: none !important;
   height: 48px;
-  border-radius: 10px;
+  border-radius: var(--ds-radius, 10px);
 }
 .hero-search-input :deep(.el-input__inner) {
   color: #fff;
@@ -533,7 +533,7 @@ onUnmounted(() => {
 .hero-search-btn {
   height: 48px;
   padding: 0 28px;
-  border-radius: 10px;
+  border-radius: var(--ds-radius, 10px);
   font-weight: 600;
   font-size: 15px;
 }

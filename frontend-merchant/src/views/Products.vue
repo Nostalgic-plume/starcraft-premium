@@ -33,8 +33,8 @@
         <el-table-column label="商品" min-width="240">
           <template #default="{ row }">
             <div style="display: flex; align-items: center; gap: 12px">
-              <el-image v-if="row.mainImage" :src="row.mainImage" style="width: 60px; height: 60px; border-radius: 6px" fit="cover" />
-              <div v-else style="width:60px;height:60px;background:var(--ds-bg, #f5f3ef);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--ds-text-muted, #b2bec3);font-size:12px">暂无</div>
+              <el-image v-if="row.mainImage" :src="row.mainImage" style="width: 60px; height: 60px; border-radius: var(--ds-radius-sm, 8px)" fit="cover" />
+              <div v-else style="width:60px;height:60px;background:var(--ds-bg, #f5f3ef);border-radius:var(--ds-radius-sm, 8px);display:flex;align-items:center;justify-content:center;color:var(--ds-text-muted, #b2bec3);font-size:12px">暂无</div>
               <div>
                 <div style="font-weight: 500; margin-bottom: 4px">{{ row.name }}</div>
                 <div style="color: var(--ds-text-muted, #b2bec3); font-size: 12px">{{ row.brand || '-' }}</div>
@@ -311,7 +311,7 @@ onMounted(() => {
   align-items: center;
   padding: 10px 16px;
   background: var(--ds-bg, #f5f3ef);
-  border-radius: 6px;
+  border-radius: var(--ds-radius-sm, 8px);
 }
 
 /* Table header & row hover */

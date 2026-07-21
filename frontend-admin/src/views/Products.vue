@@ -527,7 +527,7 @@ onMounted(async () => {
   gap: 6px;
   font-size: 13px;
   padding: 3px 0;
-  border-radius: 4px;
+  border-radius: var(--ds-radius-sm, 8px);
 }
 
 .category-node:hover {

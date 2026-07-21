@@ -57,10 +57,10 @@
 
       <!-- Zone 3: 不对称 70/30 分栏 -->
       <section class="split-zone">
-        <div class="split-main">
+        <div class="split-main card-elevated">
           <CategorySales :data="data.categorySales || []" />
         </div>
-        <div class="split-side">
+        <div class="split-side card-elevated">
           <UserMetrics
             :active="data.userActive"
             :retain="data.userNewRetain"
@@ -71,7 +71,7 @@
 
       <!-- Zone 4: 底部双栏商品排行 + 订单分布 -->
       <section class="bottom-zone">
-        <div class="bottom-col">
+        <div class="bottom-col card-elevated">
           <ProductTop :data="(data.productTop || []).slice(0, 10)" />
         </div>
         <div class="bottom-col">
@@ -343,8 +343,8 @@ const orderPieOption = computed(() => {
 
 /* ====== Zone 1: Hero 趋势图 ====== */
 .hero-zone {
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-  border-radius: 12px;
+  background: linear-gradient(135deg, var(--ds-navy, #1a1a2e) 0%, #16213e 100%);
+  border-radius: var(--ds-radius-lg, 16px);
   padding: 24px 24px 16px;
   margin-bottom: 16px;
   min-height: 400px;
@@ -363,7 +363,7 @@ const orderPieOption = computed(() => {
 .hero-title {
   font-size: 18px;
   font-weight: 700;
-  color: #fff;
+  color: var(--ds-text-inverse, #fff);
 }
 .hero-badge {
   font-size: 11px;
@@ -401,7 +401,7 @@ const orderPieOption = computed(() => {
 }
 .hero-skeleton {
   background: rgba(255, 255, 255, 0.05);
-  border-radius: 12px;
+  border-radius: var(--ds-radius-lg, 16px);
   padding: 24px;
 }
 
@@ -413,27 +413,28 @@ const orderPieOption = computed(() => {
 }
 .kpi-card {
   flex: 1;
-  background: #fff;
-  border-radius: 10px;
+  background: var(--ds-surface, #fff);
+  border-radius: var(--ds-radius-lg, 16px);
   padding: 16px 12px;
   text-align: center;
-  border-top: 3px solid #e94560;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  border-top: 3px solid var(--ds-coral, #e94560);
+  box-shadow: var(--ds-shadow-md);
   transition: transform 0.2s, box-shadow 0.2s;
   cursor: default;
 }
 .kpi-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--ds-shadow-lg);
 }
 .kpi-value {
   font-size: 26px;
   font-weight: 700;
   line-height: 1.2;
+  color: var(--ds-navy, #1a1a2e);
 }
 .kpi-label {
   font-size: 12px;
-  color: #909399;
+  color: var(--ds-text-muted, #b2bec3);
   margin-top: 4px;
 }
 
@@ -479,6 +480,12 @@ const orderPieOption = computed(() => {
 :deep(.card-title) {
   font-size: 15px;
   font-weight: 600;
+}
+
+/* 弹性容器中 card-elevated 取消全局 margin-bottom */
+.split-zone .card-elevated,
+.bottom-zone .card-elevated {
+  margin-bottom: 0;
 }
 
 /* 工具类 */

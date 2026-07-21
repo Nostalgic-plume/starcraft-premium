@@ -112,7 +112,7 @@
                 <el-image
                   v-if="item.productImage"
                   :src="item.productImage"
-                  style="width: 50px; height: 50px; border-radius: 4px; flex-shrink: 0"
+                  style="width: 50px; height: 50px; border-radius: var(--ds-radius-sm, 8px); flex-shrink: 0"
                   fit="cover"
                 />
                 <div style="flex: 1">

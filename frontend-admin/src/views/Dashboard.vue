@@ -75,11 +75,11 @@ const TEAL = '#00b894'
 const PURPLE = '#6c5ce7'
 
 const statCards = ref([
-  { label: '用户总数', value: 0, color: '#2d3436', icon: '👥', iconBg: 'var(--ds-coral-gradient)' },
-  { label: '商品总数', value: 0, color: '#2d3436', icon: '📦', iconBg: 'var(--ds-coral-gradient)' },
-  { label: '订单总数', value: 0, color: '#2d3436', icon: '📋', iconBg: 'var(--ds-coral-gradient)' },
+  { label: '用户总数', value: 0, color: 'var(--ds-text, #1a1a2e)', icon: '👥', iconBg: 'var(--ds-coral-gradient)' },
+  { label: '商品总数', value: 0, color: 'var(--ds-text, #1a1a2e)', icon: '📦', iconBg: 'var(--ds-coral-gradient)' },
+  { label: '订单总数', value: 0, color: 'var(--ds-text, #1a1a2e)', icon: '📋', iconBg: 'var(--ds-coral-gradient)' },
   { label: '销售额', value: '¥0', color: CORAL, icon: '💰', iconBg: 'var(--ds-coral-gradient)' },
-  { label: '待支付', value: 0, color: '#2d3436', icon: '⏳', iconBg: '#f2f4f4' }
+  { label: '待支付', value: 0, color: 'var(--ds-text, #1a1a2e)', icon: '⏳', iconBg: '#f2f4f4' }
 ])
 
 const trendDays = ref(7)

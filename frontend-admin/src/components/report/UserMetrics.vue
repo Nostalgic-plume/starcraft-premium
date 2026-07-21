@@ -67,7 +67,7 @@ defineProps({
 </script>
 
 <style scoped>
-.card-title { font-size: 15px; font-weight: 600; }
+.card-title { font-size: 14px; font-weight: 600; color: var(--ds-text, #1a1a2e); }
 .metric-card { text-align: center; padding: 8px 0; }
 .metric-label { font-size: 13px; color: #909399; margin-bottom: 6px; }
 .metric-value { font-size: 28px; font-weight: 700; }

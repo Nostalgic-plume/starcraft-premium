@@ -67,6 +67,6 @@ const barOption = computed(() => {
 </script>
 
 <style scoped>
-.card-title { font-size: 15px; font-weight: 600; }
+.card-title { font-size: 14px; font-weight: 600; color: var(--ds-text, #1a1a2e); }
 .chart-box { width: 100%; height: 300px; }
 </style>

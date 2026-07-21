@@ -93,7 +93,7 @@ const pieOption = computed(() => {
 </script>
 
 <style scoped>
-.card-title { font-size: 15px; font-weight: 600; }
+.card-title { font-size: 14px; font-weight: 600; color: var(--ds-text, #1a1a2e); }
 .gmv-main { text-align: center; }
 .gmv-big { font-size: 32px; font-weight: 700; color: #f56c6c; margin-bottom: 16px; }
 .gmv-item { display: flex; flex-direction: column; align-items: center; padding: 8px; background: #fafafa; border-radius: 8px; margin-bottom: 8px; }

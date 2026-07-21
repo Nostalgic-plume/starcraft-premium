@@ -1,6 +1,6 @@
 <template>
   <div class="page-container">
-    <div class="card">
+    <div class="card-elevated">
       <!-- 搜索筛选栏 -->
       <div class="filter-bar mb-16">
         <el-input v-model="keyword" placeholder="订单号/收货人/电话" clearable style="width: 220px" @keyup.enter="handleSearch" />
@@ -39,7 +39,7 @@
           </el-table-column>
           <el-table-column label="实付金额" width="110">
             <template #default="{ row }">
-              <span style="font-weight: 600; color: #f56c6c">¥{{ (row.actualAmount || 0).toFixed(2) }}</span>
+              <span style="font-weight: 600; color: var(--ds-coral, #e94560)">¥{{ (row.actualAmount || 0).toFixed(2) }}</span>
             </template>
           </el-table-column>
           <el-table-column label="状态" width="100" align="center">
@@ -93,7 +93,7 @@
             <el-tag :type="statusTypeMap[detailData.status] || 'info'" size="small">{{ statusMap[detailData.status] || '未知' }}</el-tag>
           </div>
           <div class="detail-item"><span class="detail-label">总金额</span><span>¥{{ (detailData.totalAmount || 0).toFixed(2) }}</span></div>
-          <div class="detail-item"><span class="detail-label">实付金额</span><span style="color:#f56c6c">¥{{ (detailData.actualAmount || 0).toFixed(2) }}</span></div>
+          <div class="detail-item"><span class="detail-label">实付金额</span><span style="color: var(--ds-coral, #e94560)">¥{{ (detailData.actualAmount || 0).toFixed(2) }}</span></div>
           <div class="detail-item"><span class="detail-label">创建时间</span><span>{{ detailData.createTime }}</span></div>
         </div>
 
@@ -117,14 +117,14 @@
                 />
                 <div style="flex: 1">
                   <div style="font-size: 14px">{{ item.productName }}</div>
-                  <div v-if="item.skuName" style="font-size: 12px; color: #999; margin-top: 2px">
+                  <div v-if="item.skuName" style="font-size: 12px; color: var(--ds-text-muted, #999); margin-top: 2px">
                     规格: {{ item.skuName }}
                   </div>
                 </div>
               </div>
               <div style="text-align: right; white-space: nowrap; margin-left: 12px">
                 <div>¥{{ (item.price || 0).toFixed(2) }}</div>
-                <div style="font-size: 12px; color: #999">x{{ item.quantity || 0 }}</div>
+                <div style="font-size: 12px; color: var(--ds-text-muted, #999)">x{{ item.quantity || 0 }}</div>
                 <div style="font-size: 12px; font-weight: 600">¥{{ (item.subtotal || 0).toFixed(2) }}</div>
               </div>
             </div>
@@ -241,7 +241,7 @@ onMounted(loadOrders)
   display: flex;
   flex-direction: column;
 }
-.page-container > .card {
+.page-container > .card-elevated {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -269,14 +269,14 @@ onMounted(loadOrders)
 .detail-section {
   margin-bottom: 20px;
   padding-bottom: 16px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--ds-border-light, #f0f0f0);
 }
 .detail-section:last-child { border-bottom: none; }
 .detail-title {
   font-size: 15px;
   font-weight: 600;
   margin-bottom: 12px;
-  color: #333;
+  color: var(--ds-navy, #1a1a2e);
 }
 .detail-item {
   display: flex;
@@ -286,7 +286,7 @@ onMounted(loadOrders)
   font-size: 14px;
 }
 .detail-label {
-  color: #999;
+  color: var(--ds-text-muted, #999);
   flex-shrink: 0;
   margin-right: 16px;
 }
@@ -295,7 +295,19 @@ onMounted(loadOrders)
   justify-content: space-between;
   align-items: center;
   padding: 10px 0;
-  border-bottom: 1px solid #f5f5f5;
+  border-bottom: 1px solid var(--ds-border-light, #f0eee9);
 }
 .order-item:last-child { border-bottom: none; }
+
+/* ====== Table :deep overrides ====== */
+.table-wrap :deep(.el-table) {
+  --el-table-header-bg-color: var(--ds-bg);
+  --el-table-row-hover-bg-color: var(--ds-bg);
+}
+
+/* ====== Drawer title ====== */
+:deep(.el-drawer__header) {
+  color: var(--ds-navy, #1a1a2e);
+  font-weight: 600;
+}
 </style>

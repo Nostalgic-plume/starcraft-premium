@@ -118,6 +118,13 @@
             <version>${langchain4j.version}</version>
         </dependency>
 
+        <!-- .env 文件自动加载 -->
+        <dependency>
+            <groupId>me.paulschwarz</groupId>
+            <artifactId>spring-dotenv</artifactId>
+            <version>4.0.0</version>
+        </dependency>
+
         <!-- Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

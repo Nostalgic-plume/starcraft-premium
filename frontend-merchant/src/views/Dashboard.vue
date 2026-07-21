@@ -21,7 +21,7 @@
     <el-row :gutter="16">
       <!-- 销售额趋势 -->
       <el-col :xs="24" :lg="14" class="mb-16">
-        <div class="card">
+        <div class="card-elevated">
           <div class="chart-header">
             <h3 class="chart-title">销售额趋势</h3>
             <el-radio-group v-model="trendDays" size="small">
@@ -38,7 +38,7 @@
 
       <!-- 订单分布 -->
       <el-col :xs="24" :lg="10" class="mb-16">
-        <div class="card">
+        <div class="card-elevated">
           <div class="chart-header">
             <h3 class="chart-title">订单分布</h3>
           </div>
@@ -53,7 +53,7 @@
     <el-row :gutter="16">
       <!-- 商品销量排行 -->
       <el-col :xs="24" :lg="12" class="mb-16">
-        <div class="card">
+        <div class="card-elevated">
           <div class="chart-header">
             <h3 class="chart-title">商品销量排行 TOP5</h3>
           </div>
@@ -66,7 +66,7 @@
 
       <!-- 每日订单数 -->
       <el-col :xs="24" :lg="12" class="mb-16">
-        <div class="card">
+        <div class="card-elevated">
           <div class="chart-header">
             <h3 class="chart-title">每日订单数</h3>
           </div>

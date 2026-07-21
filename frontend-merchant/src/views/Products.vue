@@ -8,34 +8,36 @@
     </div>
 
     <!-- 搜索栏 -->
-    <div class="mb-16" style="display: flex; gap: 12px; flex-wrap: wrap">
-      <el-input v-model="keyword" placeholder="搜索商品名称" clearable style="width: 200px" @keyup.enter="handleSearch" />
-      <el-select v-model="selectedCategoryId" placeholder="商品分类" clearable style="width: 140px" @change="handleSearch">
-        <el-option v-for="c in subCategories" :key="c.id" :label="c.name" :value="c.id" />
-      </el-select>
-      <el-button type="primary" @click="handleSearch">搜索</el-button>
+    <div class="card-elevated mb-16">
+      <div style="display: flex; gap: 12px; flex-wrap: wrap">
+        <el-input v-model="keyword" placeholder="搜索商品名称" clearable style="width: 200px" @keyup.enter="handleSearch" />
+        <el-select v-model="selectedCategoryId" placeholder="商品分类" clearable style="width: 140px" @change="handleSearch">
+          <el-option v-for="c in subCategories" :key="c.id" :label="c.name" :value="c.id" />
+        </el-select>
+        <el-button type="primary" @click="handleSearch">搜索</el-button>
+      </div>
     </div>
 
     <!-- 批量操作栏 -->
     <div class="batch-bar mb-16" v-if="selectedIds.length > 0">
-      <span style="color: #666; margin-right: 12px">已选 {{ selectedIds.length }} 项</span>
+      <span style="color: var(--ds-text-muted, #999); margin-right: 12px">已选 {{ selectedIds.length }} 项</span>
       <el-button size="small" type="success" plain @click="batchStatus(1)">批量上架</el-button>
       <el-button size="small" type="warning" plain @click="batchStatus(2)">批量下架</el-button>
       <el-button size="small" text @click="clearSelection">取消选择</el-button>
     </div>
 
     <!-- 表格 -->
-    <el-card class="card">
+    <div class="card-elevated">
       <el-table :data="list" v-loading="loading" stripe @selection-change="onSelectionChange" style="width: 100%">
         <el-table-column type="selection" width="50" />
         <el-table-column label="商品" min-width="240">
           <template #default="{ row }">
             <div style="display: flex; align-items: center; gap: 12px">
               <el-image v-if="row.mainImage" :src="row.mainImage" style="width: 60px; height: 60px; border-radius: 6px" fit="cover" />
-              <div v-else style="width:60px;height:60px;background:#f5f5f5;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#ccc;font-size:12px">暂无</div>
+              <div v-else style="width:60px;height:60px;background:var(--ds-bg, #f5f3ef);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--ds-text-muted, #999);font-size:12px">暂无</div>
               <div>
                 <div style="font-weight: 500; margin-bottom: 4px">{{ row.name }}</div>
-                <div style="color: #999; font-size: 12px">{{ row.brand || '-' }}</div>
+                <div style="color: var(--ds-text-muted, #999); font-size: 12px">{{ row.brand || '-' }}</div>
               </div>
             </div>
           </template>
@@ -45,7 +47,7 @@
         </el-table-column>
         <el-table-column label="价格区间" width="140">
           <template #default="{ row }">
-            <span style="color: #f56c6c; font-weight: 500">¥{{ row.minPrice || 0 }} ~ ¥{{ row.maxPrice || 0 }}</span>
+            <span style="color: var(--ds-coral, #e94560); font-weight: 500">¥{{ row.minPrice || 0 }} ~ ¥{{ row.maxPrice || 0 }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="totalStock" label="库存" width="80" align="center" />
@@ -77,7 +79,7 @@
           @current-change="load"
         />
       </div>
-    </el-card>
+    </div>
 
     <!-- 新增/编辑对话框 -->
     <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑商品' : '新增商品'" width="640px" :close-on-click-modal="false">
@@ -308,7 +310,18 @@ onMounted(() => {
   display: flex;
   align-items: center;
   padding: 10px 16px;
-  background: #ecf5ff;
+  background: var(--ds-bg, #f5f3ef);
   border-radius: 6px;
+}
+
+/* Table header & row hover */
+:deep(.el-table) {
+  --el-table-header-bg-color: var(--ds-bg, #f5f3ef);
+  --el-table-row-hover-bg-color: var(--ds-bg, #f5f3ef);
+}
+
+/* Dialog title */
+:deep(.el-dialog__title) {
+  color: var(--ds-navy, #1a1a2e);
 }
 </style>

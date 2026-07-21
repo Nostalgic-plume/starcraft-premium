@@ -3,7 +3,7 @@
     <h2 class="mb-16">订单管理</h2>
 
     <!-- 搜索栏 -->
-    <el-card class="card mb-16">
+    <div class="card-elevated mb-16">
       <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap">
         <el-select v-model="activeStatus" placeholder="订单状态" clearable style="width: 140px" @change="handleSearch">
           <el-option label="全部" value="" />
@@ -15,10 +15,10 @@
         </el-select>
         <el-button type="primary" @click="load">查询</el-button>
       </div>
-    </el-card>
+    </div>
 
     <!-- 订单表格 -->
-    <el-card class="card">
+    <div class="card-elevated">
       <el-table :data="list" v-loading="loading" stripe @row-click="showDetail" style="width: 100%; cursor: pointer">
         <el-table-column label="订单号" min-width="200">
           <template #default="{ row }">
@@ -27,7 +27,7 @@
         </el-table-column>
         <el-table-column label="总金额" width="130">
           <template #default="{ row }">
-            <span style="color: #f56c6c; font-weight: 600">¥{{ (row.totalAmount || 0).toFixed(2) }}</span>
+            <span style="color: var(--ds-coral, #e94560); font-weight: 600">¥{{ (row.totalAmount || 0).toFixed(2) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="100">
@@ -49,7 +49,7 @@
             >
               发货
             </el-button>
-            <span v-else style="color: #999; font-size: 13px">--</span>
+            <span v-else style="color: var(--ds-text-muted, #999); font-size: 13px">--</span>
           </template>
         </el-table-column>
       </el-table>
@@ -63,7 +63,7 @@
           @current-change="load"
         />
       </div>
-    </el-card>
+    </div>
 
     <!-- 订单详情弹窗 -->
     <el-dialog v-model="detailVisible" title="订单详情" width="700px" top="8vh">
@@ -71,7 +71,7 @@
         <el-descriptions :column="2" border size="small">
           <el-descriptions-item label="订单号" span="2">{{ detail.orderNo }}</el-descriptions-item>
           <el-descriptions-item label="总金额">
-            <span style="color: #f56c6c; font-weight: 600">¥{{ (detail.totalAmount || 0).toFixed(2) }}</span>
+            <span style="color: var(--ds-coral, #e94560); font-weight: 600">¥{{ (detail.totalAmount || 0).toFixed(2) }}</span>
           </el-descriptions-item>
           <el-descriptions-item label="订单状态">
             <el-tag :type="statusTypeMap[detail.status] || 'info'" effect="dark" size="small">
@@ -91,7 +91,7 @@
             <template #default="{ row }">
               <div style="display: flex; align-items: center; gap: 10px">
                 <el-image v-if="row.productImage" :src="row.productImage" style="width: 50px; height: 50px; border-radius: 4px" fit="cover" />
-                <div v-else style="width:50px;height:50px;background:#f5f5f5;border-radius:4px;display:flex;align-items:center;justify-content:center;color:#ccc;font-size:12px">暂无</div>
+                <div v-else style="width:50px;height:50px;background:var(--ds-bg, #f5f3ef);border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--ds-text-muted, #999);font-size:12px">暂无</div>
                 <span>{{ row.productName }}</span>
               </div>
             </template>
@@ -105,12 +105,12 @@
           <el-table-column prop="quantity" label="数量" width="70" />
           <el-table-column label="小计" width="110">
             <template #default="{ row }">
-              <span style="color: #f56c6c">¥{{ (row.subtotal || 0).toFixed(2) }}</span>
+              <span style="color: var(--ds-coral, #e94560)">¥{{ (row.subtotal || 0).toFixed(2) }}</span>
             </template>
           </el-table-column>
         </el-table>
       </template>
-      <div v-else class="text-center" style="padding: 60px 0; color: #999">加载中...</div>
+      <div v-else class="text-center" style="padding: 60px 0; color: var(--ds-text-muted, #999)">加载中...</div>
     </el-dialog>
 
     <!-- 发货弹窗 -->
@@ -224,6 +224,14 @@ onMounted(load)
 </script>
 
 <style scoped>
-:deep(.el-tabs__item) { font-size: 14px; }
-:deep(.el-tabs__header) { margin-bottom: 0; }
+/* Table header & row hover */
+:deep(.el-table) {
+  --el-table-header-bg-color: var(--ds-bg, #f5f3ef);
+  --el-table-row-hover-bg-color: var(--ds-bg, #f5f3ef);
+}
+
+/* Dialog title */
+:deep(.el-dialog__title) {
+  color: var(--ds-navy, #1a1a2e);
+}
 </style>

@@ -1,5 +1,0 @@
-type=command
-command=hive -f dws_etl.hql -hivevar dt=${dt}
-dependencies=03_dwd_etl
-retries=1
-retry.backoff=120000

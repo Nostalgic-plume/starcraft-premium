@@ -338,10 +338,8 @@ public class OrderServiceImpl implements OrderService {
     // ==================== 商家端 ====================
 
     @Override
-    public PageResult<OrderVO> merchantPageOrders(int page, int pageSize, Integer status, Long shopId) {
-        if (shopId == null) {
-            throw new BusinessException("商家ID缺失");
-        }
+    public PageResult<OrderVO> merchantPageOrders(int page, int pageSize, Integer status) {
+        Long shopId = StpUtil.getLoginIdAsLong();
         Page<OrderDO> mpPage = new Page<>(page, pageSize);
         LambdaQueryWrapper<OrderDO> wrapper = new LambdaQueryWrapper<OrderDO>()
                 .eq(OrderDO::getShopId, shopId)
@@ -355,10 +353,8 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    public OrderVO merchantGetDetail(Long orderId, Long shopId) {
-        if (shopId == null) {
-            throw new BusinessException("商家ID缺失");
-        }
+    public OrderVO merchantGetDetail(Long orderId) {
+        Long shopId = StpUtil.getLoginIdAsLong();
         OrderDO order = orderMapper.selectById(orderId);
         if (order == null) {
             throw new BusinessException("订单不存在");
@@ -371,10 +367,8 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void merchantDeliver(Long orderId, Long shopId, String logisticsNo) {
-        if (shopId == null) {
-            throw new BusinessException("商家ID缺失");
-        }
+    public void merchantDeliver(Long orderId, String logisticsNo) {
+        Long shopId = StpUtil.getLoginIdAsLong();
         OrderDO order = orderMapper.selectById(orderId);
         if (order == null) {
             throw new BusinessException("订单不存在");

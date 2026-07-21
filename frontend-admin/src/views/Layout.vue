@@ -21,6 +21,9 @@
       <el-header class="header">
         <div></div>
         <div class="flex-center gap-8">
+          <el-avatar :size="28" :src="adminStore.userInfo?.avatar" style="background: var(--ds-coral, #e94560); flex-shrink: 0;">
+            {{ (adminStore.userInfo?.nickname || adminStore.userInfo?.username || 'A')[0] }}
+          </el-avatar>
           <span class="user-name">{{ adminStore.userInfo?.nickname || adminStore.userInfo?.username }}</span>
           <el-button text type="danger" @click="handleLogout">退出</el-button>
         </div>
@@ -88,7 +91,7 @@ function handleLogout() {
   height: 32px;
   background: var(--ds-coral, #e94560);
   border-radius: var(--ds-radius-sm, 8px);
-  color: #fff;
+  color: var(--ds-text-inverse, #fff);
   font-size: 16px;
   font-weight: 800;
   font-family: 'Outfit', sans-serif;

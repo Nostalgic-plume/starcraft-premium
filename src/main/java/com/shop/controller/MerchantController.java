@@ -65,14 +65,14 @@ public class MerchantController {
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int pageSize,
             @RequestParam(required = false) Integer status) {
-        return Result.success(orderService.merchantPageOrders(page, pageSize, status, shopService.getCurrentShopId()));
+        return Result.success(orderService.merchantPageOrders(page, pageSize, status));
     }
 
     @SaCheckLogin
     @GetMapping("/order/detail/{orderId}")
     @Operation(summary = "商家订单详情")
     public Result<OrderVO> orderDetail(@PathVariable Long orderId) {
-        return Result.success(orderService.merchantGetDetail(orderId, shopService.getCurrentShopId()));
+        return Result.success(orderService.merchantGetDetail(orderId));
     }
 
     @SaCheckLogin
@@ -81,7 +81,7 @@ public class MerchantController {
     public Result<Void> deliver(@RequestBody Map<String, Object> body) {
         Long orderId = Long.valueOf(body.get("orderId").toString());
         String logisticsNo = (String) body.getOrDefault("logisticsNo", "");
-        orderService.merchantDeliver(orderId, shopService.getCurrentShopId(), logisticsNo);
+        orderService.merchantDeliver(orderId, logisticsNo);
         return Result.success("发货成功");
     }
 
@@ -98,8 +98,7 @@ public class MerchantController {
         query.setPage(page);
         query.setPageSize(pageSize);
         query.setKeyword(keyword);
-        query.setShopId(shopService.getCurrentShopId());
-        return Result.success(productService.page(query));
+        return Result.success(productService.merchantPage(query));
     }
 
     @SaCheckPermission(PermissionConstants.PRODUCT_ADD)

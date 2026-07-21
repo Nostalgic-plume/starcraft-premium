@@ -55,25 +55,23 @@ public interface OrderService {
     // ==================== 商家端 ====================
 
     /**
-     * 商家订单分页（强制 shop_id 过滤）
+     * 商家订单分页（强制 shop_id 过滤，shop_id 从 StpUtil 自动获取）
      *
      * @param page     页码
      * @param pageSize 每页条数
      * @param status   订单状态
-     * @param shopId   商家ID（从 Sa-Token 注入，非前端传参）
      * @return 分页结果
      */
-    PageResult<OrderVO> merchantPageOrders(int page, int pageSize, Integer status, Long shopId);
+    PageResult<OrderVO> merchantPageOrders(int page, int pageSize, Integer status);
 
-    /** 商家端订单详情（shop_id 归属校验） */
-    OrderVO merchantGetDetail(Long orderId, Long shopId);
+    /** 商家端订单详情（shop_id 归属校验，shop_id 从 StpUtil 自动获取） */
+    OrderVO merchantGetDetail(Long orderId);
 
     /**
-     * 商家发货
+     * 商家发货（shop_id 从 StpUtil 自动获取）
      *
      * @param orderId    订单ID
-     * @param shopId     商家ID（Sa-Token 注入）
      * @param logisticsNo 物流单号
      */
-    void merchantDeliver(Long orderId, Long shopId, String logisticsNo);
+    void merchantDeliver(Long orderId, String logisticsNo);
 }

@@ -3,6 +3,7 @@ package com.shop.config;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.shop.constant.OrderConstants;
+import com.shop.constant.ProductConstants;
 import com.shop.mapper.OrderItemMapper;
 import com.shop.mapper.OrderMapper;
 import com.shop.mapper.SkuMapper;
@@ -10,6 +11,7 @@ import com.shop.model.entity.OrderDO;
 import com.shop.model.entity.OrderItemDO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +33,7 @@ public class ScheduledTasks {
     private final OrderMapper orderMapper;
     private final OrderItemMapper orderItemMapper;
     private final SkuMapper skuMapper;
+    private final RedisTemplate<String, String> redisTemplate;
 
     /**
      * 每 5 分钟执行一次，自动取消超时未支付订单（下单超过 30 分钟未支付）
@@ -63,11 +66,12 @@ public class ScheduledTasks {
                     continue;
                 }
 
-                // ② 回滚库存
+                // ② 回滚库存 + 淘汰商品缓存
                 List<OrderItemDO> items = orderItemMapper.selectList(
                         new LambdaQueryWrapper<OrderItemDO>().eq(OrderItemDO::getOrderId, order.getId()));
                 for (OrderItemDO item : items) {
                     skuMapper.restoreStock(item.getSkuId(), item.getQuantity());
+                    redisTemplate.delete(ProductConstants.CACHE_PRODUCT + item.getProductId());
                 }
                 cancelled++;
 

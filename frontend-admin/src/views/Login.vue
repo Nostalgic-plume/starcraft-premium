@@ -83,11 +83,11 @@ async function handleLogin() {
   justify-content: center;
   width: 36px;
   height: 36px;
-  background: var(--ds-navy, #1a1a2e);
   border-radius: var(--ds-radius-sm, 8px);
   color: var(--ds-text-inverse, #fff);
   font-size: 18px;
   font-weight: 800;
+  font-family: 'Outfit', sans-serif;
 }
 .brand-label {
   font-size: 22px;

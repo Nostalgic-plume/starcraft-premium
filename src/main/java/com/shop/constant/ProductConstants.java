@@ -6,13 +6,13 @@ package com.shop.constant;
  */
 public interface ProductConstants {
 
-    /* ==================== 商品状态 ==================== */
+    /* ==================== 商品状态（与 product.status 列注释一致） ==================== */
+    /** 待审核 */
+    int STATUS_PENDING   = 0;
     /** 上架 */
     int STATUS_ON_SHELF  = 1;
     /** 下架 */
     int STATUS_OFF_SHELF = 2;
-    /** 售罄 */
-    int STATUS_SOLD_OUT  = 3;
 
     /* ==================== 缓存 Key 前缀 ==================== */
     /** 商品详情缓存 */

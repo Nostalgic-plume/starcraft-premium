@@ -5,9 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.shop.mapper.CategoryMapper;
 import com.shop.mapper.ProductMapper;
 import com.shop.model.entity.CategoryDO;
+import com.shop.model.entity.ChatMessageDO;
 import com.shop.model.entity.ProductDO;
 import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
@@ -29,6 +29,7 @@ import java.util.concurrent.Executors;
 /**
  * 智能客服服务
  * 基于 RAG（检索增强生成）+ 流式 SSE 输出
+ * 对话记录持久化到 MySQL
  */
 @Slf4j
 @Service
@@ -37,6 +38,8 @@ public class ChatService {
 
     private final OpenAiStreamingChatModel streamingChatModel;
     private final RagSearchService ragSearchService;
+    private final ChatHistoryService chatHistoryService;
+    private final QueryRewriter queryRewriter;
     private final ObjectMapper objectMapper;
     private final CategoryMapper categoryMapper;
     private final ProductMapper productMapper;
@@ -79,16 +82,32 @@ public class ChatService {
      * 流式问答（SSE）
      *
      * @param conversationId 会话ID
+     * @param userId         用户ID
      * @param userMessage    用户消息
      * @param emitter        SSE 发射器
      */
-    public void ask(String conversationId, String userMessage, SseEmitter emitter) {
+    public void ask(String conversationId, Long userId, String userMessage, SseEmitter emitter) {
         executor.execute(() -> {
             try {
-                // 1. RAG 检索 TOP-3
-                List<RagHitVO> hits = ragSearchService.search(userMessage, 3, null, null, null);
+                // 1. 确保会话存在（MySQL持久化）
+                chatHistoryService.getOrCreateConversation(Long.valueOf(conversationId), userId);
 
-                // 2. RAG 无结果时，尝试按分类名回退查询数据库
+                // 2. 获取或创建会话记忆（提前获取，为 Query 改写提供对话上下文）
+                MessageWindowChatMemory chatMemory = chatMemoryMap.computeIfAbsent(
+                        conversationId,
+                        k -> MessageWindowChatMemory.builder()
+                                .maxMessages(MAX_TOKENS)
+                                .build()
+                );
+
+                // 3. Query 改写：利用 LLM 补全指代、优化搜索关键词
+                String searchQuery = queryRewriter.rewrite(userMessage, chatMemory.messages());
+                log.debug("Query 改写: '{}' → '{}'", userMessage, searchQuery);
+
+                // 4. 混合 RAG 检索 TOP-3（使用改写后的 Query）
+                List<RagHitVO> hits = ragSearchService.search(searchQuery, 3, null, null, null);
+
+                // 5. RAG 无结果时，尝试按分类名回退查询数据库（使用原始消息）
                 if (hits == null || hits.isEmpty()) {
                     List<RagHitVO> categoryHits = fallbackSearchByCategory(userMessage);
                     if (categoryHits != null && !categoryHits.isEmpty()) {
@@ -97,23 +116,23 @@ public class ChatService {
                     }
                 }
 
-                // 3. 构建商品上下文
+                // 6. 构建商品上下文
                 String productContext = buildProductContext(hits);
 
-                // 3. 获取或创建会话记忆
-                MessageWindowChatMemory chatMemory = chatMemoryMap.computeIfAbsent(
-                        conversationId,
-                        k -> MessageWindowChatMemory.builder()
-                                .maxMessages(MAX_TOKENS)
-                                .build()
-                );
+                // 7. 保存用户消息到 MySQL
+                ChatMessageDO userMsgDO = new ChatMessageDO();
+                userMsgDO.setConversationId(Long.valueOf(conversationId));
+                userMsgDO.setRole("user");
+                userMsgDO.setContent(userMessage);
+                userMsgDO.setRagContext(buildRagContextJson(hits));
+                chatHistoryService.saveMessage(userMsgDO);
 
-                // 4. 构建消息列表
+                // 8. 构建消息列表
                 String systemPrompt = String.format(SYSTEM_PROMPT_TEMPLATE, productContext);
                 chatMemory.add(new SystemMessage(systemPrompt));
                 chatMemory.add(new UserMessage(userMessage));
 
-                // 5. 流式调用 Ollama
+                // 8. 流式调用大模型
                 StringBuilder fullResponse = new StringBuilder();
                 streamingChatModel.generate(chatMemory.messages(), new dev.langchain4j.model.StreamingResponseHandler<AiMessage>() {
                     @Override
@@ -124,39 +143,39 @@ public class ChatService {
 
                     @Override
                     public void onComplete(Response<AiMessage> response) {
-                        // 防止 langchain4j-ollama 空 response 的 bug（切到 OpenAi 后一般不会发生，但保留防御）
+                        String reply = "";
                         if (response != null && response.content() != null) {
+                            reply = response.content().text();
                             chatMemory.add(response.content());
                         }
-                        sendEvent(emitter, "end", "");
-                        try {
-                            emitter.complete();
-                        } catch (Exception e) {
-                            log.warn("SSE complete 异常: {}", e.getMessage());
+                        // 保存 AI 回复到 MySQL
+                        ChatMessageDO aiMsgDO = new ChatMessageDO();
+                        aiMsgDO.setConversationId(Long.valueOf(conversationId));
+                        aiMsgDO.setRole("assistant");
+                        aiMsgDO.setContent(reply);
+                        chatHistoryService.saveMessage(aiMsgDO);
+
+                        // 首次对话时自动生成标题
+                        boolean isFirstMessage = chatHistoryService.listMessages(Long.valueOf(conversationId)).size() <= 2;
+                        if (isFirstMessage) {
+                            chatHistoryService.updateConversationTitle(Long.valueOf(conversationId));
                         }
+
+                        completeSse(emitter, reply);
                     }
 
                     @Override
                     public void onError(Throwable error) {
-                        log.error("Ollama 流式调用失败", error);
+                        log.error("大模型流式调用失败", error);
                         sendEvent(emitter, "error", "AI 回复生成失败，请稍后重试");
-                        sendEvent(emitter, "end", "");
-                        try {
-                            emitter.complete();
-                        } catch (Exception e) {
-                            log.warn("SSE complete 异常: {}", e.getMessage());
-                        }
+                        completeSse(emitter, "");
                     }
                 });
 
             } catch (Exception e) {
                 log.error("ChatService 处理异常", e);
                 sendEvent(emitter, "error", "服务异常，请稍后重试");
-                sendEvent(emitter, "end", "");
-                try {
-                    emitter.complete();
-                } catch (Exception ignored) {
-                }
+                completeSse(emitter, "");
             }
         });
     }
@@ -189,18 +208,37 @@ public class ChatService {
     }
 
     /**
+     * 构建RAG上下文的JSON字符串（命中商品ID、分数等）
+     */
+    private String buildRagContextJson(List<RagHitVO> hits) {
+        if (hits == null || hits.isEmpty()) return null;
+        try {
+            List<Map<String, Object>> ctx = new ArrayList<>();
+            for (RagHitVO hit : hits) {
+                ctx.add(Map.of(
+                        "productId", hit.getProductId(),
+                        "name", hit.getName(),
+                        "score", hit.getScore(),
+                        "price", hit.getMinPrice()
+                ));
+            }
+            return objectMapper.writeValueAsString(ctx);
+        } catch (Exception e) {
+            log.warn("构建RAG上下文JSON失败: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * RAG 无结果时，尝试按分类名匹配回退查询数据库
-     * 支持一级分类和二级分类名匹配
      */
     private List<RagHitVO> fallbackSearchByCategory(String userMessage) {
         try {
-            // 查所有分类（一级 + 二级）
             List<CategoryDO> allCategories = categoryMapper.selectList(
                     new LambdaQueryWrapper<CategoryDO>()
                             .eq(CategoryDO::getStatus, 0));
             if (allCategories == null || allCategories.isEmpty()) return null;
 
-            // 匹配分类名（优先精确包含，如「手机」「电脑」「衣服」）
             CategoryDO matched = null;
             for (CategoryDO cat : allCategories) {
                 if (userMessage.contains(cat.getName())) {
@@ -210,7 +248,6 @@ public class ChatService {
             }
             if (matched == null) return null;
 
-            // 确定一级分类ID：若匹配到二级分类，取其 parentId
             Long targetFirstCategoryId;
             if (matched.getParentId() != null && matched.getParentId() != 0) {
                 targetFirstCategoryId = matched.getParentId();
@@ -218,7 +255,6 @@ public class ChatService {
                 targetFirstCategoryId = matched.getId();
             }
 
-            // 查询该一级分类下的上架商品（含子分类商品）
             List<ProductDO> products = productMapper.selectList(
                     new LambdaQueryWrapper<ProductDO>()
                             .eq(ProductDO::getStatus, 1)
@@ -227,7 +263,6 @@ public class ChatService {
 
             if (products == null || products.isEmpty()) return null;
 
-            // 转为 RagHitVO
             List<RagHitVO> hits = new ArrayList<>();
             for (ProductDO p : products) {
                 hits.add(RagHitVO.builder()
@@ -254,6 +289,15 @@ public class ChatService {
                     .data(json));
         } catch (IOException | IllegalStateException e) {
             log.warn("SSE 发送失败（连接可能已关闭）: {}", e.getMessage());
+        }
+    }
+
+    /** 发送结束事件并完成 SSE 连接 */
+    private void completeSse(SseEmitter emitter, String reply) {
+        sendEvent(emitter, "end", reply);
+        try {
+            emitter.complete();
+        } catch (Exception ignored) {
         }
     }
 }

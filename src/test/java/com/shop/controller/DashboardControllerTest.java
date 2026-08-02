@@ -2,6 +2,7 @@ package com.shop.controller;
 
 import com.shop.common.Result;
 import com.shop.config.MockMyBatisConfig;
+import com.shop.config.SaTokenConfig;
 import org.springframework.context.annotation.Import;
 import com.shop.model.vo.DashboardAllVO;
 import com.shop.service.DashboardService;
@@ -31,6 +32,9 @@ class DashboardControllerTest {
 
     @MockBean
     private DashboardService dashboardService;
+
+    @MockBean
+    private SaTokenConfig saTokenConfig;
 
     @Test
     @DisplayName("获取数据看板全量数据")

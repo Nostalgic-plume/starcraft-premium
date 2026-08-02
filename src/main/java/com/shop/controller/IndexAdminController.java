@@ -28,21 +28,21 @@ public class IndexAdminController {
 
     @PostMapping("/rebuild")
     @SaCheckPermission("product:edit")
-    @Operation(summary = "触发全量重建索引")
+    @Operation(summary = "触发全量重建索引（Qdrant 向量 + MySQL FULLTEXT）")
     public Result<Map<String, Object>> rebuild() {
-        // 异步重建
+        // 异步强重建（不清除已有 Qdrant 数据，而是全量重写）
         new Thread(() -> {
-            productIndexer.rebuildAll();
+            productIndexer.forceRebuildAll();
         }, "rag-rebuild-thread").start();
 
         Map<String, Object> data = new HashMap<>();
-        data.put("message", "索引重建已触发，请稍后查看状态");
+        data.put("message", "全量索引重建已触发，请稍后查看状态");
         return Result.success(data);
     }
 
     @GetMapping("/status")
     @SaCheckPermission("product:edit")
-    @Operation(summary = "查看索引状态")
+    @Operation(summary = "查看索引状态（Qdrant + FULLTEXT）")
     public Result<Map<String, Object>> status() {
         Map<String, Object> data = new HashMap<>();
         data.put("indexedCount", productIndexer.getIndexedCount());
@@ -50,6 +50,8 @@ public class IndexAdminController {
                 ? LocalDateTime.ofInstant(Instant.ofEpochMilli(productIndexer.getLastRebuildTime()),
                         ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
                 : "未重建");
+        // 添加 FULLTEXT 索引健康检查
+        data.put("fulltextIndex", productIndexer.checkFulltextIndex());
         return Result.success(data);
     }
 }

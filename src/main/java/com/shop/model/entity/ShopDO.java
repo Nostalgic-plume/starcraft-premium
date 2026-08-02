@@ -8,7 +8,7 @@ import java.time.LocalDateTime;
 
 /**
  * 店铺实体
- * 独立于 user 表，商家用户关联到 shop（一个用户可以拥有多个店铺）
+ * 独立账号体系：商家通过 shop.username/password 直接登录，仅以 id（shop_id）作为身份标识
  * product.shop_id 和 orders.shop_id 均引用此表 id
  */
 @Data
@@ -19,9 +19,6 @@ public class ShopDO {
     @TableId(type = IdType.AUTO)
     @Schema(description = "店铺ID")
     private Long id;
-
-    @Schema(description = "所属用户ID（店主，历史遗留）")
-    private Long userId;
 
     @Schema(description = "商家登录用户名")
     private String username;
@@ -44,7 +41,7 @@ public class ShopDO {
     @Schema(description = "联系电话")
     private String contactPhone;
 
-    @Schema(description = "状态：1正常 0关闭")
+    @Schema(description = "状态：0正常 1停用")
     private Integer status;
 
     @TableField(fill = FieldFill.INSERT)

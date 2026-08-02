@@ -9,6 +9,7 @@ import com.shop.mapper.OrderMapper;
 import com.shop.mapper.SkuMapper;
 import com.shop.model.entity.OrderDO;
 import com.shop.model.entity.OrderItemDO;
+import com.shop.service.StockCacheService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -34,11 +35,16 @@ public class ScheduledTasks {
     private final OrderItemMapper orderItemMapper;
     private final SkuMapper skuMapper;
     private final RedisTemplate<String, String> redisTemplate;
+    private final StockCacheService stockCacheService;
 
     /**
-     * 每 5 分钟执行一次，自动取消超时未支付订单（下单超过 30 分钟未支付）
+     * 每 60 分钟执行一次（兜底），自动取消超时未支付订单。
+     * <p>
+     * 主取消机制已迁移到 RocketMQ 延迟消息（30 分钟），
+     * 此处作为 MQ 不可用时的安全兜底。
+     * </p>
      */
-    @Scheduled(fixedRate = 300_000) // 5 分钟
+    @Scheduled(fixedRate = 3_600_000) // 60 分钟
     @Transactional(rollbackFor = Exception.class)
     public void cancelTimeoutOrders() {
         LocalDateTime deadline = LocalDateTime.now().minusMinutes(OrderConstants.PAY_TIMEOUT_MINUTES);
@@ -71,6 +77,7 @@ public class ScheduledTasks {
                         new LambdaQueryWrapper<OrderItemDO>().eq(OrderItemDO::getOrderId, order.getId()));
                 for (OrderItemDO item : items) {
                     skuMapper.restoreStock(item.getSkuId(), item.getQuantity());
+                    stockCacheService.restoreStock(item.getSkuId(), item.getQuantity());
                     redisTemplate.delete(ProductConstants.CACHE_PRODUCT + item.getProductId());
                 }
                 cancelled++;

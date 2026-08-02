@@ -3,10 +3,6 @@ package com.shop.rag;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.store.embedding.qdrant.QdrantEmbeddingStore;
-import io.qdrant.client.QdrantClient;
-import io.qdrant.client.QdrantGrpcClient;
-import io.qdrant.client.grpc.Collections.Distance;
-import io.qdrant.client.grpc.Collections.VectorParams;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,31 +22,14 @@ import java.time.Duration;
 public class RagConfig {
 
     private final RagProperties ragProperties;
+    private final QdrantCollectionHelper qdrantCollectionHelper;
 
     /**
      * 启动时确保 Qdrant 集合已存在，不存在则创建
      */
     @PostConstruct
     public void initCollection() {
-        try (QdrantClient client = new QdrantClient(
-                QdrantGrpcClient.newBuilder(ragProperties.getHost(), ragProperties.getPort(), false).build())) {
-
-            String name = ragProperties.getCollectionName();
-            boolean exists = client.collectionExistsAsync(name).get();
-            if (exists) {
-                log.info("Qdrant 集合 '{}' 已存在，跳过创建", name);
-                return;
-            }
-            log.info("Qdrant 集合 '{}' 不存在，正在创建...", name);
-            client.createCollectionAsync(name,
-                    VectorParams.newBuilder()
-                            .setSize(ragProperties.getDimension())
-                            .setDistance(Distance.Cosine)
-                            .build()).get();
-            log.info("Qdrant 集合 '{}' 创建完成（维度: {}）", name, ragProperties.getDimension());
-        } catch (Exception e) {
-            log.warn("Qdrant 集合初始化跳过（已存在或无法连接）: {}", e.getMessage());
-        }
+        qdrantCollectionHelper.ensureCollection();
     }
 
     @Bean

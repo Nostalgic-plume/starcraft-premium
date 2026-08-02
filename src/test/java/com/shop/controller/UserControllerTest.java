@@ -2,6 +2,7 @@ package com.shop.controller;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.shop.config.MockMyBatisConfig;
+import com.shop.config.SaTokenConfig;
 import org.springframework.context.annotation.Import;
 import com.shop.common.PageResult;
 import com.shop.common.Result;
@@ -33,7 +34,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * UserController 单元测试
  * 覆盖注册、登录、信息获取、退出、角色查询、用户列表接口
- * 注意：@SaCheckLogin/@SaCheckPermission 在 @WebMvcTest 中不生效，方法正常执行
+ * 注意：SaTokenConfig 被 @MockBean 整体替换，SaInterceptor 不注册，注解鉴权在 @WebMvcTest 中不生效，方法正常执行
  */
 @WebMvcTest(UserController.class)
 @Import(MockMyBatisConfig.class)
@@ -48,6 +49,9 @@ class UserControllerTest {
 
     @MockBean
     private AdminService adminService;
+
+    @MockBean
+    private SaTokenConfig saTokenConfig;
 
     @Test
     @DisplayName("用户注册：成功注册")

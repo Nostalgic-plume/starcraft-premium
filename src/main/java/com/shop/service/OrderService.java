@@ -2,11 +2,14 @@ package com.shop.service;
 
 import com.shop.model.dto.OrderCreateDTO;
 import com.shop.model.vo.OrderVO;
+import com.shop.mq.OrderCreateMessage;
 import com.shop.common.PageResult;
+
+import java.util.Map;
 
 /**
  * 订单服务
- * 处理订单生命周期：防重令牌 → 创建 → 支付回调 → 取消 → 确认收货
+ * 处理订单生命周期：防重令牌 → 创建（异步削峰）→ 支付回调 → 取消 → 确认收货
  * 新增管理员/商家维度的订单查询与管理
  */
 public interface OrderService {
@@ -14,8 +17,32 @@ public interface OrderService {
     /** 获取下单防重令牌 */
     String getOrderToken();
 
-    /** 创建订单（含 shop_id 绑定、购物车 is_ordered 标记） */
-    Long createOrder(OrderCreateDTO dto);
+    /**
+     * 异步创建订单（生产者侧）
+     * <p>
+     * 参数校验通过后将消息发到 RocketMQ，立即返回 processingId 供前端轮询，
+     * 消费端异步完成 DB 写入（Redis 预扣 + MySQL 行锁 + 订单创建 + 快照 + 购物车标记）。
+     * </p>
+     *
+     * @return processingId（前端轮询订单状态的凭证）
+     */
+    String createOrder(OrderCreateDTO dto);
+
+    /**
+     * 异步落单处理（消费端，带 @Transactional）
+     * <p>
+     * 由 OrderCreateConsumer 调用，在事务内完成 Redis 预扣库存 + MySQL 行锁扣库存 +
+     * 订单创建 + 快照 + 购物车标记 + 淘汰缓存。
+     * </p>
+     */
+    Long processOrder(OrderCreateMessage msg);
+
+    /**
+     * 查询异步落单处理状态（前端轮询接口）
+     *
+     * @return 包含 status（PROCESSING/订单ID/FAILED:原因/EXPIRED）的 Map
+     */
+    Map<String, Object> getProcessingStatus(String processingId);
 
     /** 支付回调处理（幂等） */
     void handlePaymentCallback(String orderNo, Integer payType);

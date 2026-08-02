@@ -2,6 +2,7 @@ package com.shop.controller;
 
 import com.shop.common.PageResult;
 import com.shop.config.MockMyBatisConfig;
+import com.shop.config.SaTokenConfig;
 import org.springframework.context.annotation.Import;
 import com.shop.model.dto.AdminLoginDTO;
 import com.shop.model.entity.AdminDO;
@@ -30,7 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * AdminController 单元测试
  * 覆盖管理员登录、信息获取、用户管理（分页/状态变更）、订单管理接口
- * 注意：@SaCheckPermission 在 @WebMvcTest 中不生效，方法正常执行
+ * 注意：SaTokenConfig 被 @MockBean 整体替换，SaInterceptor 不注册，注解鉴权在 @WebMvcTest 中不生效，方法正常执行
  */
 @WebMvcTest(AdminController.class)
 @Import(MockMyBatisConfig.class)
@@ -45,6 +46,9 @@ class AdminControllerTest {
 
     @MockBean
     private OrderService orderService;
+
+    @MockBean
+    private SaTokenConfig saTokenConfig;
 
     @Test
     @DisplayName("管理员登录：返回 token 和管理员信息")

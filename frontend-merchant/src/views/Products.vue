@@ -56,7 +56,6 @@
             <el-tag v-if="row.status === 0" type="info" effect="plain" size="small">待审核</el-tag>
             <el-tag v-else-if="row.status === 1" type="success" effect="plain" size="small">上架</el-tag>
             <el-tag v-else-if="row.status === 2" type="warning" effect="plain" size="small">下架</el-tag>
-            <el-tag v-else-if="row.status === 3" type="danger" effect="plain" size="small">售罄</el-tag>
             <el-tag v-else type="info" effect="plain" size="small">未知</el-tag>
           </template>
         </el-table-column>

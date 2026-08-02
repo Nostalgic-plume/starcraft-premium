@@ -36,9 +36,16 @@ public class OrderController {
 
     @SaCheckLogin
     @PostMapping("/create")
-    @Operation(summary = "创建订单")
-    public Result<Long> createOrder(@Valid @RequestBody OrderCreateDTO dto) {
-        return Result.success("下单成功", orderService.createOrder(dto));
+    @Operation(summary = "创建订单（异步削峰，返回 processingId 供前端轮询）")
+    public Result<String> createOrder(@Valid @RequestBody OrderCreateDTO dto) {
+        return Result.success("下单请求已提交", orderService.createOrder(dto));
+    }
+
+    @SaCheckLogin
+    @GetMapping("/status/{processingId}")
+    @Operation(summary = "查询异步落单状态（轮询接口）")
+    public Result<Map<String, Object>> processingStatus(@PathVariable String processingId) {
+        return Result.success(orderService.getProcessingStatus(processingId));
     }
 
     @SaCheckLogin

@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 /**
  * 分类服务实现
@@ -25,31 +26,29 @@ public class CategoryServiceImpl implements CategoryService {
 
     @Override
     public List<CategoryDO> list() {
-        String cacheKey = ProductConstants.CACHE_CATEGORY + "all";
-        String cached = redisTemplate.opsForValue().get(cacheKey);
-        if (cached != null) {
-            return JSONUtil.toList(cached, CategoryDO.class);
-        }
-        List<CategoryDO> list = categoryMapper.selectList(
+        return cacheThrough("all", () -> categoryMapper.selectList(
                 new LambdaQueryWrapper<CategoryDO>()
                         .eq(CategoryDO::getStatus, 0)
-                        .orderByAsc(CategoryDO::getSort));
-        redisTemplate.opsForValue().set(cacheKey, JSONUtil.toJsonStr(list), 1, TimeUnit.HOURS);
-        return list;
+                        .orderByAsc(CategoryDO::getSort)));
     }
 
     @Override
     public List<CategoryDO> getChildren(Long parentId) {
-        String cacheKey = ProductConstants.CACHE_CATEGORY + "children:" + parentId;
+        return cacheThrough("children:" + parentId, () -> categoryMapper.selectList(
+                new LambdaQueryWrapper<CategoryDO>()
+                        .eq(CategoryDO::getParentId, parentId)
+                        .eq(CategoryDO::getStatus, 0)
+                        .orderByAsc(CategoryDO::getSort)));
+    }
+
+    /** 缓存穿透防护：查缓存 → 回源 DB → 写缓存 */
+    private List<CategoryDO> cacheThrough(String suffix, Supplier<List<CategoryDO>> query) {
+        String cacheKey = ProductConstants.CACHE_CATEGORY + suffix;
         String cached = redisTemplate.opsForValue().get(cacheKey);
         if (cached != null) {
             return JSONUtil.toList(cached, CategoryDO.class);
         }
-        List<CategoryDO> list = categoryMapper.selectList(
-                new LambdaQueryWrapper<CategoryDO>()
-                        .eq(CategoryDO::getParentId, parentId)
-                        .eq(CategoryDO::getStatus, 0)
-                        .orderByAsc(CategoryDO::getSort));
+        List<CategoryDO> list = query.get();
         redisTemplate.opsForValue().set(cacheKey, JSONUtil.toJsonStr(list), 1, TimeUnit.HOURS);
         return list;
     }

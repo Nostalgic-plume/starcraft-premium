@@ -1,8 +1,11 @@
 package com.shop.service.impl;
 
 import cn.dev33.satoken.stp.StpUtil;
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.shop.common.BusinessException;
 import com.shop.common.PageResult;
@@ -12,15 +15,19 @@ import com.shop.mapper.OrderItemMapper;
 import com.shop.mapper.OrderMapper;
 import com.shop.mapper.ProductMapper;
 import com.shop.mapper.SkuMapper;
+import com.shop.mq.OrderCreateMessage;
+import com.shop.mq.OrderProducer;
 import com.shop.model.dto.OrderCreateDTO;
 import com.shop.model.entity.*;
 import com.shop.model.vo.OrderVO;
+import com.shop.service.StockCacheService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -66,6 +73,12 @@ class OrderServiceImplTest {
     @Mock
     private ValueOperations<String, String> valueOperations;
 
+    @Mock
+    private OrderProducer orderProducer;
+
+    @Mock
+    private StockCacheService stockCacheService;
+
     @InjectMocks
     private OrderServiceImpl orderService;
 
@@ -81,6 +94,10 @@ class OrderServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        // 纯 Mockito 无 Spring 上下文：LambdaUpdateWrapper.set() 构造时立即解析列名，
+        // 需手动初始化 MyBatis-Plus TableInfo 缓存（幂等，重复调用直接返回已有缓存）
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), OrderDO.class);
+
         // ========== 订单实体 ==========
         pendingOrder = new OrderDO();
         pendingOrder.setId(1L);
@@ -186,7 +203,7 @@ class OrderServiceImplTest {
     class CreateOrderTest {
 
         @Test
-        @DisplayName("成功创建订单：完整流程")
+        @DisplayName("成功提交下单：异步发送消息并返回 processingId")
         void createOrder_ShouldSucceed() {
             try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
                 stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
@@ -194,32 +211,25 @@ class OrderServiceImplTest {
                 // Token 校验
                 when(redisTemplate.delete("order:token:1")).thenReturn(true);
 
-                // SKU 校验
+                // SKU / 商品校验
                 when(skuMapper.selectById(100L)).thenReturn(validSku);
                 when(productMapper.selectById(10L)).thenReturn(validProduct);
 
-                // 插入订单并设置 ID
-                doAnswer(inv -> { inv.<OrderDO>getArgument(0).setId(1L); return 0; })
-                        .when(orderMapper).insert(any(OrderDO.class));
-
-                // 扣库存
-                when(skuMapper.deductStock(100L, 2)).thenReturn(1);
-
-                // Redis 缓存 & 购物车标记
+                // 缓存 PROCESSING 状态 & 异步发送 MQ
                 when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-                when(cartMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(cartItem);
+                doNothing().when(orderProducer).sendOrderCreate(any(OrderCreateMessage.class));
 
-                Long orderId = orderService.createOrder(createDTO);
+                String processingId = orderService.createOrder(createDTO);
 
-                assertNotNull(orderId);
-                verify(orderMapper).insert(any(OrderDO.class));
-                verify(orderItemMapper).insert(any(OrderItemDO.class));
-                verify(skuMapper).deductStock(100L, 2);
-                verify(cartMapper).updateById(argThat(c -> c.getIsOrdered() == 1));
+                assertNotNull(processingId);
+                assertEquals(32, processingId.length());
+                // 异步落单：DB 写入不在 createOrder 内
+                verify(orderMapper, never()).insert(any(OrderDO.class));
+                verify(orderProducer).sendOrderCreate(any(OrderCreateMessage.class));
                 verify(valueOperations).set(
-                    startsWith("order:detail:"),
-                    anyString(),
-                    eq(30L),
+                    startsWith("order:process:"),
+                    eq("PROCESSING"),
+                    eq(5L),
                     eq(TimeUnit.MINUTES));
             }
         }
@@ -311,71 +321,6 @@ class OrderServiceImplTest {
             }
         }
 
-        @Test
-        @DisplayName("创建失败：扣库存行锁返回 0（并发超卖）")
-        void createOrder_ShouldThrow_WhenDeductStockFails() {
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
-                when(redisTemplate.delete("order:token:1")).thenReturn(true);
-                when(skuMapper.selectById(100L)).thenReturn(validSku);
-                when(productMapper.selectById(10L)).thenReturn(validProduct);
-                when(skuMapper.deductStock(100L, 2)).thenReturn(0); // 扣库存失败
-
-                BusinessException ex = assertThrows(BusinessException.class,
-                        () -> orderService.createOrder(createDTO));
-                assertTrue(ex.getMessage().contains("库存不足"));
-            }
-        }
-
-        @Test
-        @DisplayName("创建失败：多个商家的商品")
-        void createOrder_ShouldThrow_WhenMultiShop() {
-            // 两个不同商家的 SKU
-            OrderCreateDTO.OrderItemDTO itemDTO2 = new OrderCreateDTO.OrderItemDTO();
-            itemDTO2.setSkuId(200L);
-            itemDTO2.setQuantity(1);
-            createDTO.setItems(List.of(itemDTO, itemDTO2));
-
-            SkuDO sku2 = new SkuDO();
-            sku2.setId(200L);
-            sku2.setProductId(20L);
-            sku2.setName("另一家店的商品");
-            sku2.setStock(10);
-
-            ProductDO product2 = new ProductDO();
-            product2.setId(20L);
-            product2.setShopId(20L); // 不同商家
-            product2.setStatus(1);
-
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
-                when(redisTemplate.delete("order:token:1")).thenReturn(true);
-                when(skuMapper.selectById(100L)).thenReturn(validSku);
-                when(skuMapper.selectById(200L)).thenReturn(sku2);
-                when(productMapper.selectById(10L)).thenReturn(validProduct);
-                when(productMapper.selectById(20L)).thenReturn(product2);
-
-                BusinessException ex = assertThrows(BusinessException.class,
-                        () -> orderService.createOrder(createDTO));
-                assertEquals("订单中包含多个商家的商品，请分开下单", ex.getMessage());
-            }
-        }
-
-        @Test
-        @DisplayName("创建失败：商品商家信息缺失")
-        void createOrder_ShouldThrow_WhenShopIdMissing() {
-            validProduct.setShopId(null); // 无商家信息
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
-                when(redisTemplate.delete("order:token:1")).thenReturn(true);
-                when(skuMapper.selectById(100L)).thenReturn(validSku);
-                when(productMapper.selectById(10L)).thenReturn(validProduct);
-
-                BusinessException ex = assertThrows(BusinessException.class,
-                        () -> orderService.createOrder(createDTO));
-                assertEquals("商品所属商家信息缺失", ex.getMessage());
-            }
-        }
     }
 
     // ==================== 支付回调 ====================
@@ -385,37 +330,38 @@ class OrderServiceImplTest {
     class HandlePaymentCallbackTest {
 
         @Test
-        @DisplayName("支付成功：更新订单状态为已支付")
+        @DisplayName("支付成功：按订单号条件更新状态为已支付")
         void handlePaymentCallback_ShouldSucceed() {
-            when(orderMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(pendingOrder);
+            when(orderMapper.update(isNull(), any(LambdaUpdateWrapper.class))).thenReturn(1);
 
             orderService.handlePaymentCallback("20240101001", 1);
 
-            verify(orderMapper).updateById(argThat(order ->
-                    order.getStatus() == OrderConstants.STATUS_PAID
-                            && order.getPayType() == 1
-                            && order.getPayTime() != null));
+            verify(orderMapper).update(isNull(), argThat(wrapper -> {
+                String where = wrapper.getSqlSegment().toLowerCase();
+                String set = wrapper.getSqlSet().toLowerCase();
+                return where.contains("order_no") && set.contains("status");
+            }));
         }
 
         @Test
-        @DisplayName("支付回调：订单不存在时静默忽略")
+        @DisplayName("支付回调：无待支付订单时静默忽略")
         void handlePaymentCallback_ShouldSilentlyIgnore_WhenOrderNotFound() {
-            when(orderMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(null);
+            when(orderMapper.update(isNull(), any(LambdaUpdateWrapper.class))).thenReturn(0);
 
             // 不应抛异常
             orderService.handlePaymentCallback("non-existent", 1);
 
-            verify(orderMapper, never()).updateById(any());
+            verify(orderMapper).update(isNull(), any(LambdaUpdateWrapper.class));
         }
 
         @Test
         @DisplayName("支付回调：已处理过的订单幂等忽略")
         void handlePaymentCallback_ShouldIdempotent_WhenAlreadyPaid() {
-            when(orderMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(paidOrder);
+            when(orderMapper.update(isNull(), any(LambdaUpdateWrapper.class))).thenReturn(0);
 
             orderService.handlePaymentCallback("20240101002", 1);
 
-            verify(orderMapper, never()).updateById(any());
+            verify(orderMapper).update(isNull(), any(LambdaUpdateWrapper.class));
         }
     }
 
@@ -688,17 +634,13 @@ class OrderServiceImplTest {
                     .thenReturn(pageResult);
             when(orderItemMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(orderItem));
 
-            PageResult<OrderVO> result = orderService.merchantPageOrders(1, 10, null, 10L);
+            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
+                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(10L);
 
-            assertEquals(1, result.getList().size());
-        }
+                PageResult<OrderVO> result = orderService.merchantPageOrders(1, 10, null);
 
-        @Test
-        @DisplayName("商家查询订单列表：shopId 缺失")
-        void merchantPageOrders_ShouldThrow_WhenShopIdMissing() {
-            BusinessException ex = assertThrows(BusinessException.class,
-                    () -> orderService.merchantPageOrders(1, 10, null, null));
-            assertEquals("商家ID缺失", ex.getMessage());
+                assertEquals(1, result.getList().size());
+            }
         }
 
         @Test
@@ -707,17 +649,13 @@ class OrderServiceImplTest {
             when(orderMapper.selectById(1L)).thenReturn(pendingOrder);
             when(orderItemMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(orderItem));
 
-            OrderVO vo = orderService.merchantGetDetail(1L, 10L);
+            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
+                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(10L);
 
-            assertNotNull(vo);
-        }
+                OrderVO vo = orderService.merchantGetDetail(1L);
 
-        @Test
-        @DisplayName("商家查看订单详情：shopId 缺失")
-        void merchantGetDetail_ShouldThrow_WhenShopIdMissing() {
-            BusinessException ex = assertThrows(BusinessException.class,
-                    () -> orderService.merchantGetDetail(1L, null));
-            assertEquals("商家ID缺失", ex.getMessage());
+                assertNotNull(vo);
+            }
         }
 
         @Test
@@ -725,9 +663,13 @@ class OrderServiceImplTest {
         void merchantGetDetail_ShouldThrow_WhenNotOwnShop() {
             when(orderMapper.selectById(1L)).thenReturn(pendingOrder);
 
-            BusinessException ex = assertThrows(BusinessException.class,
-                    () -> orderService.merchantGetDetail(1L, 99L));
-            assertEquals("无权查看该订单（非本店订单）", ex.getMessage());
+            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
+                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(99L);
+
+                BusinessException ex = assertThrows(BusinessException.class,
+                        () -> orderService.merchantGetDetail(1L));
+                assertEquals("无权查看该订单（非本店订单）", ex.getMessage());
+            }
         }
 
         @Test
@@ -735,20 +677,16 @@ class OrderServiceImplTest {
         void merchantDeliver_ShouldSucceed() {
             when(orderMapper.selectById(2L)).thenReturn(paidOrder);
 
-            orderService.merchantDeliver(2L, 10L, "SF123456789");
+            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
+                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(10L);
 
-            verify(orderMapper).updateById(argThat(order ->
-                    order.getStatus() == OrderConstants.STATUS_DELIVERED
-                            && "SF123456789".equals(order.getLogisticsNo())
-                            && order.getDeliverTime() != null));
-        }
+                orderService.merchantDeliver(2L, "SF123456789");
 
-        @Test
-        @DisplayName("商家发货：shopId 缺失")
-        void merchantDeliver_ShouldThrow_WhenShopIdMissing() {
-            BusinessException ex = assertThrows(BusinessException.class,
-                    () -> orderService.merchantDeliver(2L, null, "SF123"));
-            assertEquals("商家ID缺失", ex.getMessage());
+                verify(orderMapper).updateById(argThat(order ->
+                        order.getStatus() == OrderConstants.STATUS_DELIVERED
+                                && "SF123456789".equals(order.getLogisticsNo())
+                                && order.getDeliverTime() != null));
+            }
         }
 
         @Test
@@ -756,9 +694,13 @@ class OrderServiceImplTest {
         void merchantDeliver_ShouldThrow_WhenNotOwnShop() {
             when(orderMapper.selectById(2L)).thenReturn(paidOrder);
 
-            BusinessException ex = assertThrows(BusinessException.class,
-                    () -> orderService.merchantDeliver(2L, 99L, "SF123"));
-            assertEquals("无权操作该订单（非本店订单）", ex.getMessage());
+            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
+                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(99L);
+
+                BusinessException ex = assertThrows(BusinessException.class,
+                        () -> orderService.merchantDeliver(2L, "SF123"));
+                assertEquals("无权操作该订单（非本店订单）", ex.getMessage());
+            }
         }
 
         @Test
@@ -766,9 +708,13 @@ class OrderServiceImplTest {
         void merchantDeliver_ShouldThrow_WhenNotPaid() {
             when(orderMapper.selectById(1L)).thenReturn(pendingOrder);
 
-            BusinessException ex = assertThrows(BusinessException.class,
-                    () -> orderService.merchantDeliver(1L, 10L, "SF123"));
-            assertEquals("当前订单状态不允许发货，仅已支付订单可发货", ex.getMessage());
+            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
+                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(10L);
+
+                BusinessException ex = assertThrows(BusinessException.class,
+                        () -> orderService.merchantDeliver(1L, "SF123"));
+                assertEquals("当前订单状态不允许发货，仅已支付订单可发货", ex.getMessage());
+            }
         }
 
         @Test
@@ -776,9 +722,13 @@ class OrderServiceImplTest {
         void merchantDeliver_ShouldThrow_WhenOrderNotFound() {
             when(orderMapper.selectById(99L)).thenReturn(null);
 
-            BusinessException ex = assertThrows(BusinessException.class,
-                    () -> orderService.merchantDeliver(99L, 10L, "SF123"));
-            assertEquals("订单不存在", ex.getMessage());
+            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
+                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(10L);
+
+                BusinessException ex = assertThrows(BusinessException.class,
+                        () -> orderService.merchantDeliver(99L, "SF123"));
+                assertEquals("订单不存在", ex.getMessage());
+            }
         }
     }
 }

@@ -49,12 +49,21 @@ server:
 
 sa-token:
   token-name: token
+  # 会话存储介质：memory=JVM 内存（默认，单机可用）；redis=Redis 存储（分布式会话共享，
+  # 多实例部署时登录态/强制下线跨实例生效；序列化走 sa-token-jackson，对象以 JSON 存 String 键）
+  dao-type: redis
   timeout: 2592000
   active-timeout: -1
   is-concurrent: true
   is-share: true
   token-style: uuid
   is-log: false
+
+# RocketMQ 配置（NameServer 地址由 .env 传入，默认本地 9876）
+rocketmq:
+  name-server: ${ROCKETMQ_NAMESRV:127.0.0.1:9876}
+  producer:
+    group: shop-producer-group
 
 rag:
   qdrant:

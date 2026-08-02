@@ -118,6 +118,45 @@
             <version>${langchain4j.version}</version>
         </dependency>
 
+        <!-- RocketMQ -->
+        <!--
+            版本说明：
+            1. rocketmq-spring-boot-starter 官方最新版仅到 2.3.0（无 3.x），Spring Boot 3 项目需手动注册
+               自动配置（见 src/main/resources/META-INF/spring/...AutoConfiguration.imports）。
+            2. starter 2.2.3 的传递依赖会把 rocketmq-client 解析为 5.0.0，而 5.x 客户端与 4.9.x broker
+               的消费协议不兼容（消费者能注册心跳、Rebalance 正常，但拉取不到消息，消息在 broker 积压）。
+            3. 故排除 5.x 传递依赖，显式锁定 rocketmq-client 4.9.7，与 Docker broker（4.9.7）完全匹配。
+        -->
+        <dependency>
+            <groupId>org.apache.rocketmq</groupId>
+            <artifactId>rocketmq-spring-boot-starter</artifactId>
+            <version>2.2.3</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.rocketmq</groupId>
+                    <artifactId>rocketmq-client</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.rocketmq</groupId>
+                    <artifactId>rocketmq-acl</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.rocketmq</groupId>
+            <artifactId>rocketmq-client</artifactId>
+            <version>4.9.7</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.rocketmq</groupId>
+            <artifactId>rocketmq-acl</artifactId>
+            <version>4.9.7</version>
+        </dependency>
+
         <!-- .env 文件自动加载 -->
         <dependency>
             <groupId>me.paulschwarz</groupId>

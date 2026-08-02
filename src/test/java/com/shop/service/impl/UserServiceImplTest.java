@@ -160,7 +160,8 @@ class UserServiceImplTest {
                 String token = userService.login(loginDTO);
 
                 assertEquals("sa-token-xxxxx", token);
-                stpUtil.verify(() -> StpUtil.login(1L));
+                // 与生产一致：login(1L, "user") 双参登录，指定设备类型便于封号时精准踢下线
+                stpUtil.verify(() -> StpUtil.login(1L, "user"));
             }
         }
 

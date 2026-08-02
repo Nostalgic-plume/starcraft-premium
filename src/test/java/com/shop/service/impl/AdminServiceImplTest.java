@@ -69,12 +69,11 @@ class AdminServiceImplTest {
         return admin;
     }
 
-    private UserDO createUser(Long id, String username, int status, Integer level) {
+    private UserDO createUser(Long id, String username, int status) {
         UserDO user = new UserDO();
         user.setId(id);
         user.setUsername(username != null ? username : "user" + id);
         user.setStatus(status);
-        user.setAdminLevel(level);
         return user;
     }
 
@@ -100,7 +99,7 @@ class AdminServiceImplTest {
             when(adminMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(admin);
 
             try (var stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(() -> StpUtil.login(1L)).thenReturn(null);
+                // 与生产一致：login(adminId, "admin") 双参登录（void 方法，mockStatic 下默认 no-op，无需 stub 返回值）
                 stpUtil.when(StpUtil::getTokenValue).thenReturn("mock-token-xxx");
 
                 // when
@@ -112,6 +111,8 @@ class AdminServiceImplTest {
                 assertEquals(1L, result.get("adminId"));
                 assertEquals("管理员1", result.get("nickname"));
                 verify(adminMapper, times(1)).selectOne(any(LambdaQueryWrapper.class));
+                // 验证登录使用双参（adminId, "admin"），与生产代码 StpUtil.login(adminId, "admin") 一致
+                stpUtil.verify(() -> StpUtil.login(1L, "admin"));
             }
         }
 
@@ -238,8 +239,8 @@ class AdminServiceImplTest {
             when(mockPage.getTotal()).thenReturn(2L);
             when(mockPage.getPages()).thenReturn(1L);
             when(mockPage.getRecords()).thenReturn(Arrays.asList(
-                    createUser(1L, "alice", 0, 0),
-                    createUser(2L, "bob", 1, 0)
+                    createUser(1L, "alice", 0),
+                    createUser(2L, "bob", 1)
             ));
 
             when(userMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(mockPage);
@@ -268,7 +269,7 @@ class AdminServiceImplTest {
             when(mockPage.getTotal()).thenReturn(1L);
             when(mockPage.getPages()).thenReturn(1L);
             when(mockPage.getRecords()).thenReturn(List.of(
-                    createUser(1L, "testUser", 0, 0)
+                    createUser(1L, "testUser", 0)
             ));
 
             when(userMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(mockPage);
@@ -295,7 +296,7 @@ class AdminServiceImplTest {
             when(mockPage.getTotal()).thenReturn(1L);
             when(mockPage.getPages()).thenReturn(1L);
             when(mockPage.getRecords()).thenReturn(List.of(
-                    createUser(3L, "disabledUser", AccountStatusEnum.DISABLED.getValue(), 0)
+                    createUser(3L, "disabledUser", AccountStatusEnum.DISABLED.getValue())
             ));
 
             when(userMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(mockPage);
@@ -320,13 +321,13 @@ class AdminServiceImplTest {
          */
         @Test
         void updateUserStatus_shouldUpdateAndLog_whenValid() {
-            // given
-            UserDO operator = createUser(1L, "operator", 0, AdminLevelEnum.SUPER.getValue());
-            UserDO target = createUser(2L, "target", 0, AdminLevelEnum.NORMAL.getValue());
+            // given - 超级管理员操作普通用户
+            AdminDO operator = createAdmin(1L, "admin", "pwd", 0, AdminLevelEnum.SUPER.getValue());
+            UserDO target = createUser(2L, "target", 0);
 
             try (var stpUtil = mockStatic(StpUtil.class)) {
                 stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
-                when(userMapper.selectById(1L)).thenReturn(operator);
+                when(adminMapper.selectById(1L)).thenReturn(operator);
                 when(userMapper.selectById(2L)).thenReturn(target);
 
                 // when
@@ -346,6 +347,9 @@ class AdminServiceImplTest {
                 assertEquals(0, logDO.getFromStatus());
                 assertEquals(AccountStatusEnum.DISABLED.getValue(), logDO.getToStatus());
                 assertEquals("违规发言", logDO.getReason());
+
+                // then - 状态变为非 0（停用），强制下线该用户已登录会话（device="user" 精准踢）
+                stpUtil.verify(() -> StpUtil.kickout(2L, "user"));
             }
         }
 
@@ -357,7 +361,7 @@ class AdminServiceImplTest {
             // given
             try (var stpUtil = mockStatic(StpUtil.class)) {
                 stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(999L);
-                when(userMapper.selectById(999L)).thenReturn(null);
+                when(adminMapper.selectById(999L)).thenReturn(null);
 
                 // when & then
                 BusinessException ex = assertThrows(BusinessException.class,
@@ -375,11 +379,11 @@ class AdminServiceImplTest {
         @Test
         void updateUserStatus_shouldThrow_whenTargetNotFound() {
             // given
-            UserDO operator = createUser(1L, "operator", 0, AdminLevelEnum.SUPER.getValue());
+            AdminDO operator = createAdmin(1L, "admin", "pwd", 0, AdminLevelEnum.SUPER.getValue());
 
             try (var stpUtil = mockStatic(StpUtil.class)) {
                 stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
-                when(userMapper.selectById(1L)).thenReturn(operator);
+                when(adminMapper.selectById(1L)).thenReturn(operator);
                 when(userMapper.selectById(2L)).thenReturn(null);
 
                 // when & then
@@ -393,18 +397,18 @@ class AdminServiceImplTest {
         }
 
         /**
-         * 场景：普通管理员尝试操作超级管理员，权限不足抛异常
-         * NORMAL(1) 不能操作 SUPER(2)
+         * 场景：操作人无管理员级别（adminLevel 为 NONE/0），权限不足抛异常
+         * user 表已不存管理员级别，目标用户恒为普通买家，此处校验操作人自身级别
          */
         @Test
         void updateUserStatus_shouldThrow_whenNoPermission() {
-            // given
-            UserDO operator = createUser(1L, "normalAdmin", 0, AdminLevelEnum.NORMAL.getValue());
-            UserDO target = createUser(2L, "superAdmin", 0, AdminLevelEnum.SUPER.getValue());
+            // given - 操作人 adminLevel 无效
+            AdminDO operator = createAdmin(1L, "noLevelAdmin", "pwd", 0, AdminLevelEnum.NONE.getValue());
+            UserDO target = createUser(2L, "user", 0);
 
             try (var stpUtil = mockStatic(StpUtil.class)) {
                 stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
-                when(userMapper.selectById(1L)).thenReturn(operator);
+                when(adminMapper.selectById(1L)).thenReturn(operator);
                 when(userMapper.selectById(2L)).thenReturn(target);
 
                 // when & then
@@ -418,17 +422,17 @@ class AdminServiceImplTest {
         }
 
         /**
-         * 场景：目标用户 adminLevel 为 null（普通注册用户），操作人级别够，应正常执行
+         * 场景：普通管理员（NORMAL）操作普通用户，应正常执行
          */
         @Test
-        void updateUserStatus_shouldUpdate_whenTargetLevelNull() {
-            // given - target adminLevel = null，视为 NONE(0)
-            UserDO operator = createUser(1L, "admin", 0, AdminLevelEnum.NORMAL.getValue());
-            UserDO target = createUser(2L, "normalUser", 0, null);
+        void updateUserStatus_shouldUpdate_whenNormalAdmin() {
+            // given - 操作人 NORMAL(1)，目标为普通用户(0)，允许操作
+            AdminDO operator = createAdmin(1L, "admin", "pwd", 0, AdminLevelEnum.NORMAL.getValue());
+            UserDO target = createUser(2L, "normalUser", 0);
 
             try (var stpUtil = mockStatic(StpUtil.class)) {
                 stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
-                when(userMapper.selectById(1L)).thenReturn(operator);
+                when(adminMapper.selectById(1L)).thenReturn(operator);
                 when(userMapper.selectById(2L)).thenReturn(target);
 
                 // when
@@ -437,6 +441,8 @@ class AdminServiceImplTest {
                 // then
                 verify(userMapper).updateById(any(UserDO.class));
                 verify(userStatusLogMapper).insert(any(UserStatusLogDO.class));
+                // then - 状态变为非 0（停用），强制下线该用户会话（device="user" 精准踢）
+                stpUtil.verify(() -> StpUtil.kickout(2L, "user"));
             }
         }
     }
@@ -452,15 +458,15 @@ class AdminServiceImplTest {
          */
         @Test
         void batchUpdateUserStatus_shouldUpdateAll_whenValid() {
-            // given
+            // given - 超级管理员批量操作普通用户
             List<Long> userIds = Arrays.asList(2L, 3L);
-            UserDO operator = createUser(1L, "superAdmin", 0, AdminLevelEnum.SUPER.getValue());
+            AdminDO operator = createAdmin(1L, "superAdmin", "pwd", 0, AdminLevelEnum.SUPER.getValue());
 
             try (var stpUtil = mockStatic(StpUtil.class)) {
                 stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
-                when(userMapper.selectById(1L)).thenReturn(operator);
-                when(userMapper.selectById(2L)).thenReturn(createUser(2L, "user2", 0, AdminLevelEnum.NORMAL.getValue()));
-                when(userMapper.selectById(3L)).thenReturn(createUser(3L, "user3", 0, AdminLevelEnum.NORMAL.getValue()));
+                when(adminMapper.selectById(1L)).thenReturn(operator);
+                when(userMapper.selectById(2L)).thenReturn(createUser(2L, "user2", 0));
+                when(userMapper.selectById(3L)).thenReturn(createUser(3L, "user3", 0));
 
                 // when
                 adminService.batchUpdateUserStatus(userIds, AccountStatusEnum.BANNED.getValue(), "批量封禁");
@@ -468,6 +474,9 @@ class AdminServiceImplTest {
                 // then - 每个用户都执行了状态更新和日志记录
                 verify(userMapper, times(2)).updateById(any(UserDO.class));
                 verify(userStatusLogMapper, times(2)).insert(any(UserStatusLogDO.class));
+                // then - 状态变为非 0（封禁），两个用户均强制下线（device="user" 精准踢）
+                stpUtil.verify(() -> StpUtil.kickout(2L, "user"));
+                stpUtil.verify(() -> StpUtil.kickout(3L, "user"));
             }
         }
 
@@ -476,14 +485,14 @@ class AdminServiceImplTest {
          */
         @Test
         void batchUpdateUserStatus_shouldThrow_whenMiddleTargetNotFound() {
-            // given
+            // given - 超级管理员批量操作，中间用户不存在
             List<Long> userIds = Arrays.asList(2L, 99L);
-            UserDO operator = createUser(1L, "superAdmin", 0, AdminLevelEnum.SUPER.getValue());
+            AdminDO operator = createAdmin(1L, "superAdmin", "pwd", 0, AdminLevelEnum.SUPER.getValue());
 
             try (var stpUtil = mockStatic(StpUtil.class)) {
                 stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
-                when(userMapper.selectById(1L)).thenReturn(operator);
-                when(userMapper.selectById(2L)).thenReturn(createUser(2L, "user2", 0, AdminLevelEnum.NORMAL.getValue()));
+                when(adminMapper.selectById(1L)).thenReturn(operator);
+                when(userMapper.selectById(2L)).thenReturn(createUser(2L, "user2", 0));
                 when(userMapper.selectById(99L)).thenReturn(null);
 
                 // when & then - 第二个目标不存在时抛出异常
@@ -491,9 +500,11 @@ class AdminServiceImplTest {
                         () -> adminService.batchUpdateUserStatus(userIds, AccountStatusEnum.DISABLED.getValue(), "批量"));
                 assertEquals("目标用户不存在", ex.getMessage());
 
-                // 第一个用户已更新，第二个中断
+                // 第一个用户已更新并强制下线，第二个用户不存在（抛异常前不触发踢下线）
                 verify(userMapper, times(1)).updateById(any(UserDO.class));
                 verify(userStatusLogMapper, times(1)).insert(any(UserStatusLogDO.class));
+                stpUtil.verify(() -> StpUtil.kickout(2L, "user"));
+                stpUtil.verify(() -> StpUtil.kickout(99L, "user"), never());
             }
         }
     }

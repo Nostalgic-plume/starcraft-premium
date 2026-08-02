@@ -102,12 +102,12 @@ public class AdminServiceImpl implements AdminService {
             throw new BusinessException("目标用户不存在");
         }
 
-        // 权限校验：操作人级别 vs 目标用户级别
-        int operatorLevel = operator.getAdminLevel() != null ? operator.getAdminLevel() : 0;
-        int targetLevel = target.getAdminLevel() != null ? target.getAdminLevel() : 0;
-        if (!AdminLevelEnum.canOperate(operatorLevel, targetLevel)) {
-            log.warn("权限不足: 操作人={}(level={}), 目标={}(level={})",
-                    operatorId, operatorLevel, targetUserId, targetLevel);
+        // 权限校验：操作人必须是有效管理员（admin 表 adminLevel：1=普通 2=超级）
+        // user 表不存管理员级别（管理员已独立到 admin 表），目标用户恒为普通买家，无需比较目标级别
+        Integer adminLevel = operator.getAdminLevel();
+        if (adminLevel == null || !AdminLevelEnum.canOperate(adminLevel, AdminLevelEnum.NONE.getValue())) {
+            log.warn("权限不足: 操作人={}(level={}), 目标={}",
+                    operatorId, adminLevel, targetUserId);
             throw new BusinessException("权限不足，无法操作该用户");
         }
 
@@ -125,6 +125,15 @@ public class AdminServiceImpl implements AdminService {
         logDO.setToStatus(newStatus);
         logDO.setReason(reason);
         userStatusLogMapper.insert(logDO);
+
+        // 强制下线：状态非 0（停用/注销中/封禁中）即禁止登录，踢掉已登录会话。
+        // 会话 key 为 {tokenName}:{loginType}:session:{loginId}，loginType 恒为 "login" 且不含 device，
+        // 同 id 的 user/admin/shop 共享同一 SaSession，故必须按 device 精准踢（普通用户登录 device="user"），
+        // 避免 `kickout(id, null)` 误伤同 id 的管理员/商家会话
+        if (newStatus != null && newStatus != 0) {
+            StpUtil.kickout(targetUserId, "user");
+            log.info("用户强制下线: targetUserId={}, newStatus={}", targetUserId, newStatus);
+        }
 
         log.info("用户状态变更: targetUserId={}, {}→{}, reason={}, operatorId={}",
                 targetUserId, AccountStatusEnum.labelOf(oldStatus),

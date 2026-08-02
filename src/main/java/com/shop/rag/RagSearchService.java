@@ -18,8 +18,12 @@ import java.time.Duration;
 import java.util.*;
 
 /**
- * RAG 语义检索服务
- * 用户查询 → Ollama 向量化 → Qdrant REST API 检索 → 元数据过滤 → 返回结果
+ * RAG 混合检索服务（Hybrid Search）
+ * <p>
+ * 双路并行检索 + RRF 合并：
+ * ┌─ DashScope embedding → Qdrant 向量检索 ─┐
+ * │                                           │→ RRF 合并 → Top-K
+ * └─ MySQL FULLTEXT 关键词检索 ─────────────┘
  * <p>
  * 注意：直接使用 Qdrant REST API（端口 6333）而非 gRPC（端口 6334），
  * 因为 langchain4j-qdrant 0.36.1 依赖的 qdrant-client 1.11.0 与 Qdrant 服务端 1.18.3
@@ -34,6 +38,7 @@ public class RagSearchService {
     private final OpenAiEmbeddingModel embeddingModel;
     private final RagProperties ragProperties;
     private final ObjectMapper objectMapper;
+    private final KeywordSearchService keywordSearchService;
 
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
@@ -43,14 +48,14 @@ public class RagSearchService {
     private static final int EXPECTED_DIMENSION = 1536;
 
     /**
-     * 语义搜索商品
+     * 混合搜索商品（向量 + 关键词双路 → RRF 合并）
      *
      * @param query      用户查询
      * @param topK       返回条数
      * @param categoryId 分类过滤（可选）
      * @param minPrice   最低价（可选）
      * @param maxPrice   最高价（可选）
-     * @return 语义匹配结果列表
+     * @return 混合匹配结果列表（按 RRF 分数降序）
      */
     public List<RagHitVO> search(String query, int topK,
                                   Long categoryId, BigDecimal minPrice, BigDecimal maxPrice) {
@@ -58,23 +63,23 @@ public class RagSearchService {
             return Collections.emptyList();
         }
 
-        // 1. 生成查询向量（embedAll 路径正常，仅 Qdrant gRPC 搜索路径有问题）
+        // 1. 生成查询向量
         Embedding queryEmbedding;
         try {
             List<Embedding> embeddings = embeddingModel.embedAll(List.of(TextSegment.from(query))).content();
             if (embeddings == null || embeddings.isEmpty()) {
-                log.warn("Ollama 嵌入模型返回空列表");
+                log.warn("嵌入模型返回空列表");
                 return Collections.emptyList();
             }
             queryEmbedding = embeddings.get(0);
         } catch (Exception e) {
-            log.warn("Ollama 嵌入模型调用失败: {}", e.getMessage());
+            log.warn("嵌入模型调用失败: {}", e.getMessage());
             return Collections.emptyList();
         }
 
-        // 2. 校验向量：非空、维度匹配
+        // 2. 校验向量
         if (queryEmbedding == null || queryEmbedding.vector() == null || queryEmbedding.vector().length == 0) {
-            log.warn("Ollama 返回空向量，跳过 RAG 检索");
+            log.warn("嵌入模型返回空向量，跳过 RAG 检索");
             return Collections.emptyList();
         }
         if (queryEmbedding.vector().length != EXPECTED_DIMENSION) {
@@ -83,9 +88,19 @@ public class RagSearchService {
             return Collections.emptyList();
         }
 
-        // 3. 通过 Qdrant REST API 检索（绕过 gRPC 版本不兼容问题）
-        return searchViaQdrantRest(queryEmbedding.vector(), topK * 3, MIN_RELEVANCE_SCORE,
-                categoryId, minPrice, maxPrice, topK);
+        // 3. 双路并行检索：向量 + 关键词
+        int queryLimit = Math.max(topK * 5, 50);
+
+        List<RagHitVO> vectorHits = searchViaQdrantRest(queryEmbedding.vector(), queryLimit,
+                MIN_RELEVANCE_SCORE, categoryId, minPrice, maxPrice, topK);
+
+        List<RagHitVO> keywordHits = keywordSearchService.searchByKeyword(query, queryLimit);
+
+        log.debug("混合检索: 向量命中 {}, 关键词命中 {}, 合并取 Top-{}",
+                vectorHits.size(), keywordHits.size(), topK);
+
+        // 4. RRF 合并
+        return RrfMerger.merge(vectorHits, keywordHits, topK);
     }
 
     /**
@@ -179,7 +194,7 @@ public class RagSearchService {
         if (categoryId != null) {
             JsonNode catNode = payload.get("firstCategoryId");
             if (catNode != null && !catNode.isNull()) {
-                String catVal = catNode.isNumber() ? catNode.asText() : catNode.asText();
+                String catVal = catNode.asText();
                 if (!String.valueOf(categoryId).equals(catVal)) {
                     return false;
                 }

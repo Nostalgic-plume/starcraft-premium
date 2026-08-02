@@ -79,7 +79,8 @@ class ShopServiceImplTest {
                 assertEquals("sa-token-shop-xxx", result.get("token"));
                 assertEquals(10L, result.get("shopId"));
                 assertEquals("测试店铺", result.get("shopName"));
-                stpUtil.verify(() -> StpUtil.login(10L));
+                // 生产代码双参登录 StpUtil.login(shopId, "shop")，verify 参数必须与之完全一致
+                stpUtil.verify(() -> StpUtil.login(10L, "shop"));
             }
         }
 

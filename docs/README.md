@@ -96,7 +96,7 @@ shop/
 | **商家中心** | shop_id 自动隔离、本店商品/订单管理、发货、本店 ECharts 看板 |
 | **数据看板** | 独立后端（:8081）查询 shop_ads，6 组 ECharts 报表组件 |
 | **智能客服** | SSE 流式对话，RAG 检索 TOP-3 + 分类名回退，小星真人导购人设 |
-| **RAG 搜索** | Ollama bge-m3 向量化 → Qdrant 检索 → 元数据过滤（分类/价格） |
+| **RAG 搜索** | DashScope text-embedding-v1 向量化 → Qdrant 检索 → 元数据过滤（分类/价格） |
 
 ---
 
@@ -155,13 +155,15 @@ shop/
 
 ## 数据库
 
-### 主库 `shop`（12 张表）
+### 主库 `shop`（18 张表）
 
 | 类别 | 表 | 说明 |
 |------|----|------|
 | 业务 | user / product / sku / orders / order_item / cart / category / address | 用户/商品/订单/购物车/分类/地址 |
+| 账号 | admin / shop | 管理员、商家独立账号（shop 以 shop_id 为身份标识，无 user_id 关联） |
 | RBAC | role / permission / user_role / role_permission | 三级角色 + 6 项权限 |
 | 日志 | user_status_log | 账号状态变更记录 |
+| 智能客服 | chat_conversation / chat_message / chat_feedback | 对话会话 / 消息 / 反馈 |
 
 ### 报表库 `shop_ads`（9 张表）
 
@@ -201,8 +203,8 @@ shop/
 | **商家隔离** | 后端强制 `WHERE shop_id = ?`（从 Sa-Token loginId 注入） |
 | **商品快照** | order_item 记录下单时名称/价格/图片，不受后续变更影响 |
 | **购物车标记** | 下单后批量 `cart.is_ordered = 1`，列表过滤已结算 |
-| **RAG 搜索** | Ollama bge-m3 向量化 → Qdrant 检索 → 元数据过滤 |
-| **智能客服** | SSE 流式输出 → RAG 检索 TOP-3（空结果走分类名回退）→ Qwen3.5 生成回答，小星真人导购人设 |
+| **RAG 搜索** | DashScope text-embedding-v1 向量化 → Qdrant 检索 → 元数据过滤 |
+| **智能客服** | SSE 流式输出 → RAG 检索 TOP-3（空结果走分类名回退）→ DashScope qwen-plus 生成回答，小星真人导购人设 |
 | **统一返回** | `{ code, msg, data }`，全局异常处理器接管所有异常 |
 | **Long→String** | Jackson 全局配置，解决雪花 ID 前端 JS 精度丢失 |
 

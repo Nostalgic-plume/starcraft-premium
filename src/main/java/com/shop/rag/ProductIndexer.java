@@ -43,6 +43,7 @@ public class ProductIndexer {
     private final SkuMapper skuMapper;
     private final OpenAiEmbeddingModel embeddingModel;
     private final QdrantEmbeddingStore embeddingStore;
+    private final QdrantCollectionHelper qdrantCollectionHelper;
 
     /** productId → Qdrant pointId 映射，用于删除时定位 */
     private final ConcurrentHashMap<Long, String> pointIdMap = new ConcurrentHashMap<>();
@@ -81,34 +82,10 @@ public class ProductIndexer {
     }
 
     /**
-     * 清理并重建 Qdrant 集合（用 REST API 确保清除旧脏数据）
+     * 清理并重建 Qdrant 集合（委托 QdrantCollectionHelper 统一管理）
      */
     private void recreateCollection() {
-        try {
-            URI del = URI.create("http://localhost:6333/collections/products");
-            HttpURLConnection conn = (HttpURLConnection) del.toURL().openConnection();
-            conn.setRequestMethod("DELETE");
-            conn.setConnectTimeout(3000);
-            conn.setReadTimeout(3000);
-            int code = conn.getResponseCode();
-            log.info("清理 Qdrant 旧集合, HTTP {}", code);
-            conn.disconnect();
-
-            URI create = URI.create("http://localhost:6333/collections/products?wait=true");
-            HttpURLConnection conn2 = (HttpURLConnection) create.toURL().openConnection();
-            conn2.setRequestMethod("PUT");
-            conn2.setRequestProperty("Content-Type", "application/json");
-            conn2.setDoOutput(true);
-            conn2.setConnectTimeout(3000);
-            conn2.setReadTimeout(3000);
-            String body = "{\"vectors\":{\"size\":1536,\"distance\":\"Cosine\"}}";
-            conn2.getOutputStream().write(body.getBytes());
-            int code2 = conn2.getResponseCode();
-            log.info("创建 Qdrant 新集合, HTTP {}", code2);
-            conn2.disconnect();
-        } catch (Exception e) {
-            log.warn("重建 Qdrant 集合失败: {}", e.getMessage());
-        }
+        qdrantCollectionHelper.recreateCollection();
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -118,7 +95,21 @@ public class ProductIndexer {
             log.info("Qdrant 集合已有向量数据，跳过索引重建");
             return;
         }
+        doRebuild();
+    }
 
+    /**
+     * 强制全量重建（不检查 Qdrant 是否已有数据）
+     * 供管理后台手动触发调用
+     */
+    public void forceRebuildAll() {
+        doRebuild();
+    }
+
+    /**
+     * 全量重建共享逻辑
+     */
+    private void doRebuild() {
         log.info("===== 开始全量重建商品向量索引 =====");
         long start = System.currentTimeMillis();
         pointIdMap.clear();
@@ -126,7 +117,7 @@ public class ProductIndexer {
         // 清理并重建 Qdrant 集合
         recreateCollection();
 
-        // 查所有上架商品
+        // 查询所有上架商品
         List<ProductDO> products = productMapper.selectList(
                 new LambdaQueryWrapper<ProductDO>()
                         .eq(ProductDO::getStatus, ProductConstants.STATUS_ON_SHELF)
@@ -160,7 +151,7 @@ public class ProductIndexer {
             log.debug("向量化进度: {}/{}", end, segments.size());
         }
 
-        // 校验：跳过空向量（Ollama 未就绪时可能返回 0 维向量）
+        // 校验：跳过空向量（嵌入服务未就绪时可能返回 0 维向量）
         List<Embedding> validEmbeddings = new ArrayList<>();
         List<TextSegment> validSegments = new ArrayList<>();
         for (int i = 0; i < embeddings.size(); i++) {
@@ -173,7 +164,7 @@ public class ProductIndexer {
         }
 
         if (validEmbeddings.isEmpty()) {
-            log.warn("所有商品向量化结果均为空，请检查 Ollama 服务是否正常运行");
+            log.warn("所有商品向量化结果均为空，请检查嵌入服务是否正常运行");
             indexedCount = 0;
             lastRebuildTime = System.currentTimeMillis();
             return;
@@ -189,6 +180,46 @@ public class ProductIndexer {
         lastRebuildTime = System.currentTimeMillis();
         long elapsed = System.currentTimeMillis() - start;
         log.info("===== 商品向量索引完成: {} 条, 耗时 {}ms =====", indexedCount, elapsed);
+
+        // 联动重建 MySQL FULLTEXT 索引
+        rebuildFulltextIndex();
+    }
+
+    /**
+     * 重建 MySQL FULLTEXT 索引
+     * 通过 OPTIMIZE TABLE 重建整个表索引（含 FULLTEXT），确保索引处于最优状态
+     */
+    private void rebuildFulltextIndex() {
+        try {
+            log.info("开始重建 MySQL FULLTEXT 索引...");
+            long start = System.currentTimeMillis();
+            productMapper.optimizeFulltextIndex();
+            long elapsed = System.currentTimeMillis() - start;
+            log.info("MySQL FULLTEXT 索引重建完成, 耗时 {}ms", elapsed);
+        } catch (Exception e) {
+            log.warn("MySQL FULLTEXT 索引重建失败: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 检查 FULLTEXT 索引是否正常工作
+     *
+     * @return 索引状态信息
+     */
+    public Map<String, Object> checkFulltextIndex() {
+        Map<String, Object> result = new HashMap<>();
+        try {
+            // 执行测试查询
+            int matchCount = productMapper.testFulltextIndex("手机");
+            result.put("healthy", matchCount >= 0);  // 空表也算正常
+            result.put("testMatchCount", matchCount);
+            result.put("message", "FULLTEXT 索引正常");
+        } catch (Exception e) {
+            result.put("healthy", false);
+            result.put("message", "FULLTEXT 索引异常: " + e.getMessage());
+            result.put("testMatchCount", -1);
+        }
+        return result;
     }
 
     /**
@@ -314,25 +345,12 @@ public class ProductIndexer {
     }
 
     /**
-     * 查询单个商品 SKU 价格范围
+     * 查询单个商品 SKU 价格范围（委托批量查询）
      */
     private BigDecimal[] loadProductPrice(Long productId) {
-        List<SkuDO> skus = skuMapper.selectList(
-                new LambdaQueryWrapper<SkuDO>()
-                        .eq(SkuDO::getProductId, productId)
-                        .select(SkuDO::getPrice));
-        if (CollUtil.isEmpty(skus)) {
-            return null;
-        }
-        BigDecimal min = skus.stream().map(SkuDO::getPrice)
-                .filter(Objects::nonNull)
-                .min(BigDecimal::compareTo)
-                .orElse(BigDecimal.ZERO);
-        BigDecimal max = skus.stream().map(SkuDO::getPrice)
-                .filter(Objects::nonNull)
-                .max(BigDecimal::compareTo)
-                .orElse(BigDecimal.ZERO);
-        return new BigDecimal[]{min, max};
+        ProductDO stub = new ProductDO();
+        stub.setId(productId);
+        return loadPriceMap(List.of(stub)).get(productId);
     }
 
     private static String safe(String s) {

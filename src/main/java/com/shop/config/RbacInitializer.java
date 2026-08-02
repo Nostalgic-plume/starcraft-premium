@@ -54,7 +54,8 @@ public class RbacInitializer implements CommandLineRunner {
                 new PermDef(202L, "删除商品", PermissionConstants.PRODUCT_DELETE),
                 new PermDef(203L, "上架/下架", PermissionConstants.PRODUCT_STATUS),
                 new PermDef(204L, "查看所有订单", PermissionConstants.ORDER_ALL),
-                new PermDef(205L, "用户管理", PermissionConstants.USER_MANAGE)
+                new PermDef(205L, "用户管理", PermissionConstants.USER_MANAGE),
+                new PermDef(206L, "查看统计", PermissionConstants.STATS_VIEW)
         );
         for (PermDef p : allPerms) {
             PermissionDO perm = new PermissionDO(); perm.setId(p.id); perm.setName(p.name);
@@ -89,26 +90,7 @@ public class RbacInitializer implements CommandLineRunner {
             userRoleMapper.insert(ur);
         }
         log.info("已为 {} 个用户分配角色", users.size());
-
-        // ⑤ 为角色为 merchant 的用户自动创建店铺（未创建时）
-        RoleDO merchantRoleRef = roleMapper.selectOne(new LambdaQueryWrapper<RoleDO>().eq(RoleDO::getCode, "merchant"));
-        if (merchantRoleRef != null) {
-            List<UserRoleDO> merchantUsers = userRoleMapper.selectList(
-                    new LambdaQueryWrapper<UserRoleDO>().eq(UserRoleDO::getRoleId, merchantRoleRef.getId()));
-            for (UserRoleDO ur : merchantUsers) {
-                ShopDO existingShop = shopMapper.selectOne(
-                        new LambdaQueryWrapper<ShopDO>().eq(ShopDO::getUserId, ur.getUserId()));
-                if (existingShop == null) {
-                    UserDO u = userMapper.selectById(ur.getUserId());
-                    ShopDO shop = new ShopDO();
-                    shop.setUserId(ur.getUserId());
-                    shop.setShopName(u != null ? u.getNickname() + "的店铺" : "默认店铺");
-                    shop.setStatus(1);
-                    shopMapper.insert(shop);
-                    log.info("自动创建店铺: userId={}, shopId={}", ur.getUserId(), shop.getId());
-                }
-            }
-        }
+        // 商家为独立账号体系（shop 表 username/password 直接登录，以 shop_id 为身份标识），无需经 user_role 建店
         log.info("========== RBAC 初始化完成 ==========");
 }
 }

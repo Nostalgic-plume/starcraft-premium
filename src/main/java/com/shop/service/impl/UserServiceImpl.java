@@ -88,7 +88,9 @@ public class UserServiceImpl implements UserService {
             throw new BusinessException(statusMsg);
         }
 
-        StpUtil.login(user.getId());
+        // 双参登录指定设备类型 device="user"：后续封号/停用可精准踢下线该用户会话，
+        // 避免与同 id 的管理员（device="admin"）/商家（device="shop"）会话误伤
+        StpUtil.login(user.getId(), "user");
 
         log.info("用户登录成功, userId: {}", user.getId());
         return StpUtil.getTokenValue();

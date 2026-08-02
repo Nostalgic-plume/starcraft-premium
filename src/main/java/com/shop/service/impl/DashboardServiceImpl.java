@@ -3,6 +3,7 @@ package com.shop.service.impl;
 import com.shop.mapper.DwOverviewMapper;
 import com.shop.model.vo.DashboardAllVO;
 import com.shop.service.DashboardService;
+import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -24,91 +25,44 @@ public class DashboardServiceImpl implements DashboardService {
     public DashboardAllVO getDashboardAll() {
         DashboardAllVO vo = new DashboardAllVO();
 
-        try {
-            vo.setOverview(dwOverviewMapper.selectOverview());
-        } catch (Exception e) {
-            log.warn("查询 ads_overview 异常: {}", e.getMessage());
-        }
-        if (vo.getOverview() == null) {
-            vo.setOverview(new DashboardAllVO.OverviewVO());
-        }
+        vo.setOverview(safeQuery("ads_overview", () -> dwOverviewMapper.selectOverview()));
+        if (vo.getOverview() == null) vo.setOverview(new DashboardAllVO.OverviewVO());
 
-        try {
-            vo.setGmvDaily(dwOverviewMapper.selectGmvDaily());
-        } catch (Exception e) {
-            log.warn("查询 ads_gmv_daily 异常: {}", e.getMessage());
-        }
-        if (vo.getGmvDaily() == null) {
-            vo.setGmvDaily(new DashboardAllVO.GmvDailyVO());
-        }
+        vo.setGmvDaily(safeQuery("ads_gmv_daily", () -> dwOverviewMapper.selectGmvDaily()));
+        if (vo.getGmvDaily() == null) vo.setGmvDaily(new DashboardAllVO.GmvDailyVO());
 
-        try {
-            vo.setOrderStats(dwOverviewMapper.selectOrderStats());
-        } catch (Exception e) {
-            log.warn("查询 ads_order_stats_daily 异常: {}", e.getMessage());
-        }
-        if (vo.getOrderStats() == null) {
-            vo.setOrderStats(new DashboardAllVO.OrderStatsVO());
-        }
+        vo.setOrderStats(safeQuery("ads_order_stats_daily", () -> dwOverviewMapper.selectOrderStats()));
+        if (vo.getOrderStats() == null) vo.setOrderStats(new DashboardAllVO.OrderStatsVO());
 
-        try {
-            vo.setCategorySales(dwOverviewMapper.selectCategorySales());
-        } catch (Exception e) {
-            log.warn("查询 ads_category_sales 异常: {}", e.getMessage());
-        }
+        vo.setCategorySales(safeQuery("ads_category_sales", () -> dwOverviewMapper.selectCategorySales()));
 
-        try {
-            vo.setProductTop(dwOverviewMapper.selectProductTop());
-        } catch (Exception e) {
-            log.warn("查询 ads_product_top50 异常: {}", e.getMessage());
-        }
+        vo.setProductTop(safeQuery("ads_product_top50", () -> dwOverviewMapper.selectProductTop()));
 
-        try {
-            vo.setWeeklyTrend(dwOverviewMapper.selectWeeklyTrend());
-        } catch (Exception e) {
-            log.warn("查询 ads_trend_weekly 异常: {}", e.getMessage());
-        }
+        vo.setWeeklyTrend(safeQuery("ads_trend_weekly", () -> dwOverviewMapper.selectWeeklyTrend()));
 
-        try {
-            vo.setUserActive(dwOverviewMapper.selectUserActive());
-        } catch (Exception e) {
-            log.warn("查询 ads_user_active 异常: {}", e.getMessage());
-        }
-        if (vo.getUserActive() == null) {
-            vo.setUserActive(new DashboardAllVO.UserActiveVO());
-        }
+        vo.setUserActive(safeQuery("ads_user_active", () -> dwOverviewMapper.selectUserActive()));
+        if (vo.getUserActive() == null) vo.setUserActive(new DashboardAllVO.UserActiveVO());
 
-        try {
-            vo.setUserNewRetain(dwOverviewMapper.selectUserNewRetain());
-        } catch (Exception e) {
-            log.warn("查询 ads_user_new_retain 异常: {}", e.getMessage());
-        }
-        if (vo.getUserNewRetain() == null) {
-            vo.setUserNewRetain(new DashboardAllVO.UserNewRetainVO());
-        }
+        vo.setUserNewRetain(safeQuery("ads_user_new_retain", () -> dwOverviewMapper.selectUserNewRetain()));
+        if (vo.getUserNewRetain() == null) vo.setUserNewRetain(new DashboardAllVO.UserNewRetainVO());
 
-        try {
-            vo.setShopDaily(dwOverviewMapper.selectShopDaily());
-        } catch (Exception e) {
-            log.warn("查询 ads_shop_daily 异常: {}", e.getMessage());
-        }
-        if (vo.getShopDaily() == null) {
-            vo.setShopDaily(new DashboardAllVO.ShopDailyVO());
-        }
+        vo.setShopDaily(safeQuery("ads_shop_daily", () -> dwOverviewMapper.selectShopDaily()));
+        if (vo.getShopDaily() == null) vo.setShopDaily(new DashboardAllVO.ShopDailyVO());
 
-        try {
-            vo.setGmvTrend(dwOverviewMapper.selectGmvTrend());
-        } catch (Exception e) {
-            log.warn("查询 GMV 日趋势异常: {}", e.getMessage());
-        }
+        vo.setGmvTrend(safeQuery("GMV 日趋势", () -> dwOverviewMapper.selectGmvTrend()));
 
-        try {
-            vo.setOrderTrend(dwOverviewMapper.selectOrderTrend());
-        } catch (Exception e) {
-            log.warn("查询订单状态日趋势异常: {}", e.getMessage());
-        }
+        vo.setOrderTrend(safeQuery("订单状态日趋势", () -> dwOverviewMapper.selectOrderTrend()));
 
         log.info("数据看板查询完成");
         return vo;
+    }
+
+    private <T> T safeQuery(String logPrefix, Supplier<T> query) {
+        try {
+            return query.get();
+        } catch (Exception e) {
+            log.warn("查询 {} 异常: {}", logPrefix, e.getMessage());
+            return null;
+        }
     }
 }

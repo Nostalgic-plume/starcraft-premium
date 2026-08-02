@@ -2,6 +2,7 @@ package com.shop.controller;
 
 import com.shop.common.PageResult;
 import com.shop.config.MockMyBatisConfig;
+import com.shop.config.SaTokenConfig;
 import org.springframework.context.annotation.Import;
 import com.shop.common.Result;
 import com.shop.model.dto.ProductDTO;
@@ -34,7 +35,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * MerchantController 单元测试
  * 覆盖商家登录、统计、订单管理、商品管理接口
- * 注意：@SaCheckPermission 在 @WebMvcTest 中不生效，方法正常执行
+ * 注意：SaTokenConfig 被 @MockBean 整体替换，SaInterceptor 不注册，注解鉴权在 @WebMvcTest 中不生效，方法正常执行
  */
 @WebMvcTest(MerchantController.class)
 @Import(MockMyBatisConfig.class)
@@ -52,6 +53,9 @@ class MerchantControllerTest {
 
     @MockBean
     private ProductService productService;
+
+    @MockBean
+    private SaTokenConfig saTokenConfig;
 
     @Test
     @DisplayName("商家登录：返回 token 和商家信息")
@@ -95,8 +99,6 @@ class MerchantControllerTest {
     @Test
     @DisplayName("商家订单分页列表：返回本店订单")
     void orderPage_ShouldReturnShopOrders() throws Exception {
-        given(shopService.getCurrentShopId()).willReturn(50L);
-
         OrderVO vo = new OrderVO();
         vo.setId(1001L);
         vo.setOrderNo("ORD20260718001");
@@ -104,7 +106,7 @@ class MerchantControllerTest {
         pageResult.setList(List.of(vo));
         pageResult.setTotal(1L);
 
-        given(orderService.merchantPageOrders(anyInt(), anyInt(), any(), eq(50L)))
+        given(orderService.merchantPageOrders(anyInt(), anyInt(), any()))
                 .willReturn(pageResult);
 
         mockMvc.perform(get("/api/merchant/order/page"))
@@ -116,13 +118,11 @@ class MerchantControllerTest {
     @Test
     @DisplayName("商家订单详情：返回订单信息")
     void orderDetail_ShouldReturnOrder() throws Exception {
-        given(shopService.getCurrentShopId()).willReturn(50L);
-
         OrderVO vo = new OrderVO();
         vo.setId(1001L);
         vo.setOrderNo("ORD20260718001");
 
-        given(orderService.merchantGetDetail(1001L, 50L)).willReturn(vo);
+        given(orderService.merchantGetDetail(1001L)).willReturn(vo);
 
         mockMvc.perform(get("/api/merchant/order/detail/{orderId}", 1001L))
                 .andExpect(status().isOk())
@@ -133,8 +133,7 @@ class MerchantControllerTest {
     @Test
     @DisplayName("商家发货：成功发货")
     void deliver_ShouldSucceed() throws Exception {
-        given(shopService.getCurrentShopId()).willReturn(50L);
-        doNothing().when(orderService).merchantDeliver(1001L, 50L, "SF123456789");
+        doNothing().when(orderService).merchantDeliver(1001L, "SF123456789");
 
         String requestBody = """
                 {"orderId": 1001, "logisticsNo": "SF123456789"}
@@ -151,8 +150,7 @@ class MerchantControllerTest {
     @Test
     @DisplayName("商家发货：无物流单号时使用空字符串")
     void deliver_ShouldUseEmptyLogisticsNo_WhenNotProvided() throws Exception {
-        given(shopService.getCurrentShopId()).willReturn(50L);
-        doNothing().when(orderService).merchantDeliver(1001L, 50L, "");
+        doNothing().when(orderService).merchantDeliver(1001L, "");
 
         String requestBody = """
                 {"orderId": 1001}
@@ -168,8 +166,6 @@ class MerchantControllerTest {
     @Test
     @DisplayName("商家商品列表：返回本店商品")
     void productPage_ShouldReturnShopProducts() throws Exception {
-        given(shopService.getCurrentShopId()).willReturn(50L);
-
         ProductVO vo = new ProductVO();
         vo.setId(1L);
         vo.setName("商家商品");
@@ -177,7 +173,7 @@ class MerchantControllerTest {
         pageResult.setList(List.of(vo));
         pageResult.setTotal(1L);
 
-        given(productService.page(any(ProductPageQuery.class))).willReturn(pageResult);
+        given(productService.merchantPage(any(ProductPageQuery.class))).willReturn(pageResult);
 
         mockMvc.perform(get("/api/merchant/product/page"))
                 .andExpect(status().isOk())

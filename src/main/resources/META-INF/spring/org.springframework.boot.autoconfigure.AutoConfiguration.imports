@@ -1,0 +1,5 @@
+# 兼容注册：rocketmq-spring-boot-starter 2.2.3（Spring Boot 2.x 时代产物）
+# 只写了 META-INF/spring.factories 的 EnableAutoConfiguration 条目，
+# 而 Spring Boot 3.x 只读 META-INF/spring/...AutoConfiguration.imports，
+# 故手动注册 RocketMQ 自动配置，否则 RocketMQTemplate bean 无法创建。
+org.apache.rocketmq.spring.autoconfigure.RocketMQAutoConfiguration

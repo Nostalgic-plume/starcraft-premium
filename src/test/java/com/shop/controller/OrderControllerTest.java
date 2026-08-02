@@ -2,6 +2,7 @@ package com.shop.controller;
 
 import com.shop.common.PageResult;
 import com.shop.config.MockMyBatisConfig;
+import com.shop.config.SaTokenConfig;
 import org.springframework.context.annotation.Import;
 import com.shop.model.dto.OrderCreateDTO;
 import com.shop.model.vo.OrderVO;
@@ -26,7 +27,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * OrderController 单元测试
  * 覆盖下单防重令牌、创建订单、取消订单、确认收货、订单详情、订单列表接口
- * 注意：@SaCheckLogin 在 @WebMvcTest 中不生效，方法正常执行
+ * 注意：SaTokenConfig 被 @MockBean 整体替换，SaInterceptor 不注册，注解鉴权在 @WebMvcTest 中不生效，方法正常执行
  */
 @WebMvcTest(OrderController.class)
 @Import(MockMyBatisConfig.class)
@@ -38,6 +39,9 @@ class OrderControllerTest {
 
     @MockBean
     private OrderService orderService;
+
+    @MockBean
+    private SaTokenConfig saTokenConfig;
 
     @Test
     @DisplayName("获取下单防重令牌：返回 token")
@@ -51,9 +55,9 @@ class OrderControllerTest {
     }
 
     @Test
-    @DisplayName("创建订单：返回订单 ID")
-    void createOrder_ShouldReturnOrderId() throws Exception {
-        given(orderService.createOrder(any(OrderCreateDTO.class))).willReturn(1001L);
+    @DisplayName("创建订单：返回处理标识 processingId")
+    void createOrder_ShouldReturnProcessingId() throws Exception {
+        given(orderService.createOrder(any(OrderCreateDTO.class))).willReturn("1001");
 
         String requestBody = """
                 {
@@ -69,7 +73,7 @@ class OrderControllerTest {
                         .content(requestBody))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)))
-                .andExpect(jsonPath("$.msg", is("下单成功")))
+                .andExpect(jsonPath("$.msg", is("下单请求已提交")))
                 .andExpect(jsonPath("$.data", is("1001")));
     }
 

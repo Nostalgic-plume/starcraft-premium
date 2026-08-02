@@ -2,6 +2,7 @@ package com.shop.controller;
 
 import com.shop.common.PageResult;
 import com.shop.config.MockMyBatisConfig;
+import com.shop.config.SaTokenConfig;
 import org.springframework.context.annotation.Import;
 import com.shop.common.Result;
 import com.shop.model.dto.ProductDTO;
@@ -29,7 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * ProductController 单元测试
  * 覆盖商品分页、详情、新增、状态更新接口
- * 注意：@SaCheckPermission 注解在 @WebMvcTest 中不生效，方法正常执行
+ * 注意：SaTokenConfig 被 @MockBean 整体替换，SaInterceptor 不注册，注解鉴权在 @WebMvcTest 中不生效，方法正常执行
  */
 @WebMvcTest(ProductController.class)
 @Import(MockMyBatisConfig.class)
@@ -41,6 +42,9 @@ class ProductControllerTest {
 
     @MockBean
     private ProductService productService;
+
+    @MockBean
+    private SaTokenConfig saTokenConfig;
 
     @Test
     @DisplayName("商品分页列表：返回分页结果")

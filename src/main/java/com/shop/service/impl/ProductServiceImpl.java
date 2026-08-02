@@ -26,6 +26,7 @@ import com.shop.model.query.ProductPageQuery;
 import com.shop.model.vo.ProductVO;
 import com.shop.rag.ProductIndexer;
 import com.shop.service.ProductService;
+import com.shop.service.StockCacheService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
@@ -55,6 +56,7 @@ public class ProductServiceImpl implements ProductService {
     private final OrderItemMapper orderItemMapper;
     private final ProductIndexer productIndexer;
     private final RedisTemplate<String, String> redisTemplate;
+    private final StockCacheService stockCacheService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -77,13 +79,12 @@ public class ProductServiceImpl implements ProductService {
         product.setCategoryId(category.getId());
         product.setFirstCategoryId(category.getParentId());
 
-        // 自动填充商家ID（从 shop 表查询，避免 user.id 与 shop.id 混淆）
+        // 自动填充商家ID（商家登录主体就是 shop_id，直接取 loginId）
         try {
             long loginId = StpUtil.getLoginIdAsLong();
             List<String> roles = StpUtil.getRoleList();
             if (roles.contains("merchant")) {
-                ShopDO shop = shopMapper.selectOne(
-                        new LambdaQueryWrapper<ShopDO>().eq(ShopDO::getUserId, loginId));
+                ShopDO shop = shopMapper.selectById(loginId);
                 if (shop != null) {
                     product.setShopId(shop.getId());
                 }
@@ -240,6 +241,11 @@ public class ProductServiceImpl implements ProductService {
                 return skuVO;
             }).collect(Collectors.toList());
             vo.setSkuList(skuVOList);
+        }
+
+        // SKU 库存预热到 Redis（供 Lua 预扣使用，setIfAbsent 只写一次，不影响浏览性能）
+        if (CollUtil.isNotEmpty(skuList)) {
+            skuList.forEach(sku -> stockCacheService.initStock(sku.getId(), sku.getStock()));
         }
 
         Integer sold = orderItemMapper.sumQuantityByProductId(product.getId());

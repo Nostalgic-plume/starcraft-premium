@@ -40,9 +40,6 @@ public class UserDO {
     @Schema(description = "状态：0正常 1停用 2注销中 3封禁中")
     private Integer status;
 
-    @Schema(description = "管理员级别：0非管理员 1普通管理员 2超级管理员")
-    private Integer adminLevel;
-
     @TableField(fill = FieldFill.INSERT)
     @Schema(description = "创建时间")
     private LocalDateTime createTime;

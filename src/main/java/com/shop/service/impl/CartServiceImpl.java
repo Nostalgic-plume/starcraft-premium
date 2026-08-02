@@ -55,16 +55,12 @@ public class CartServiceImpl implements CartService {
         if (exist != null) {
             // 已存在则增加数量
             int newQuantity = exist.getQuantity() + dto.getQuantity();
-            if (newQuantity > sku.getStock()) {
-                throw new BusinessException("库存不足，当前库存: " + sku.getStock());
-            }
+            checkStock(newQuantity, sku);
             exist.setQuantity(newQuantity);
             cartMapper.updateById(exist);
         } else {
             // 新增
-            if (dto.getQuantity() > sku.getStock()) {
-                throw new BusinessException("库存不足，当前库存: " + sku.getStock());
-            }
+            checkStock(dto.getQuantity(), sku);
             CartDO cart = new CartDO();
             cart.setUserId(userId);
             cart.setProductId(sku.getProductId());
@@ -86,9 +82,7 @@ public class CartServiceImpl implements CartService {
         if (sku == null) {
             throw new BusinessException("商品不存在或已下架");
         }
-        if (quantity > sku.getStock()) {
-            throw new BusinessException("库存不足，当前库存: " + sku.getStock());
-        }
+        checkStock(quantity, sku);
         cart.setQuantity(quantity);
         cartMapper.updateById(cart);
     }
@@ -158,5 +152,12 @@ public class CartServiceImpl implements CartService {
             throw new BusinessException("购物车中未找到该商品");
         }
         return cart;
+    }
+
+    /** 校验库存是否充足 */
+    private void checkStock(Integer quantity, SkuDO sku) {
+        if (quantity > sku.getStock()) {
+            throw new BusinessException("库存不足，当前库存: " + sku.getStock());
+        }
     }
 }

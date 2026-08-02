@@ -1,6 +1,7 @@
 package com.shop.controller;
 
 import com.shop.config.MockMyBatisConfig;
+import com.shop.config.SaTokenConfig;
 import com.shop.service.OrderService;
 import org.springframework.context.annotation.Import;
 import org.junit.jupiter.api.DisplayName;
@@ -28,6 +29,9 @@ class PaymentControllerTest {
 
     @MockBean
     private OrderService orderService;
+
+    @MockBean
+    private SaTokenConfig saTokenConfig;
 
     @Test
     @DisplayName("支付回调：返回字符串 success")

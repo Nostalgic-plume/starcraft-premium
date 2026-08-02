@@ -7,6 +7,7 @@ import com.shop.common.BusinessException;
 import com.shop.common.PageResult;
 import com.shop.constant.ProductConstants;
 import com.shop.mapper.CategoryMapper;
+import com.shop.mapper.OrderItemMapper;
 import com.shop.mapper.ProductMapper;
 import com.shop.mapper.ShopMapper;
 import com.shop.mapper.SkuMapper;
@@ -17,7 +18,11 @@ import com.shop.model.entity.ShopDO;
 import com.shop.model.entity.SkuDO;
 import com.shop.model.query.ProductPageQuery;
 import com.shop.model.vo.ProductVO;
+import com.shop.rag.ProductIndexer;
+import com.shop.service.StockCacheService;
 import org.junit.jupiter.api.BeforeEach;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -53,6 +58,21 @@ class ProductServiceImplTest {
 
     @Mock
     private ShopMapper shopMapper;
+
+    @Mock
+    private OrderItemMapper orderItemMapper;
+
+    @Mock
+    private ProductIndexer productIndexer;
+
+    @Mock
+    private RedisTemplate<String, String> redisTemplate;
+
+    @Mock
+    private StockCacheService stockCacheService;
+
+    @Mock
+    private ValueOperations<String, String> valueOps;
 
     @InjectMocks
     private ProductServiceImpl productService;
@@ -119,7 +139,7 @@ class ProductServiceImplTest {
             try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
                 stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
                 stpUtil.when(StpUtil::getRoleList).thenReturn(List.of("merchant"));
-                when(shopMapper.selectOne(any(LambdaQueryWrapper.class))).thenAnswer(inv -> {
+                when(shopMapper.selectById(1L)).thenAnswer(inv -> {
                     ShopDO shop = new ShopDO();
                     shop.setId(50L);
                     return shop;
@@ -186,7 +206,7 @@ class ProductServiceImplTest {
             try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
                 stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
                 stpUtil.when(StpUtil::getRoleList).thenReturn(List.of("merchant"));
-                when(shopMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(null);
+                when(shopMapper.selectById(1L)).thenReturn(null);
 
                 Long productId = productService.addProduct(productDTO);
 
@@ -311,6 +331,8 @@ class ProductServiceImplTest {
         @Test
         @DisplayName("成功获取详情，含 SKU 列表和分类名")
         void getDetail_ShouldReturnVO() {
+            when(redisTemplate.opsForValue()).thenReturn(valueOps);
+            when(valueOps.get(anyString())).thenReturn(null); // 缓存 miss，走 DB
             when(productMapper.selectById(100L)).thenReturn(product);
             when(categoryMapper.selectById(10L)).thenReturn(leafCategory);
             when(skuMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(sku));
@@ -329,6 +351,8 @@ class ProductServiceImplTest {
         @Test
         @DisplayName("获取详情：商品不存在")
         void getDetail_ShouldThrow_WhenNotFound() {
+            when(redisTemplate.opsForValue()).thenReturn(valueOps);
+            when(valueOps.get(anyString())).thenReturn(null); // 缓存 miss，走 DB
             when(productMapper.selectById(99L)).thenReturn(null);
 
             BusinessException ex = assertThrows(BusinessException.class,
@@ -339,6 +363,8 @@ class ProductServiceImplTest {
         @Test
         @DisplayName("获取详情：无 SKU 时价格和库存返回 null")
         void getDetail_ShouldReturnNullValues_WhenNoSkus() {
+            when(redisTemplate.opsForValue()).thenReturn(valueOps);
+            when(valueOps.get(anyString())).thenReturn(null); // 缓存 miss，走 DB
             when(productMapper.selectById(100L)).thenReturn(product);
             when(categoryMapper.selectById(10L)).thenReturn(leafCategory);
             when(skuMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());

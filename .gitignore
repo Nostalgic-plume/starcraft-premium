@@ -20,6 +20,10 @@ dist/
 Thumbs.db
 CLAUDE.md
 *.zip
+docs/db-backup/
+docs/秋招备战计划书.md
+docs/面试知识点清单.md
+docs/会话存储-内存vsRedis.md
 deploy/html/
 deploy/nginx.exe
 deploy/mime.types

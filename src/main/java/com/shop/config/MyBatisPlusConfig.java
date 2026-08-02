@@ -8,18 +8,20 @@ import org.springframework.context.annotation.Configuration;
 
 /**
  * MyBatis-Plus 配置
- * 注册分页插件（PaginationInnerInterceptor），替代 PageHelper
+ * 注册分页插件 + 商家数据隔离拦截器
  */
 @Configuration
 public class MyBatisPlusConfig {
 
     /**
      * MyBatis-Plus 插件集合
-     * PaginationInnerInterceptor 提供分页能力，自动拦截 selectPage 等分页方法
+     * 注册顺序：商家数据隔离（优先执行 shop_id 过滤）→ 分页（基于已过滤的结果分页）
      */
     @Bean
     public MybatisPlusInterceptor mybatisPlusInterceptor() {
         MybatisPlusInterceptor interceptor = new MybatisPlusInterceptor();
+        // 商家数据隔离必须在分页之前执行，确保 count 查询和 LIMIT 都基于已过滤的数据
+        interceptor.addInnerInterceptor(new ShopDataIsolationInterceptor());
         interceptor.addInnerInterceptor(new PaginationInnerInterceptor(DbType.MYSQL));
         return interceptor;
     }

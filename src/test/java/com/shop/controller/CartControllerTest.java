@@ -2,6 +2,7 @@ package com.shop.controller;
 
 import com.shop.common.Result;
 import com.shop.config.MockMyBatisConfig;
+import com.shop.config.SaTokenConfig;
 import org.springframework.context.annotation.Import;
 import com.shop.model.dto.CartDTO;
 import com.shop.model.vo.CartVO;
@@ -28,7 +29,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * CartController 单元测试
  * 覆盖购物车列表、添加、修改数量、删除、选中操作接口
- * 注意：@SaCheckLogin 在 @WebMvcTest 中不生效，方法正常执行
+ * 注意：SaTokenConfig 被 @MockBean 整体替换，SaInterceptor 不注册，注解鉴权在 @WebMvcTest 中不生效，方法正常执行
  */
 @WebMvcTest(CartController.class)
 @Import(MockMyBatisConfig.class)
@@ -40,6 +41,9 @@ class CartControllerTest {
 
     @MockBean
     private CartService cartService;
+
+    @MockBean
+    private SaTokenConfig saTokenConfig;
 
     @Test
     @DisplayName("购物车列表：返回购物车 VO 列表")

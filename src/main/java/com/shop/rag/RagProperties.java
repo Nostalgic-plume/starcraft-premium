@@ -5,7 +5,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * RAG 配置属性 - Qdrant + Ollama
+ * RAG 配置属性 - Qdrant + DashScope
  */
 @Data
 @Component
@@ -17,6 +17,6 @@ public class RagProperties {
     private int port = 6334;
     /** 集合名称 */
     private String collectionName = "products";
-    /** 向量维度（Qwen3.5 默认 1024） */
-    private int dimension = 1024;
+    /** 向量维度（DashScope text-embedding-v1 默认 1536） */
+    private int dimension = 1536;
 }

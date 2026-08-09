@@ -31,7 +31,7 @@ spring:
       stat-view-servlet:
         enabled: true
         login-username: ${DRUID_MONITOR_USER:admin}
-        login-password: ${DRUID_MONITOR_PASSWORD:123456}   # 生产环境务必通过 .env 注入
+        login-password: ${DRUID_MONITOR_PASSWORD}   # 必须通过 .env 注入，无默认值（未配置则启动失败，防呆）
         reset-enable: false            # 禁止在面板上清空统计数据
       # Web 请求统计
       web-stat-filter:

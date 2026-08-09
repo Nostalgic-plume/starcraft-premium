@@ -62,11 +62,28 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- Druid 连接池 + SQL 监控/防火墙
+             注意：Spring Boot 3 必须用 druid-spring-boot-3-starter（jakarta.servlet），
+             不能用 druid-spring-boot-starter（Boot 2 的 javax.servlet 会启动失败） -->
+        <dependency>
+            <groupId>com.alibaba</groupId>
+            <artifactId>druid-spring-boot-3-starter</artifactId>
+            <version>1.2.25</version>
+        </dependency>
+
         <!-- Hutool -->
         <dependency>
             <groupId>cn.hutool</groupId>
             <artifactId>hutool-all</artifactId>
             <version>${hutool.version}</version>
+        </dependency>
+
+        <!-- Guava：布隆过滤器（防缓存穿透）。
+             hutool 内置 BitMapBloomFilter 按数值寻址，雪花大 ID 会数组越界，故改用 Guava 哈希版 -->
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>33.2.1-jre</version>
         </dependency>
 
         <!-- Sa-Token -->

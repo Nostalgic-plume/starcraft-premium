@@ -32,6 +32,7 @@ import java.util.regex.Pattern;
  *   <li>INSERT 不拦截（shop_id 已在 Service 层手动填充）</li>
  *   <li>SQL 中已包含 shop_id 条件的不重复追加</li>
  *   <li>DDL 语句（OPTIMIZE TABLE 等）因无 FROM/UPDATE 关键词而自动跳过</li>
+ *   <li>SKIP_MAPPERS 白名单内的 Mapper 方法豁免隔离（多表 JOIN / 子查询等复杂 SQL）</li>
  * </ul>
  *
  * @author shop
@@ -41,6 +42,16 @@ public class ShopDataIsolationInterceptor implements InnerInterceptor {
 
     /** 包含 shop_id 字段、需要自动隔离的业务表 */
     private static final Set<String> SHOP_TABLES = Set.of("product", "orders");
+
+    /**
+     * 需要豁免 shop_id 自动隔离的 Mapper 方法白名单
+     * （key 为 Mapper 方法的全限定 ID，如 "com.shop.mapper.xxxMapper.selectXxx"）
+     *
+     * 用途：拦截器基于正则解析 SQL，遇到多表 JOIN（字段歧义）、子查询、手写复杂 SQL 时，
+     * 直接追加裸 shop_id 会产生 Column ambiguous 或语义错误。这类方法在此显式豁免，
+     * 改为在 Service 层手动拼接 shop_id 条件。默认空集合不影响现有行为。
+     */
+    private static final Set<String> SKIP_MAPPERS = Set.of();
 
     /** 正则：提取 FROM 或 JOIN 后的表名（忽略反引号和别名） */
     private static final Pattern TABLE_AFTER_FROM_JOIN =
@@ -86,6 +97,9 @@ public class ShopDataIsolationInterceptor implements InnerInterceptor {
      * 对 SQL 执行 shop_id 条件追加（如果目标表在隔离列表中且 SQL 尚未包含 shop_id 条件）
      */
     private void doFilter(MappedStatement ms, BoundSql boundSql) {
+        // 白名单豁免：命中该 Mapper 方法则跳过 shop_id 自动拼接
+        if (SKIP_MAPPERS.contains(ms.getId())) return;
+
         String originalSql = boundSql.getSql();
         String tableName = extractTableName(originalSql);
         if (tableName == null || !SHOP_TABLES.contains(tableName)) return;

@@ -21,4 +21,8 @@ public interface ProductConstants {
     String CACHE_CATEGORY    = "category:list";
     /** SKU 库存缓存 */
     String CACHE_SKU_STOCK   = "sku:stock:";
+
+    /* ==================== 逻辑过期时长（防缓存击穿） ==================== */
+    /** 商品详情逻辑过期时长（秒）：缓存物理永不过期，逻辑过期后返回旧数据 + 异步重建 */
+    long CACHE_PRODUCT_LOGICAL_TTL = 30 * 60;
 }

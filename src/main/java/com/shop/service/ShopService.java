@@ -32,4 +32,11 @@ public interface ShopService {
      * @return shopId
      */
     Long getCurrentShopId();
+
+    /**
+     * 获取当前登录商家信息（不含密码，供商家端展示店铺名称/Logo）
+     *
+     * @return shopId、shopName、shopLogo、shopDesc、contactName、contactPhone
+     */
+    Map<String, Object> getCurrentShopInfo();
 }

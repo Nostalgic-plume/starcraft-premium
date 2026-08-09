@@ -62,4 +62,21 @@ public class ShopServiceImpl implements ShopService {
             throw new BusinessException("未登录，请先登录");
         }
     }
+
+    @Override
+    public Map<String, Object> getCurrentShopInfo() {
+        ShopDO shop = shopMapper.selectById(getCurrentShopId());
+        if (shop == null) {
+            throw new BusinessException("店铺不存在");
+        }
+        // Map.of 不允许 null 值，可空字段用三元兜底
+        return Map.of(
+                "shopId", shop.getId(),
+                "username", shop.getUsername(),
+                "shopName", shop.getShopName(),
+                "shopLogo", shop.getShopLogo() == null ? "" : shop.getShopLogo(),
+                "shopDesc", shop.getShopDesc() == null ? "" : shop.getShopDesc(),
+                "contactName", shop.getContactName() == null ? "" : shop.getContactName(),
+                "contactPhone", shop.getContactPhone() == null ? "" : shop.getContactPhone());
+    }
 }

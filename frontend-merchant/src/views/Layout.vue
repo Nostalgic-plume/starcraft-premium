@@ -26,9 +26,9 @@
         <div></div>
         <div class="flex-center gap-8">
           <el-avatar :size="28" :src="store.userInfo?.avatar" style="background: var(--ds-coral, #e94560); flex-shrink: 0;">
-            {{ (store.userInfo?.nickname || store.userInfo?.username || 'M')[0] }}
+            {{ (store.userInfo?.shopName || store.userInfo?.username || 'M')[0] }}
           </el-avatar>
-          <span class="user-name">{{ store.userInfo?.nickname || store.userInfo?.username || '商家' }}</span>
+          <span class="user-name">{{ store.userInfo?.shopName || store.userInfo?.username || '商家' }}</span>
           <el-button text type="danger" @click="handleLogout">退出</el-button>
         </div>
       </el-header>
@@ -43,7 +43,7 @@
 import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMerchantStore } from '@/stores/user'
-import { userApi } from '@/api/user'
+import { merchantApi } from '@/api/merchant'
 import { DataAnalysis, Goods, List } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -51,10 +51,10 @@ const store = useMerchantStore()
 
 async function fetchUserInfo() {
   try {
-    const res = await userApi.getInfo()
+    const res = await merchantApi.getInfo()
     store.userInfo = res.data || res
   } catch (e) {
-    console.error('获取用户信息失败:', e)
+    console.error('获取商家信息失败:', e)
   }
 }
 

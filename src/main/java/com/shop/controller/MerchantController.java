@@ -47,6 +47,15 @@ public class MerchantController {
         return Result.success(shopService.login(dto));
     }
 
+    // ==================== 商家信息 ====================
+
+    @SaCheckLogin
+    @GetMapping("/info")
+    @Operation(summary = "获取当前商家信息（店铺名称/Logo，供商家端头部展示）")
+    public Result<Map<String, Object>> info() {
+        return Result.success(shopService.getCurrentShopInfo());
+    }
+
     // ==================== 数据统计 ====================
 
     @SaCheckLogin

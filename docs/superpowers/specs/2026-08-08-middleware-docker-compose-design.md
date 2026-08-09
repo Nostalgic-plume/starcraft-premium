@@ -13,7 +13,7 @@
 **范围外（明确不做）：**
 - 后端 Spring Boot **不** Docker 化（高频改代码 + 断点调试，维持本地运行）
 - MySQL 保持本地 Windows 服务（不在本任务范围）
-- Qdrant 产品向量 collection / 索引 **本轮不构建**（用户确认：先全新空库启动，索引留待以后）
+- Qdrant 产品向量 collection / 索引 **本轮一并构建**（用户确认：容器启动后由后端启动时自动建 collection + 全量索引，依赖 `.env` 中 `DASHSCOPE_API_KEY` 有效；另有手动接口 `POST /api/admin/rag/rebuild`）
 - 本地 Redis / 本地 Nginx **退役**（当前均未运行，端口空闲，无冲突）
 
 ## 现状确认（2026-08-08 实测）
@@ -46,7 +46,7 @@
 ```
 D:/claudecode/shop/
 ├── docker-compose.yml              # 新增：编排 5 个容器
-├── .env.example                    # 修改：追加 REDIS_PASSWORD（Redis 密码）、HOST_IP（宿主机局域网 IP，供 brokerIP1）
+├── .env.example                    # 修改：追加 REDIS_PASSWORD（Redis 密码；brokerIP1 用 127.0.0.1，不再需要 HOST_IP）
 ├── docker/
 │   ├── rocketmq/broker.conf        # 新增：broker 配置（含 brokerIP1=${HOST_IP}）
 │   └── nginx/nginx.conf            # 新增：Docker 版 Nginx 配置（静态路径改为容器内路径，其余照抄现有 nginx.conf）
@@ -57,7 +57,7 @@ D:/claudecode/shop/
 
 | 服务 | 镜像 | 端口映射（宿主机→容器） | 数据卷（named volume） |
 |------|------|------------------------|----------------------|
-| redis | `redis:8-alpine` | `127.0.0.1:6379`（仅本机可达） | `redis-data:/data`；启动命令见「关键设计点 1. Redis」 |
+| redis | `redis:8.8-alpine` | `127.0.0.1:6379`（仅本机可达） | `redis-data:/data`；启动命令见「关键设计点 1. Redis」 |
 | qdrant | `qdrant/qdrant` | 6333, 6334 | `qdrant-data:/qdrant/storage` |
 | rocketmq-namesrv | `apache/rocketmq:5.3.2` | 9876 | `rmq-logs:/home/rocketmq/logs` |
 | rocketmq-broker | `apache/rocketmq:5.3.2` | 10909, 10911, 10912 | `rmq-logs:/home/rocketmq/logs`、`rmq-store:/home/rocketmq/store` |
@@ -67,7 +67,7 @@ D:/claudecode/shop/
 
 ### 1. Redis
 
-`redis:8-alpine` 容器启动命令：
+`redis:8.8-alpine` 容器启动命令：
 
 ```yaml
 command: redis-server --appendonly yes --appendfsync everysec \
@@ -82,7 +82,7 @@ command: redis-server --appendonly yes --appendfsync everysec \
 
 ### 2. RocketMQ broker（最易踩坑）
 
-- **`brokerIP1` 必须设为宿主机可达 IP**：bridge 模式下 broker 默认向 namesrv 广播容器内网 IP（172.x），宿主机后端连不上。将 `brokerIP1=${HOST_IP}` 写入 `docker/rocketmq/broker.conf`，`HOST_IP` 由根目录 `.env` 提供（实施时用 `ipconfig` 探测宿主机局域网 IPv4 填入）。
+- **`brokerIP1=127.0.0.1`（单机开发场景）**：bridge 模式下 broker 默认向 namesrv 广播容器内网 IP（172.x），宿主机后端连不上，必须显式指定。后端明确跑宿主机，`127.0.0.1` 即可经 `10911` 端口映射直连 broker，且免去 DHCP 换网（家用路由 IP 会变）改配置的维护成本。直接写死在 `docker/rocketmq/broker.conf`，**不需要 `.env` 变量**。若将来后端容器化，需改为宿主机可达 IP。
 - **内存限制**：官方镜像默认堆很大，小内存机器易崩溃，broker 加 `JAVA_OPT_EXT=-server -Xms256m -Xmx512m -XX:+UseG1GC`。
 - **配置挂载路径版本敏感**：`apache/rocketmq:5.3.2` 镜像内目录为 `/home/rocketmq/rocketmq-5.3.2/conf/broker.conf`，broker.conf 需挂载到该路径，启动命令 `sh mqbroker -n namesrv:9876 -c /home/rocketmq/rocketmq-5.3.2/conf/broker.conf`。
 - broker 其余关键项：`brokerId=0`（master）、`autoCreateTopicEnable=true`（简化开发）、`deleteWhen=04`、`fileReservedTime=48`、`brokerRole=ASYNC_MASTER`、`flushDiskType=ASYNC_FLUSH`。
@@ -114,7 +114,7 @@ command: redis-server --appendonly yes --appendfsync everysec \
 cd D:/claudecode/shop/frontend          && npm run build
 cd D:/claudecode/shop/frontend-admin    && npm run build
 cd D:/claudecode/shop/frontend-merchant && npm run build
-# 2) 配置 .env（若缺失）：追加 REDIS_PASSWORD=<redis密码>、HOST_IP=<宿主机局域网 IPv4，ipconfig 查询>
+# 2) 配置 .env（若缺失）：追加 REDIS_PASSWORD=<redis密码>（brokerIP1 已固定 127.0.0.1，无需 HOST_IP）
 # 3) 一键启动
 cd D:/claudecode/shop && docker compose up -d
 # 4) 验证
@@ -131,7 +131,7 @@ docker compose down -v
 
 | 风险 | 说明 | 缓解 |
 |------|------|------|
-| brokerIP1 配错 | 后端下单/发消息连不上 broker | 实施时探测真实 IP 并写入 .env；`docker logs rmqbroker` 检查注册地址 |
+| brokerIP1 配错 | 后端下单/发消息连不上 broker | 单机已固定 `127.0.0.1` 规避；`docker logs rmqbroker` 检查注册地址 |
 | Nginx 容器反代失效 | 容器内 `localhost:8080` 指向容器自身 | 用 `host.docker.internal:8080` |
 | 镜像拉取慢 | RocketMQ 镜像较大 | 若本地已有镜像不重拉；可配置 Docker 镜像加速 |
 | 端口被占 | 将来本地 Redis/Nginx 再启动会冲突 | 保持本地版退役，仅用 Docker 版 |
@@ -144,5 +144,7 @@ docker compose down -v
 - [ ] 后端启动无 Redis 认证报错（`application.yml` 密码与 `.env` 一致）
 - [ ] `curl http://localhost:6333` 返回 Qdrant 版本信息
 - [ ] 后端启动无报错（Redis 会话、RocketMQ 生产者连接正常）
+- [ ] **RocketMQ 实测（关键）**：`POST /api/order/create` 发一单 → 前端轮询到 orderId（异步落单成功）。这是 **4.9.7 客户端 ↔ 5.3.2 broker** 兼容性的唯一实证；若消费端拉不到消息（消息积压），回退 broker 镜像 `apache/rocketmq:4.9.7`
+- [ ] **Qdrant 索引已建**：后端启动后 `curl http://localhost:6333/collections/products` 的 `points_count` > 0（依赖 `.env` 的 `DASHSCOPE_API_KEY` 有效）；或手动 `POST /api/admin/rag/rebuild` 触发
 - [ ] `http://localhost`、`/admin/`、`/merchant/` 页面正常（重新构建后的 dist）
 - [ ] `docker compose down` 后再 `up -d`，Redis/Qdrant 数据仍在（sa-token 会话可复用）

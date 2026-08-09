@@ -1,0 +1,97 @@
+# 中间件 Docker Compose 一键编排
+# 范围：Redis / Qdrant / RocketMQ / Nginx 四个中间件；后端 Spring Boot 保持本地运行
+# 启动：docker compose up -d（根目录 .env 提供 REDIS_PASSWORD 等敏感凭证，已 gitignore）
+# 参考：docs/superpowers/specs/2026-08-08-middleware-docker-compose-design.md
+services:
+  # ====== Redis（仅本机可达，含密码）======
+  redis:
+    image: redis:8.8-alpine              # 锁精确小版本，与本地 redis-8.8.0 对齐
+    container_name: shop-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"            # 仅本机可达，局域网不暴露
+    command: >
+      redis-server --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ====== Qdrant（向量库，空库启动，collection 由后端启动时自动构建）======
+  qdrant:
+    image: qdrant/qdrant
+    container_name: shop-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"                      # REST API（后端 ProductIndexer / RagSearchService 使用）
+      - "6334:6334"                      # gRPC（langchain4j QdrantEmbeddingStore 使用）
+    volumes:
+      - qdrant-data:/qdrant/storage
+
+  # ====== RocketMQ NameServer ======
+  rocketmq-namesrv:
+    image: apache/rocketmq:5.3.2
+    container_name: shop-rmq-namesrv
+    restart: unless-stopped
+    # named volume 默认 root:root，而镜像 USER=rocketmq 无法写入日志卷，故以 root 运行
+    user: root
+    ports:
+      - "9876:9876"
+    volumes:
+      - rmq-logs:/home/rocketmq/logs
+    # 官方 entrypoint 按参数区分角色：nameserver → exec ./mqnamesrv
+    command: nameserver
+
+  # ====== RocketMQ Broker（Remoting 直连 10911，不启用 proxy）======
+  rocketmq-broker:
+    image: apache/rocketmq:5.3.2
+    container_name: shop-rmq-broker
+    restart: unless-stopped
+    # named volume 默认 root:root，而镜像 USER=rocketmq 无法写入 store/logs 卷，故以 root 运行
+    user: root
+    ports:
+      - "10909:10909"
+      - "10911:10911"
+      - "10912:10912"
+    volumes:
+      - rmq-logs:/home/rocketmq/logs
+      - rmq-store:/home/rocketmq/store
+      # 注意：挂载路径含镜像版本号，升级镜像需同步修改
+      - ./docker/rocketmq/broker.conf:/home/rocketmq/rocketmq-5.3.2/conf/broker.conf:ro
+    environment:
+      - JAVA_OPT_EXT=-server -Xms256m -Xmx512m -XX:+UseG1GC
+    # 官方 entrypoint 按参数区分角色：broker → exec ./mqbroker
+    # -n 指向 compose 网络内 namesrv 的【服务名】rocketmq-namesrv（用 namesrv 会 DNS 解析失败）
+    command: broker -n rocketmq-namesrv:9876 -c /home/rocketmq/rocketmq-5.3.2/conf/broker.conf
+    depends_on:
+      - rocketmq-namesrv
+
+  # ====== Nginx（静态三端 + 反代后端，容器内经 host.docker.internal 访问宿主机 :8080）======
+  nginx:
+    image: nginx:1.20.2-alpine
+    container_name: shop-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      # Docker 版主配置（覆盖容器默认 nginx.conf；含 http 块，upstream/gzip 合法）
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # 三端静态资源挂载（:ro 只读；npm run build 后挂载卷实时同步，无需重建容器）
+      - ./frontend/dist:/usr/share/nginx/html/user:ro
+      - ./frontend-admin/dist:/usr/share/nginx/html/admin:ro
+      - ./frontend-merchant/dist:/usr/share/nginx/html/merchant:ro
+    depends_on:
+      - redis
+
+volumes:
+  redis-data: {}
+  qdrant-data: {}
+  rmq-logs: {}
+  rmq-store: {}

@@ -3,10 +3,41 @@ spring:
     name: shop
 
   datasource:
+    type: com.alibaba.druid.pool.DruidDataSource
     url: jdbc:mysql://localhost:3306/shop?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
+    druid:
+      # 连接池参数
+      initial-size: 5                 # 启动预建连接
+      min-idle: 5                     # 最小空闲连接
+      max-active: 20                  # 最大连接数（并发 SQL 上限，防打垮数据库）
+      max-wait: 60000                 # 借连接最长等待 60s，超时抛异常
+      # 连接保活检测
+      validation-query: SELECT 1
+      test-while-idle: true
+      test-on-borrow: false
+      test-on-return: false
+      # 监控过滤器
+      filter:
+        stat:                          # SQL 统计：参数化指纹聚合 + 慢 SQL 日志
+          enabled: true
+          log-slow-sql: true
+          slow-sql-millis: 2000        # 超过 2s 的 SQL 打印 WARN 日志
+        wall:                          # SQL 防火墙：解析 AST 拦截 1=1 注入 / 无 WHERE 删除等
+          enabled: true
+      # 监控面板（访问 /druid/）
+      stat-view-servlet:
+        enabled: true
+        login-username: ${DRUID_MONITOR_USER:admin}
+        login-password: ${DRUID_MONITOR_PASSWORD:123456}   # 生产环境务必通过 .env 注入
+        reset-enable: false            # 禁止在面板上清空统计数据
+      # Web 请求统计
+      web-stat-filter:
+        enabled: true
+        url-pattern: /*
+        exclusions: "*.js,*.gif,*.jpg,*.png,*.css,*.ico,/druid/*"
 
   data:
     redis:
@@ -14,6 +45,7 @@ spring:
       port: 6379
       database: 0
       timeout: 3000ms
+      password: ${REDIS_PASSWORD:}
 
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss

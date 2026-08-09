@@ -23,7 +23,11 @@ B2C 电商系统，**Spring Boot 单体后端 + Vue 3 三端分离前端**，Ngi
 
 | 组件 | 技术栈 |
 |------|--------|
-| 后端 | Spring Boot 3.4.4 + MyBatis-Plus 3.5.5 + Sa-Token 1.45.0 |
+| 后端 | Spring Boot 3.2.12 + MyBatis-Plus 3.5.5 + Sa-Token 1.45.0 |
+| 数据库连接池 | Druid（连接池 + SQL 监控 + 防火墙），监控面板 `/druid/` | 1.2.25 |
+| 异步消息 | RocketMQ（异步落单 + 延迟取消） | client 4.9.7 / starter 2.2.3 |
+| 接口文档 | springdoc-openapi（Swagger UI，`/swagger-ui.html`） | 2.3.0 |
+| 配置加载 | spring-dotenv（`.env` 加载敏感凭证，已 gitignore） | 4.0.0 |
 | 数据库 | MySQL 8 + Redis |
 | 前端 | Vue 3 + Vite + Element Plus + Pinia + ECharts |
 | 反向代理 | Nginx 1.20.2 |
@@ -54,8 +58,10 @@ cd shop/deploy && nginx.exe -c conf/nginx.conf -p .
 | `http://localhost:8088` | 用户端 | zhangsan / lisi |
 | `http://localhost:8088/admin/` | 管理后台 | admin |
 | `http://localhost:8088/merchant/` | 商家中心 | merchant1 |
+| `http://localhost:8080/swagger-ui.html` | 接口文档（Swagger UI） | — |
 
 > 所有账号密码统一 **`123456`**。
+> 首次运行前复制 `.env.example` 为 `.env` 并填写 DB 密码 / DashScope Key（已 gitignore，由 spring-dotenv 启动时加载）。
 
 ---
 
@@ -69,6 +75,7 @@ shop/
 │   ├── mapper/                 #   MyBatis-Plus 数据访问
 │   ├── model/entity/dto/vo     #   数据模型
 │   ├── rag/                    #   语义搜索 + 智能客服
+│   ├── mq/                     #   RocketMQ 异步落单 + 延迟取消
 │   ├── common/                 #   通用工具 + 统一返回
 │   └── config/                 #   全局配置 + 异常处理 + 定时任务
 ├── frontend/                   # 用户端 Vue 3
@@ -77,7 +84,6 @@ shop/
 └── deploy/                     # Nginx + 静态资源
 
 独立项目：shop-data-mocker（Mock 数据工具）
-独立后端：shop-dashboard（数据看板 :8081，查询 shop_ads 报表库）
 ```
 
 ---
@@ -89,12 +95,12 @@ shop/
 | **用户** | BCrypt 注册登录、Sa-Token 会话、4 种账号状态 |
 | **商品** | SPU + SKU 分层、二级分类联动（firstCategoryId）、shop_id 隔离、RAG 语义搜索 |
 | **分类** | 二级分类树、按父级查询子分类 |
-| **订单** | Redis 防重令牌 → MySQL 行锁扣库存 → shop_id 绑定 → 购物车标记 → 幂等支付回调 → 库存回滚取消 → 30 分钟超时自动取消 |
+| **订单** | Redis 防重令牌 → RocketMQ 异步落单（Redis 预扣 + MySQL 行锁）→ 前端轮询落单状态 → shop_id 绑定 → 购物车标记 → 幂等支付回调 → 库存回滚取消 → 30 分钟延迟消息超时取消 |
 | **购物车** | SKU 级别管理、is_ordered 过滤已结算商品 |
 | **支付** | 模拟支付回调、幂等处理 |
 | **管理后台** | 用户/订单/商品管理、ECharts 统计看板、全平台数据查询 |
 | **商家中心** | shop_id 自动隔离、本店商品/订单管理、发货、本店 ECharts 看板 |
-| **数据看板** | 独立后端（:8081）查询 shop_ads，6 组 ECharts 报表组件 |
+| **报表库看板** | 查询 shop_ads 报表库（离线数仓产出），ECharts 报表展示 |
 | **智能客服** | SSE 流式对话，RAG 检索 TOP-3 + 分类名回退，小星真人导购人设 |
 | **RAG 搜索** | DashScope text-embedding-v1 向量化 → Qdrant 检索 → 元数据过滤（分类/价格） |
 
@@ -120,8 +126,10 @@ shop/
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | /api/user/info | 用户信息 |
+| GET | /api/user/role | 当前用户角色 |
 | GET | /api/order/token | 下单防重令牌 |
-| POST | /api/order/create | 创建订单 |
+| POST | /api/order/create | 创建订单（异步削峰，返回 processingId 供轮询） |
+| GET | /api/order/status/{processingId} | 查询异步落单状态（前端轮询） |
 | GET | /api/order/my | 我的订单（分页+状态筛选） |
 | GET | /api/order/detail/{id} | 订单详情 |
 | POST | /api/order/cancel/{id} | 取消订单 |
@@ -195,12 +203,15 @@ shop/
 
 | 设计 | 方案 |
 |------|------|
-| **防超卖** | `UPDATE sku SET stock = stock - n WHERE id = ? AND stock >= n`（MySQL 行锁） |
-| **下单幂等** | Redis Token 防重令牌，一次有效 |
+| **连接池监控** | Druid：连接池 + SQL 统计 + 慢 SQL（2s）日志 + wall 防火墙防注入，监控面板 `/druid/` |
+| **防超卖** | MySQL 行锁 `UPDATE sku SET stock = stock - n WHERE id = ? AND stock >= n`（最终凭证）+ Redis 库存缓存 Lua 原子预扣（前置快速校验） |
+| **异步下单** | RocketMQ 削峰：接口仅发消息返回 processingId，消费端事务内 Redis 预扣 + MySQL 行锁落单，前端轮询状态 |
+| **下单幂等** | Redis Token 防重令牌一次有效 + MQ 消费幂等键 `order:dedup:{orderToken}`（SETNX 防重复投递） |
 | **支付幂等** | 状态机校验，仅"待支付"状态可更新 |
-| **库存回滚** | 取消/超时订单自动 `UPDATE sku SET stock = stock + n` |
-| **订单超时** | 定时任务每 5 分钟扫描，取消 30 分钟未支付订单 |
-| **商家隔离** | 后端强制 `WHERE shop_id = ?`（从 Sa-Token loginId 注入） |
+| **库存回滚** | 取消/超时订单自动 `UPDATE sku SET stock = stock + n` + Redis 库存回滚 |
+| **订单超时** | RocketMQ 延迟消息（30 分钟）主取消 + 定时任务 60 分钟兜底 |
+| **商家隔离** | SQL 拦截器自动追加 `AND shop_id = ?` + Service 层校验（双保险） |
+| **缓存防护** | 商品 ID 布隆过滤器（防穿透）→ 商品详情逻辑过期缓存（防击穿）→ DB |
 | **商品快照** | order_item 记录下单时名称/价格/图片，不受后续变更影响 |
 | **购物车标记** | 下单后批量 `cart.is_ordered = 1`，列表过滤已结算 |
 | **RAG 搜索** | DashScope text-embedding-v1 向量化 → Qdrant 检索 → 元数据过滤 |

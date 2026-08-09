@@ -11,6 +11,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.shop.common.BusinessException;
 import com.shop.common.PageResult;
 import com.shop.common.PaginationHelper;
+import com.shop.common.RedisCache;
 import com.shop.constant.ProductConstants;
 import com.shop.mapper.CategoryMapper;
 import com.shop.mapper.OrderItemMapper;
@@ -27,17 +28,16 @@ import com.shop.model.vo.ProductVO;
 import com.shop.rag.ProductIndexer;
 import com.shop.service.ProductService;
 import com.shop.service.StockCacheService;
+import com.google.common.hash.BloomFilter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -55,8 +55,9 @@ public class ProductServiceImpl implements ProductService {
     private final ShopMapper shopMapper;
     private final OrderItemMapper orderItemMapper;
     private final ProductIndexer productIndexer;
-    private final RedisTemplate<String, String> redisTemplate;
     private final StockCacheService stockCacheService;
+    private final BloomFilter<Long> productBloomFilter;
+    private final RedisCache redisCache;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -95,6 +96,9 @@ public class ProductServiceImpl implements ProductService {
 
         productMapper.insert(product);
         log.info("商品新增成功, productId: {}, shopId: {}", product.getId(), product.getShopId());
+
+        // 同步布隆过滤器：新商品 id 必须 put，否则会被 getDetail 的布隆判断误判为"商品不存在"
+        productBloomFilter.put(product.getId());
 
         // 同步 RAG 索引
         try {
@@ -163,21 +167,24 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     public ProductVO getDetail(Long id) {
-        String cacheKey = ProductConstants.CACHE_PRODUCT + id;
-        String cached = redisTemplate.opsForValue().get(cacheKey);
-        if (cached != null) {
-            ProductVO vo = JSONUtil.toBean(cached, ProductVO.class);
-            if (vo != null) {
-                return vo;
-            }
-        }
-        ProductDO product = productMapper.selectById(id);
-        if (product == null) {
+        // 布隆过滤器前置拦截：Guava 布隆无假阴性，这里为 false 说明该 id 从未入库，
+        // 直接短路返回，避免对不存在商品的恶意请求反复穿透缓存打到 DB
+        if (!productBloomFilter.mightContain(id)) {
             throw new BusinessException("商品不存在");
         }
-        ProductVO vo = convertToVO(product);
-        redisTemplate.opsForValue().set(cacheKey, JSONUtil.toJsonStr(vo), 5, TimeUnit.MINUTES);
-        return vo;
+
+        String cacheKey = ProductConstants.CACHE_PRODUCT + id;
+        // 逻辑过期缓存（防击穿）：物理永不过期，value 内置过期时间戳；逻辑过期瞬间返回旧数据并异步重建，
+        // 热点 key 击穿时始终只有拿到互斥锁的一个线程回源 DB（缓存不存在时的首次重建同样走互斥锁）
+        return redisCache.queryWithLogicalExpire(
+                cacheKey, ProductVO.class, ProductConstants.CACHE_PRODUCT_LOGICAL_TTL,
+                () -> {
+                    ProductDO product = productMapper.selectById(id);
+                    if (product == null) {
+                        throw new BusinessException("商品不存在");
+                    }
+                    return convertToVO(product);
+                });
     }
 
     @Override
@@ -188,7 +195,7 @@ public class ProductServiceImpl implements ProductService {
         }
         product.setStatus(status);
         productMapper.updateById(product);
-        redisTemplate.delete(ProductConstants.CACHE_PRODUCT + id);
+        redisCache.delete(ProductConstants.CACHE_PRODUCT + id);
         log.info("商品状态更新, productId: {}, status: {}", id, status);
 
         // 同步 RAG 索引

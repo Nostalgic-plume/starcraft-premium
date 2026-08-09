@@ -11,6 +11,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
@@ -49,7 +50,9 @@ public class CategoryServiceImpl implements CategoryService {
             return JSONUtil.toList(cached, CategoryDO.class);
         }
         List<CategoryDO> list = query.get();
-        redisTemplate.opsForValue().set(cacheKey, JSONUtil.toJsonStr(list), 1, TimeUnit.HOURS);
+        // TTL 随机化（基准 1h + 随机 0~120s）：分散各分类缓存的过期时间，避免同时过期引发缓存雪崩
+        long ttlSeconds = 3600 + ThreadLocalRandom.current().nextInt(120);
+        redisTemplate.opsForValue().set(cacheKey, JSONUtil.toJsonStr(list), ttlSeconds, TimeUnit.SECONDS);
         return list;
     }
 }

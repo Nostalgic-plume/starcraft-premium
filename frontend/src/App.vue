@@ -1,66 +1,72 @@
 <template>
-  <div id="app-root">
-    <!-- 顶部导航 -->
-    <header class="app-header">
-      <div class="header-inner">
-        <router-link to="/home" class="logo">
-          <span class="logo-icon">🛍️</span>
-          <span class="logo-text">Shop 商城</span>
-        </router-link>
-        <nav class="nav-links">
-          <router-link to="/home" class="nav-item">首页</router-link>
-          <router-link to="/cart" v-if="userStore.isLoggedIn()" class="nav-item">
-            购物车
-            <el-badge :value="cartStore.items.length" :hidden="cartStore.items.length === 0" class="badge" />
-          </router-link>
-          <router-link to="/orders" v-if="userStore.isLoggedIn()" class="nav-item">我的订单</router-link>
-          <template v-if="userStore.isLoggedIn()">
-            <el-dropdown trigger="click" @command="handleUserCommand">
-              <span class="user-info">
-                <el-avatar :size="30" :icon="UserFilled" class="user-avatar" />
-                <span class="user-name">{{ userStore.userInfo?.nickname || userStore.userInfo?.username }}</span>
-              </span>
-              <template #dropdown>
-                <el-dropdown-item command="logout">
-                  <el-icon><SwitchButton /></el-icon> 退出登录
-                </el-dropdown-item>
+  <n-config-provider :theme-overrides="themeOverrides">
+    <n-message-provider>
+      <div id="app-root">
+        <!-- 顶部导航 -->
+        <header class="app-header">
+          <div class="header-inner">
+            <router-link to="/home" class="logo">
+              <span class="logo-icon">🛍️</span>
+              <span class="logo-text">Shop 商城</span>
+            </router-link>
+            <nav class="nav-links">
+              <router-link to="/home" class="nav-item">首页</router-link>
+              <router-link to="/cart" v-if="userStore.isLoggedIn()" class="nav-item">
+                购物车
+                <el-badge :value="cartStore.items.length" :hidden="cartStore.items.length === 0" class="badge" />
+              </router-link>
+              <router-link to="/orders" v-if="userStore.isLoggedIn()" class="nav-item">我的订单</router-link>
+              <template v-if="userStore.isLoggedIn()">
+                <el-dropdown trigger="click" @command="handleUserCommand">
+                  <span class="user-info">
+                    <el-avatar :size="30" :icon="UserFilled" class="user-avatar" />
+                    <span class="user-name">{{ userStore.userInfo?.nickname || userStore.userInfo?.username }}</span>
+                  </span>
+                  <template #dropdown>
+                    <el-dropdown-item command="logout">
+                      <el-icon><SwitchButton /></el-icon> 退出登录
+                    </el-dropdown-item>
+                  </template>
+                </el-dropdown>
               </template>
-            </el-dropdown>
-          </template>
-          <template v-else>
-            <router-link to="/login" class="nav-item nav-btn">登录</router-link>
-            <router-link to="/register" class="nav-item nav-btn nav-btn-reg">注册</router-link>
-          </template>
-        </nav>
+              <template v-else>
+                <router-link to="/login" class="nav-item nav-btn">登录</router-link>
+                <router-link to="/register" class="nav-item nav-btn nav-btn-reg">注册</router-link>
+              </template>
+            </nav>
+          </div>
+        </header>
+
+        <!-- 主内容 -->
+        <main class="app-main">
+          <router-view v-slot="{ Component }">
+            <transition
+              mode="out-in"
+              @before-leave="pageBeforeLeave"
+              @leave="pageLeave"
+              @after-leave="pageAfterLeave"
+              @before-enter="pageBeforeEnter"
+              @enter="pageEnter"
+              @after-enter="pageAfterEnter"
+            >
+              <component :is="Component" />
+            </transition>
+          </router-view>
+        </main>
+
+        <!-- 浮动智能客服 -->
+        <FloatingChat />
       </div>
-    </header>
-
-    <!-- 主内容 -->
-    <main class="app-main">
-      <router-view v-slot="{ Component }">
-        <transition
-          mode="out-in"
-          @before-leave="pageBeforeLeave"
-          @leave="pageLeave"
-          @after-leave="pageAfterLeave"
-          @before-enter="pageBeforeEnter"
-          @enter="pageEnter"
-          @after-enter="pageAfterEnter"
-        >
-          <component :is="Component" />
-        </transition>
-      </router-view>
-    </main>
-
-    <!-- 浮动智能客服 -->
-    <FloatingChat />
-  </div>
+    </n-message-provider>
+  </n-config-provider>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { UserFilled, SwitchButton } from '@element-plus/icons-vue'
+import { NConfigProvider, NMessageProvider } from 'naive-ui'
+import { themeOverrides } from '@shared/js/naive-theme'
 import { useUserStore } from '@/stores/user'
 import { useCartStore } from '@/stores/cart'
 import FloatingChat from '@/components/FloatingChat.vue'
@@ -77,7 +83,7 @@ onMounted(async () => {
   }
 })
 
-function handleUserCommand(cmd) {
+function handleUserCommand(cmd: string | number | object) {
   if (cmd === 'logout') {
     userStore.logout()
     router.push('/home')
@@ -85,11 +91,11 @@ function handleUserCommand(cmd) {
 }
 
 /* ====== GSAP 页面转场 ====== */
-function pageBeforeLeave(el) {
+function pageBeforeLeave(_el: Element) {
   // 无特殊初始状态
 }
 
-function pageLeave(el, done) {
+function pageLeave(el: Element, done: () => void) {
   gsap.to(el, {
     opacity: 0,
     scale: 0.97,
@@ -100,11 +106,11 @@ function pageLeave(el, done) {
   })
 }
 
-function pageAfterLeave(el) {
+function pageAfterLeave(el: Element) {
   gsap.set(el, { clearProps: 'all' })
 }
 
-function pageBeforeEnter(el) {
+function pageBeforeEnter(el: Element) {
   gsap.set(el, {
     opacity: 0,
     scale: 0.97,
@@ -112,7 +118,7 @@ function pageBeforeEnter(el) {
   })
 }
 
-function pageEnter(el, done) {
+function pageEnter(el: Element, done: () => void) {
   gsap.to(el, {
     opacity: 1,
     scale: 1,
@@ -123,7 +129,7 @@ function pageEnter(el, done) {
   })
 }
 
-function pageAfterEnter(el) {
+function pageAfterEnter(el: Element) {
   gsap.set(el, { clearProps: 'all' })
 }
 </script>

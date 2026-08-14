@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { useAuth } from '@shared/js/composables/useAuth.js'
+import { useAuth } from '@shared/js/composables/useAuth'
 
 export const useAdminStore = defineStore('admin', () => {
   const { token, userInfo, isLoggedIn, setToken, clearToken } = useAuth({ tokenKey: 'admin-token', ref })

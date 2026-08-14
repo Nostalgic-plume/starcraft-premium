@@ -1,0 +1,17 @@
+:root {
+  --ds-bg: #F6F7FA;  --ds-bg-2: #EEF0F4;  --ds-card: #FFFFFF;
+  --ds-line: #E7E9EE; --ds-line-2: #D8DCE4;
+  --ds-text: #1E2632; --ds-text-2: #5A6474; --ds-text-3: #98A1AF;
+  --ds-primary: #2D7FF9; --ds-primary-strong: #1E63D6;
+  --ds-primary-grad: linear-gradient(135deg,#5AA3FF,#2D7FF9);
+  --ds-primary-tint: rgba(45,127,249,0.08);
+  --ds-primary-border: rgba(45,127,249,0.25);
+  --ds-price: #2D7FF9;
+  --ds-green: #12A77D; --ds-orange: #E08600; --ds-red: #E0404E; --ds-gray: #98A1AF;
+  --ds-sans: "PingFang SC","Microsoft YaHei","Noto Sans SC",-apple-system,sans-serif;
+  --ds-mono: "JetBrains Mono","SF Mono",Consolas,monospace;
+  --ds-r-lg:16px; --ds-r:12px; --ds-r-sm:9px; --ds-r-pill:999px;
+  --ds-shadow:0 2px 10px rgba(31,38,48,.05);
+  --ds-shadow-hover:0 12px 30px rgba(31,38,48,.10);
+  --ds-shadow-brand:0 4px 14px rgba(45,127,249,.25);
+}

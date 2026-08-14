@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { createAppRouter } from '@shared/js/createRouter.js'
+import { createAppRouter } from '@shared/js/createRouter'
 
 const routes = [
   { path: '/', redirect: '/login' },

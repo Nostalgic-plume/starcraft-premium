@@ -1,6 +1,6 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
-import { createRequest } from '@shared/js/createRequest.js'
+import { createRequest } from '@shared/js/createRequest'
 import router from '../router'
 
 export default createRequest({ tokenKey: 'token', router, axios, ElMessage })

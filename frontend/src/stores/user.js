@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { useAuth } from '@shared/js/composables/useAuth.js'
+import { useAuth } from '@shared/js/composables/useAuth'
 import { userApi } from '@/api/user'
 
 export const useUserStore = defineStore('user', () => {

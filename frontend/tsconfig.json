@@ -12,16 +12,21 @@
     "noEmit": true,
     "jsx": "preserve",
     "strict": true,
+    "allowJs": false,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@shared/*": ["../shared/*"]
+      "@shared/*": ["../shared/*"],
+      "vue": ["./node_modules/vue"],
+      "vue-router": ["./node_modules/vue-router"],
+      "axios": ["./node_modules/axios"],
+      "naive-ui": ["./node_modules/naive-ui"]
     },
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue"],
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue", "../shared/**/*.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

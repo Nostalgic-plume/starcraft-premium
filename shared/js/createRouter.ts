@@ -1,4 +1,4 @@
-import type { Router, RouteRecordRaw, RouterHistory, createRouter as createRouterFn, createWebHistory as createHistoryFn } from 'vue-router'
+import type { Router, RouteRecordRaw, createRouter as createRouterFn, createWebHistory as createHistoryFn } from 'vue-router'
 
 export interface CreateAppRouterOptions {
   base?: string

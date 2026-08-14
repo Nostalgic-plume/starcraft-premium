@@ -26,13 +26,13 @@ export function createRequest({ tokenKey, router, axios, ElMessage }: CreateRequ
       }
       return res.data as any // M2 引入 API 类型后细化为泛型
     },
-    (error: { response?: { status: number } }) => {
+    (error: { message?: string; response?: { status: number } }) => {
       if (error.response?.status === 401) {
         localStorage.removeItem(tokenKey)
         router?.push('/login')
         ElMessage.error('登录已过期，请重新登录')
       } else {
-        ElMessage.error(error.response?.status === 500 ? '服务器错误' : '网络错误')
+        ElMessage.error(error.message || '网络错误')
       }
       return Promise.reject(error)
     }

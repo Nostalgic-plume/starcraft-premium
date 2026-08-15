@@ -19,13 +19,15 @@ const emit = defineEmits<{
 
 const router = useRouter()
 
-/** 订单状态（后端）：0待支付 1已支付 2已发货 4已完成 5已取消 → StatusTag 语义类型 */
+/** 订单状态（后端）：0待支付 1已支付 2已发货 3已收货 4已完成 5已取消 6已退款 → StatusTag 语义类型 */
 const statusTypeMap: Record<number, StatusType> = {
   0: 'pending-pay',
   1: 'pending-ship',
   2: 'paid',
+  3: 'completed',
   4: 'completed',
-  5: 'cancelled'
+  5: 'cancelled',
+  6: 'cancelled'
 }
 
 const statusType = computed<StatusType>(() => statusTypeMap[props.order.status] || 'paid')

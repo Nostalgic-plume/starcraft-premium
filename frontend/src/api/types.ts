@@ -195,7 +195,7 @@ export interface OrderVO {
   actualAmount: number
   discountAmount: number
   freight: number
-  /** 状态：0待支付 1已支付 2已发货 3? 4已完成 5已取消 */
+  /** 状态：0待支付 1已支付 2已发货 3已收货 4已完成 5已取消 6已退款 */
   status: number
   statusText: string
   receiverName: string
@@ -215,7 +215,11 @@ export interface OrderTokenResult {
   token: string
 }
 
-/** 下单返回（Result<String>，值为订单 ID 的字符串） */
+/**
+ * 下单返回（Result<String>）
+ * ⚠️ 后端 OrderServiceImpl.createOrder 返回的是 orderToken（即 processingId，UUID 去横线字符串），
+ * 并非订单 ID。前端应轮询 `/api/order/status/{processingId}` 等待异步落单完成，再跳转订单详情。
+ */
 export type OrderCreateResult = string
 
 /** 下单商品项（对照 OrderCreateDTO.OrderItemDTO） */

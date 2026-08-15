@@ -9,6 +9,7 @@ export type StatusType =
   | 'completed'     // 已完成
   | 'cancelled'     // 已取消
   | 'disabled'      // 已停用 / 已下架
+  | 'failed'        // 失败 / 异常
 
 const props = withDefaults(defineProps<{
   /** 语义类型，决定配色 */
@@ -33,7 +34,8 @@ const configs: Record<StatusType, StatusConfig> = {
   'pending-pay': { label: '待支付', color: '#E08600', bg: 'rgba(224,134,0,0.10)' },
   completed: { label: '已完成', color: '#12A77D', bg: 'rgba(18,167,125,0.10)' },
   cancelled: { label: '已取消', color: '#98A1AF', bg: 'rgba(152,161,175,0.14)' },
-  disabled: { label: '已停用', color: '#98A1AF', bg: 'rgba(152,161,175,0.14)' }
+  disabled: { label: '已停用', color: '#98A1AF', bg: 'rgba(152,161,175,0.14)' },
+  failed: { label: '失败', color: '#E0404E', bg: 'rgba(224,64,78,0.10)' }
 }
 
 const cfg = computed(() => configs[props.type])

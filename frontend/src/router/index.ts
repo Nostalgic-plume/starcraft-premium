@@ -1,7 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { createAppRouter } from '@shared/js/createRouter'
+import type { RouteRecordRaw } from 'vue-router'
 
-const routes = [
+const routes: RouteRecordRaw[] = [
   { path: '/', redirect: '/login' },
   {
     path: '/home',

@@ -1,14 +1,34 @@
-import request from './request'
+import { post } from './request'
+import type { Result } from './types'
+
+/** SSE 流式数据帧（后端 /api/chat/ask） */
+export interface ChatStreamFrame {
+  type: 'token' | 'end' | 'error'
+  content?: string
+}
+
+/** 流式回调 */
+export interface ChatCallbacks {
+  onToken?: (content: string) => void
+  onEnd?: () => void
+  onError?: (msg: string) => void
+}
 
 /**
  * 智能客服 SSE 流式问答
  * 使用 fetch 读取 EventStream，非标准 axios（不支持流式响应）
  */
-export function postAsk(message, conversationId, onToken, onEnd, onError) {
+export function postAsk(
+  message: string,
+  conversationId: string,
+  onToken?: (content: string) => void,
+  onEnd?: () => void,
+  onError?: (msg: string) => void
+): Promise<void> {
   const token = localStorage.getItem('token')
   const baseURL = import.meta.env.VITE_API_BASE || ''
 
-  return new Promise((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     fetch(baseURL + '/api/chat/ask', {
       method: 'POST',
       headers: {
@@ -21,6 +41,12 @@ export function postAsk(message, conversationId, onToken, onEnd, onError) {
         const text = await response.text().catch(() => '')
         onError?.('请求失败: ' + (text || response.statusText))
         reject(new Error(text || response.statusText))
+        return
+      }
+
+      if (!response.body) {
+        onError?.('响应无数据流')
+        reject(new Error('响应无数据流'))
         return
       }
 
@@ -45,11 +71,11 @@ export function postAsk(message, conversationId, onToken, onEnd, onError) {
               const data = line.slice(5).trim()
               if (!data) continue
               try {
-                const parsed = JSON.parse(data)
+                const parsed = JSON.parse(data) as ChatStreamFrame
                 if (parsed.type === 'token') {
-                  onToken?.(parsed.content)
+                  onToken?.(parsed.content || '')
                 } else if (parsed.type === 'error') {
-                  onError?.(parsed.content)
+                  onError?.(parsed.content || '')
                 } else if (parsed.type === 'end') {
                   // end 已在 done 时触发
                 }
@@ -60,14 +86,14 @@ export function postAsk(message, conversationId, onToken, onEnd, onError) {
           }
 
           read()
-        }).catch((err) => {
+        }).catch((err: Error) => {
           onError?.('读取中断: ' + err.message)
           reject(err)
         })
       }
 
       read()
-    }).catch((err) => {
+    }).catch((err: Error) => {
       onError?.('网络异常: ' + err.message)
       reject(err)
     })
@@ -75,6 +101,6 @@ export function postAsk(message, conversationId, onToken, onEnd, onError) {
 }
 
 /** 清除对话历史 */
-export function clearConversation(conversationId) {
-  return request.post('/chat/clear', { conversationId: conversationId || 'default' })
+export function clearConversation(conversationId: string): Promise<Result<void>> {
+  return post<void>('/chat/clear', { conversationId: conversationId || 'default' })
 }

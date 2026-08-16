@@ -1,46 +1,164 @@
 <template>
   <div class="page-container fade-in" ref="pageRef">
-    <!-- ====== Hero 横幅 ====== -->
+    <!-- ====== Hero 区域（中性渐变底 + 蓝色强调 + 统计条） ====== -->
     <section class="hero">
-      <div class="hero-content">
-        <h1 class="hero-title">发现好物</h1>
-        <p class="hero-desc">精选商品，品质生活从这里开始</p>
-        <div class="hero-search">
-          <div class="search-mode-toggle">
-            <span
-              class="mode-option"
-              :class="{ active: searchMode === 'keyword' }"
-              @click="searchMode = 'keyword'"
-            >关键词</span>
-            <span class="mode-divider">|</span>
-            <span
-              class="mode-option"
-              :class="{ active: searchMode === 'semantic' }"
-              @click="searchMode = 'semantic'"
-            >智能</span>
+      <div class="hero-inner">
+        <div class="hero-copy">
+          <span class="hero-eyebrow">
+            <SvgIcon name="star" :size="13" />
+            星创优品 · 品质甄选
+          </span>
+          <h1 class="hero-title">
+            发现好物，<span class="hero-highlight">优中选优</span>，品质生活从这里开始
+          </h1>
+          <p class="hero-desc">覆盖数码、家居、美妆全品类，精选正品，好价快物流</p>
+
+          <!-- 搜索框 + 下拉（历史 / 热搜） -->
+          <div class="hero-search-wrap" ref="searchWrapRef">
+            <div class="search-mode">
+              <button
+                type="button"
+                class="mode-item"
+                :class="{ active: searchMode === 'keyword' }"
+                @click="searchMode = 'keyword'"
+              >关键词</button>
+              <button
+                type="button"
+                class="mode-item"
+                :class="{ active: searchMode === 'semantic' }"
+                @click="searchMode = 'semantic'"
+              >智能搜索</button>
+            </div>
+
+            <div class="hero-search">
+              <div class="search-input-box" :class="{ focused: searchPanelOpen }">
+                <SvgIcon name="search" :size="18" class="search-icon" />
+                <input
+                  v-model="keyword"
+                  :placeholder="searchPlaceholder"
+                  class="search-input"
+                  @focus="openSearchPanel"
+                  @keyup.enter="handleSearch"
+                />
+                <button
+                  v-if="keyword"
+                  type="button"
+                  class="search-clear"
+                  aria-label="清空输入"
+                  @click="keyword = ''"
+                >
+                  <SvgIcon name="close" :size="13" />
+                </button>
+              </div>
+              <button type="button" class="search-btn" @click="handleSearch">
+                {{ searchMode === 'semantic' ? '智能搜索' : '搜索' }}
+                <SvgIcon name="search" :size="16" />
+              </button>
+            </div>
+
+            <p v-if="searchMode === 'semantic'" class="search-hint">
+              智能搜索基于商品描述语义匹配，而非关键词精确匹配
+            </p>
+
+            <!-- 搜索下拉面板 -->
+            <transition name="panel">
+              <div v-if="searchPanelOpen" class="search-panel">
+                <div v-if="searchHistory.length" class="sp-section">
+                  <div class="sp-head">
+                    <span class="sp-title">
+                      <SvgIcon name="clock" :size="14" />
+                      搜索历史
+                    </span>
+                    <button type="button" class="sp-clear" @click="clearHistory">
+                      <SvgIcon name="close" :size="12" />
+                      清空
+                    </button>
+                  </div>
+                  <div class="sp-tags">
+                    <span
+                      v-for="h in searchHistory"
+                      :key="h"
+                      class="sp-tag"
+                      @click="searchWord(h)"
+                    >{{ h }}</span>
+                  </div>
+                </div>
+
+                <div class="sp-section">
+                  <div class="sp-head">
+                    <span class="sp-title">
+                      <SvgIcon name="star" :size="14" />
+                      热搜榜
+                    </span>
+                  </div>
+                  <div class="sp-hot">
+                    <button
+                      v-for="(w, i) in HOT_WORDS"
+                      :key="w"
+                      type="button"
+                      class="sp-hot-item"
+                      @click="searchWord(w)"
+                    >
+                      <span class="hot-rank" :class="{ top: i < 3 }">{{ i + 1 }}</span>
+                      <span class="hot-name">{{ w }}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </transition>
           </div>
-          <el-input
-            v-model="keyword"
-            :placeholder="searchMode === 'semantic' ? '搜索商品描述，例如：便宜的手机...' : '搜索商品名称...'"
-            clearable
-            class="hero-search-input"
-            :prefix-icon="Search"
-            @focus="onSearchFocus"
-            @blur="onSearchBlur"
-            @keyup.enter="handleSearch"
-          />
-          <el-button type="primary" class="hero-search-btn" @click="handleSearch">
-            {{ searchMode === 'semantic' ? '智能搜索' : '搜索' }}
-          </el-button>
+
+          <!-- 数据统计条 -->
+          <div class="hero-stats">
+            <div class="stat-item">
+              <span class="stat-num">{{ total }}</span>
+              <span class="stat-label">甄选商品</span>
+            </div>
+            <div class="stat-divider" />
+            <div class="stat-item">
+              <span class="stat-num">98%</span>
+              <span class="stat-label">好评率</span>
+            </div>
+            <div class="stat-divider" />
+            <div class="stat-item">
+              <span class="stat-num">48h</span>
+              <span class="stat-label">极速发货</span>
+            </div>
+            <div class="stat-divider" />
+            <div class="stat-item">
+              <span class="stat-num">10w+</span>
+              <span class="stat-label">活跃用户</span>
+            </div>
+          </div>
         </div>
-        <div v-if="searchMode === 'semantic' && keyword" class="search-mode-hint">
-          🔍 智能搜索模式 — 基于语义匹配商品描述，非关键词精确匹配
+
+        <!-- 右侧装饰（纯 CSS + SVG，aria-hidden） -->
+        <div class="hero-visual" aria-hidden="true">
+          <div class="hero-glow"></div>
+          <div class="hero-blob blob-1"></div>
+          <div class="hero-blob blob-2"></div>
+          <div class="hero-card float-card">
+            <div class="hero-card-head">
+              <span class="hero-card-dot dot-a"></span>
+              <span class="hero-card-dot dot-b"></span>
+              <span class="hero-card-dot dot-c"></span>
+            </div>
+            <div class="hero-card-bars">
+              <div class="bar bar-1"></div>
+              <div class="bar bar-2"></div>
+              <div class="bar bar-3"></div>
+              <div class="bar bar-4"></div>
+            </div>
+          </div>
+          <div class="hero-chip chip-1">
+            <SvgIcon name="check-circle" :size="15" />
+            正品保障
+          </div>
+          <div class="hero-chip chip-2">
+            <SvgIcon name="pay" :size="15" />
+            极速发货
+          </div>
         </div>
-      </div>
-      <div class="hero-decoration">
-        <span class="hero-dot dot-1"></span>
-        <span class="hero-dot dot-2"></span>
-        <span class="hero-dot dot-3"></span>
       </div>
     </section>
 
@@ -49,12 +167,7 @@
       <!-- 左侧分类 -->
       <aside class="category-panel">
         <div class="category-header">
-          <svg class="category-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="3" width="7" height="7" rx="1"/>
-            <rect x="14" y="3" width="7" height="7" rx="1"/>
-            <rect x="3" y="14" width="7" height="7" rx="1"/>
-            <rect x="14" y="14" width="7" height="7" rx="1"/>
-          </svg>
+          <SvgIcon name="filter" :size="16" />
           <span>全部分类</span>
         </div>
 
@@ -64,52 +177,47 @@
             :key="cat.id"
             class="category-item-wrap"
           >
-            <div
+            <button
+              type="button"
               class="category-item"
               :class="{
-                active: expandedCategoryId === cat.id && !currentCategory,
-                expanded: expandedCategoryId === cat.id
+                expanded: expandedCategoryId === cat.id,
+                active: expandedCategoryId === cat.id && !currentCategory
               }"
               @click="toggleCategory(cat)"
             >
               <span class="category-name">{{ cat.name }}</span>
-              <svg
+              <SvgIcon
+                name="chevron-right"
+                :size="14"
                 class="category-arrow"
                 :class="{ rotated: expandedCategoryId === cat.id }"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <polyline points="9 18 15 12 9 6"/>
-              </svg>
-            </div>
+              />
+            </button>
             <!-- 子分类展开在当前一级分类下 -->
             <transition name="sub-slide">
               <div v-if="expandedCategoryId === cat.id" class="subcategory-panel">
-                <div
+                <button
+                  type="button"
                   class="subcategory-item active"
                   @click="selectSubCategory(null)"
-                >
-                  全部{{ cat.name }}
-                </div>
-                <div
+                >全部{{ cat.name }}</button>
+                <button
                   v-for="sub in subCategories"
                   :key="sub.id"
+                  type="button"
                   class="subcategory-item"
                   :class="{ selected: currentCategory === sub.id }"
                   @click="selectSubCategory(sub)"
-                >
-                  {{ sub.name }}
-                </div>
+                >{{ sub.name }}</button>
               </div>
             </transition>
           </div>
         </div>
 
-        <!-- 热门标签 -->
+        <!-- 热门分类 -->
         <div v-if="hotTags.length" class="hot-tags">
-          <div class="hot-tags-label">🔥 热门</div>
+          <div class="hot-tags-label">热门</div>
           <div class="hot-tags-list">
             <span
               v-for="tag in hotTags"
@@ -122,83 +230,59 @@
         </div>
 
         <div class="category-footer">
-          <div
+          <button
+            type="button"
             class="category-all"
             :class="{ active: expandedCategoryId === null && currentCategory === null }"
             @click="selectAllCategories"
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
-              <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
-            </svg>
+            <SvgIcon name="box-open" :size="14" />
             全部商品
-          </div>
+          </button>
         </div>
       </aside>
 
       <!-- 右侧内容 -->
       <div class="main-content">
-        <!-- 商品网格 -->
-        <div v-loading="loading" class="product-grid" element-loading-text="加载商品中…">
-          <div
-            v-for="(p, index) in productList"
-            :key="p.id"
-            class="product-card card-elevated"
-            :class="{ 'product-card--wide': index % 4 === 0 }"
-            @click="$router.push('/product/' + p.id)"
-          >
-            <div class="product-image-wrap">
-              <el-image
-                :src="p.mainImage || '/placeholder.png'"
-                class="product-image"
-                fit="cover"
-                loading="lazy"
-              >
-                <template #placeholder>
-                  <div class="image-placeholder skeleton-pulse" />
-                </template>
-              </el-image>
-              <div class="product-badge" v-if="p.status === 1">
-                <span>在售</span>
-              </div>
-              <div class="product-cart-hover">
-                <el-button size="small" round @click.stop="addToCart(p)">
-                  加入购物车
-                </el-button>
-              </div>
-            </div>
-
-            <div class="product-body">
-              <h3 class="product-name">{{ p.name }}</h3>
-              <div class="product-meta">
-                <span class="product-brand">{{ p.brand || '通用' }}</span>
-                <span class="product-sold">已售 {{ p.soldCount || 0 }}</span>
-              </div>
-              <div class="product-pricing">
-                <span class="price-symbol">¥</span>
-                <span class="price-value">{{ formatPrice(p.minPrice) }}</span>
-                <span class="price-original" v-if="p.maxPrice && +p.maxPrice > +p.minPrice">
-                  ¥{{ formatPrice(p.maxPrice) }}
-                </span>
-              </div>
-            </div>
-          </div>
+        <!-- 当前筛选摘要 -->
+        <div v-if="filterLabel" class="filter-bar">
+          <span class="filter-info">
+            <SvgIcon name="filter" :size="14" />
+            {{ filterLabel }}
+          </span>
+          <button type="button" class="filter-reset" @click="resetFilter">清除筛选</button>
         </div>
 
-        <!-- 空状态 -->
-        <el-empty v-if="!loading && productList.length === 0" description="暂无商品">
-          <el-button type="primary" class="ds-btn" @click="loadProducts">刷新看看</el-button>
-        </el-empty>
+        <!-- 商品网格 -->
+        <div class="grid-area">
+          <n-spin :show="loading">
+            <div v-if="productList.length" class="product-grid">
+              <ProductCard
+                v-for="p in productList"
+                :key="p.id"
+                :product="p"
+                @add-cart="addToCart"
+              />
+            </div>
+          </n-spin>
 
-        <!-- 分页 -->
-        <div class="pagination-wrapper">
-          <el-pagination
-            v-model:current-page="page"
-            :page-size="12"
-            :total="Number(total)"
-            layout="prev, pager, next"
-            @current-change="loadProducts"
-            background
-            :hide-on-single-page="false"
+          <EmptyState
+            v-if="!loading && productList.length === 0"
+            :text="isRagResult ? '没有找到相关商品' : '暂无商品'"
+            description="换个关键词或分类试试看"
+          >
+            <button type="button" class="empty-btn" @click="resetFilter">刷新看看</button>
+          </EmptyState>
+        </div>
+
+        <!-- 分页（语义搜索结果不分页） -->
+        <div v-if="!isRagResult && total > 0" class="pagination-wrapper">
+          <n-pagination
+            v-model:page="page"
+            :page-size="pageSize"
+            :item-count="total"
+            :page-slot="5"
+            @update:page="loadProducts"
           />
         </div>
       </div>
@@ -206,35 +290,44 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { Search } from '@element-plus/icons-vue'
+import { useRoute } from 'vue-router'
+import { NPagination, NSpin, useMessage } from 'naive-ui'
 import gsap from 'gsap'
 import { productApi } from '@/api/product'
 import { categoryApi } from '@/api/category'
 import { useCartStore } from '@/stores/cart'
 import { useUserStore } from '@/stores/user'
-import { ElMessage } from 'element-plus'
+import ProductCard from '@/components/ProductCard.vue'
+import EmptyState from '@/components/EmptyState.vue'
+import SvgIcon from '@/components/SvgIcon.vue'
+import type { CategoryVO, ProductPageQuery, ProductVO } from '@/api/types'
 
 const cartStore = useCartStore()
 const userStore = useUserStore()
+const message = useMessage()
+const route = useRoute()
 
-const productList = ref([])
-const categories = ref([])
+const productList = ref<ProductVO[]>([])
+const categories = ref<CategoryVO[]>([])
 const loading = ref(false)
 const keyword = ref('')
-const searchMode = ref('keyword') // 'keyword' | 'semantic'
-const currentCategory = ref(null)
-const expandedCategoryId = ref(null)
+const searchMode = ref<'keyword' | 'semantic'>('keyword')
+const currentCategory = ref<string | null>(null)
+const expandedCategoryId = ref<string | null>(null)
 const page = ref(1)
-const pageSize = ref(12)
+const pageSize = 12
 const total = ref(0)
+/** 语义搜索命中结果：不参与分页 */
+const isRagResult = ref(false)
 
-const pageRef = ref(null)
-let ctx = null
+const pageRef = ref<HTMLElement | null>(null)
+let ctx: gsap.Context | null = null
 
+/* ====== 分类 ====== */
 const topCategories = computed(() =>
-  categories.value.filter(c => c.parentId == 0 || c.parentId === null)
+  categories.value.filter(c => c.parentId === '0' || c.parentId === null)
 )
 
 const subCategories = computed(() => {
@@ -244,18 +337,70 @@ const subCategories = computed(() => {
 
 const hotTags = computed(() => topCategories.value.slice(0, 6))
 
-function formatPrice(val) {
-  const n = Number(val)
-  return Number.isInteger(n) ? n.toString() : n.toFixed(2)
+/* ====== 搜索历史 + 热搜榜 ====== */
+const HISTORY_KEY = 'shop_search_history'
+const HISTORY_MAX = 10
+/** 热搜榜（静态占位数据，后续可接后端热搜接口） */
+const HOT_WORDS = ['手机', '耳机', '手表', '运动鞋', '精华', '笔记本', '拉面', '沙发']
+const searchHistory = ref<string[]>([])
+const searchPanelOpen = ref(false)
+const searchWrapRef = ref<HTMLElement | null>(null)
+
+function loadHistory() {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY)
+    const arr = raw ? JSON.parse(raw) : []
+    searchHistory.value = Array.isArray(arr)
+      ? arr.filter((x): x is string => typeof x === 'string').slice(0, HISTORY_MAX)
+      : []
+  } catch {
+    searchHistory.value = []
+  }
 }
 
+function persistHistory() {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(searchHistory.value))
+  } catch {
+    /* localStorage 不可用时静默忽略 */
+  }
+}
+
+function recordHistory(word: string) {
+  const q = word.trim()
+  if (!q) return
+  searchHistory.value = [q, ...searchHistory.value.filter(x => x !== q)].slice(0, HISTORY_MAX)
+  persistHistory()
+}
+
+function clearHistory() {
+  searchHistory.value = []
+  persistHistory()
+}
+
+function openSearchPanel() {
+  searchPanelOpen.value = true
+}
+
+function searchWord(word: string) {
+  keyword.value = word
+  searchPanelOpen.value = false
+  handleSearch()
+}
+
+const searchPlaceholder = computed(() =>
+  searchMode.value === 'semantic' ? '搜索商品描述，例如：便宜的手机…' : '搜索商品名称…'
+)
+
+/* ====== 商品加载 ====== */
 async function loadProducts() {
   loading.value = true
+  isRagResult.value = false
   try {
-    const params = {
+    const params: ProductPageQuery = {
       page: page.value || 1,
-      pageSize: pageSize.value || 12,
-      keyword: keyword.value || undefined
+      pageSize,
+      keyword: keyword.value.trim() || undefined
     }
     if (currentCategory.value) {
       params.categoryId = currentCategory.value
@@ -264,6 +409,7 @@ async function loadProducts() {
     }
     const res = await productApi.page(params)
     productList.value = res.data?.list || []
+    // ⚠️ 后端 Long→String，total 需 Number() 转换
     total.value = Number(res.data?.total) || 0
   } catch (e) {
     console.error('加载商品列表失败:', e)
@@ -284,6 +430,59 @@ async function loadCategories() {
   }
 }
 
+async function handleSearch() {
+  searchPanelOpen.value = false
+  const q = keyword.value.trim()
+  if (!q) {
+    // 空关键词：恢复全量列表
+    keyword.value = ''
+    page.value = 1
+    loadProducts()
+    return
+  }
+  recordHistory(q)
+  if (searchMode.value === 'semantic') {
+    await semanticSearch(q)
+  } else {
+    page.value = 1
+    loadProducts()
+  }
+}
+
+async function semanticSearch(q: string) {
+  loading.value = true
+  isRagResult.value = true
+  try {
+    const res = await productApi.ragSearch({ q, topK: 20 })
+    const hits = res.data?.hits || []
+    productList.value = hits.map(h => ({
+      id: h.productId,
+      name: h.name || '',
+      description: '',
+      categoryId: '',
+      categoryName: '',
+      brand: '',
+      mainImage: h.image || '',
+      images: [],
+      detail: '',
+      minPrice: h.minPrice,
+      maxPrice: h.maxPrice,
+      totalStock: 0,
+      soldCount: 0,
+      status: 1,
+      skuList: []
+    }))
+    total.value = hits.length
+  } catch (e) {
+    console.error('语义搜索失败:', e)
+    productList.value = []
+    total.value = 0
+  } finally {
+    loading.value = false
+  }
+}
+
+/* ====== 分类筛选 ====== */
 function selectAllCategories() {
   expandedCategoryId.value = null
   currentCategory.value = null
@@ -291,7 +490,7 @@ function selectAllCategories() {
   loadProducts()
 }
 
-function toggleCategory(cat) {
+function toggleCategory(cat: CategoryVO) {
   if (expandedCategoryId.value === cat.id) {
     expandedCategoryId.value = null
     currentCategory.value = null
@@ -303,136 +502,125 @@ function toggleCategory(cat) {
   loadProducts()
 }
 
-function selectSubCategory(sub) {
+function selectSubCategory(sub: CategoryVO | null) {
   currentCategory.value = sub ? sub.id : null
   page.value = 1
   loadProducts()
 }
 
-function selectHotTag(tag) {
+function selectHotTag(tag: CategoryVO) {
   expandedCategoryId.value = tag.id
   currentCategory.value = null
   page.value = 1
   loadProducts()
 }
 
-async function handleSearch() {
-  if (searchMode.value === 'semantic' && keyword.value.trim()) {
-    // 语义搜索模式 — 调用 RAG 向量检索
-    loading.value = true
-    try {
-      const res = await productApi.ragSearch({ q: keyword.value.trim(), topK: 20 })
-      const hits = res.data?.hits || []
-      productList.value = hits.map(h => ({
-        id: h.productId,
-        name: h.name || '',
-        mainImage: h.image || '/placeholder.png',
-        minPrice: h.minPrice,
-        maxPrice: h.maxPrice,
-        brand: '',
-        soldCount: 0,
-        status: 1
-      }))
-      total.value = Number(res.data?.total) || hits.length
-    } catch (e) {
-      console.error('语义搜索失败:', e)
-      productList.value = []
-      total.value = 0
-    } finally {
-      loading.value = false
-    }
-    return
+/* ====== 筛选摘要 ====== */
+const filterLabel = computed(() => {
+  if (keyword.value.trim()) return `关键词：${keyword.value.trim()}`
+  if (currentCategory.value) {
+    const sub = categories.value.find(c => c.id === currentCategory.value)
+    return `分类：${sub?.name || '全部'}`
   }
-  // 关键词模式 — 传统分页搜索
+  if (expandedCategoryId.value) {
+    const top = topCategories.value.find(c => c.id === expandedCategoryId.value)
+    return `分类：${top?.name || '全部'}`
+  }
+  return ''
+})
+
+function resetFilter() {
+  keyword.value = ''
+  currentCategory.value = null
+  expandedCategoryId.value = null
   page.value = 1
+  searchMode.value = 'keyword'
+  isRagResult.value = false
   loadProducts()
 }
 
-function addToCart(product) {
-  if (!product.id) return
+/* ====== 加购 ====== */
+async function addToCart(product: ProductVO) {
   if (!userStore.isLoggedIn()) {
-    ElMessage.warning('请先登录')
+    message.warning('请先登录')
     return
   }
-  cartStore.addItem({
-    productId: product.id,
-    name: product.name,
-    image: product.mainImage,
-    price: product.minPrice,
-    quantity: 1
-  })
-  ElMessage.success('已加入购物车')
+  const sku = product.skuList?.[0]
+  if (!sku) {
+    message.warning('该商品暂无规格，请到详情页选择')
+    return
+  }
+  try {
+    await cartStore.addItem({ skuId: sku.id, quantity: 1 })
+    message.success('已加入购物车')
+  } catch {
+    // 错误提示由 axios 拦截器统一处理
+  }
 }
 
-/* ====== GSAP 动画 ====== */
+/* ====== GSAP Hero 动画 ====== */
 function initHeroAnimation() {
   if (!pageRef.value) return
   ctx = gsap.context(() => {
-    // Hero 标题/描述交错入场
     const tl = gsap.timeline({ defaults: { ease: 'power3.out' } })
-    tl.from('.hero-title', { y: 30, opacity: 0, duration: 0.7 })
-      .from('.hero-desc', { y: 20, opacity: 0, duration: 0.6 }, '-=0.35')
-      .from('.hero-search', { y: 15, opacity: 0, duration: 0.5 }, '-=0.25')
-
-    // 装饰圆点浮动动画
-    gsap.to('.dot-1', { y: -14, duration: 3.5, repeat: -1, yoyo: true, ease: 'sine.inOut' })
-    gsap.to('.dot-2', { y: 10, duration: 3, repeat: -1, yoyo: true, ease: 'sine.inOut', delay: 0.6 })
-    gsap.to('.dot-3', { y: -8, duration: 2.5, repeat: -1, yoyo: true, ease: 'sine.inOut', delay: 1.2 })
+    tl.from('.hero-eyebrow', { y: 20, opacity: 0, duration: 0.6 })
+      .from('.hero-title', { y: 28, opacity: 0, duration: 0.7 }, '-=0.35')
+      .from('.hero-desc', { y: 18, opacity: 0, duration: 0.6 }, '-=0.3')
+      .from('.hero-search-wrap', { y: 16, opacity: 0, duration: 0.5 }, '-=0.25')
+      .from('.hero-stats', { y: 14, opacity: 0, duration: 0.5 }, '-=0.2')
+    // 右侧装饰卡片 / 条形 / 徽章
+    gsap.from('.hero-card', { y: 24, opacity: 0, duration: 0.7, delay: 0.15 })
+    gsap.from('.bar', {
+      scaleY: 0,
+      transformOrigin: 'bottom',
+      duration: 0.6,
+      stagger: 0.08,
+      ease: 'power2.out',
+      delay: 0.4
+    })
+    gsap.from('.hero-chip', {
+      y: 14,
+      opacity: 0,
+      duration: 0.5,
+      stagger: 0.12,
+      ease: 'power2.out',
+      delay: 0.6
+    })
+    // 背景光斑浮动
+    gsap.to('.blob-1', { y: -14, duration: 4, repeat: -1, yoyo: true, ease: 'sine.inOut' })
+    gsap.to('.blob-2', { y: 10, duration: 3.2, repeat: -1, yoyo: true, ease: 'sine.inOut', delay: 0.6 })
   }, pageRef.value)
 }
 
-function onSearchFocus() {
-  gsap.to('.hero-search-input', {
-    scale: 1.03,
-    transformOrigin: 'left center',
-    duration: 0.35,
-    ease: 'power2.out'
-  })
-  gsap.to('.hero-search-input .el-input__wrapper', {
-    boxShadow: '0 0 0 2px rgba(233,69,96,0.25), 0 4px 20px rgba(233,69,96,0.15)',
-    duration: 0.35,
-    ease: 'power2.out'
-  })
+/* ====== 点击外部关闭搜索面板 ====== */
+function onDocClick(e: MouseEvent) {
+  if (searchWrapRef.value && !searchWrapRef.value.contains(e.target as Node)) {
+    searchPanelOpen.value = false
+  }
 }
 
-function onSearchBlur() {
-  gsap.to('.hero-search-input', {
-    scale: 1,
-    transformOrigin: 'left center',
-    duration: 0.35,
-    ease: 'power2.out'
-  })
-  gsap.to('.hero-search-input .el-input__wrapper', {
-    boxShadow: '0 0 0 1px rgba(255,255,255,0.15)',
-    duration: 0.35,
-    ease: 'power2.out'
-  })
-}
-
-function initProductAnimation() {
-  if (!pageRef.value) return
-  gsap.from('.product-card', {
-    y: 24,
-    opacity: 0,
-    duration: 0.45,
-    stagger: 0.04,
-    ease: 'power2.out'
-  })
-}
-
-onMounted(() => {
-  loadCategories()
-  loadProducts()
+/* ====== 生命周期 ====== */
+onMounted(async () => {
+  loadHistory()
+  document.addEventListener('click', onDocClick)
+  // 支持从 AppHeader 搜索跳转携带 ?keyword=
+  const q = typeof route.query.keyword === 'string' ? route.query.keyword : ''
+  if (q) keyword.value = q
+  await Promise.all([loadCategories(), loadProducts()])
   nextTick(() => initHeroAnimation())
 })
 
-watch(productList, (newList) => {
-  if (newList && newList.length > 0) {
-    nextTick(() => initProductAnimation())
+// 同路由下 query 变化（AppHeader 搜索再次跳转）时刷新关键词
+watch(() => route.query.keyword, (q) => {
+  if (typeof q === 'string' && q.trim()) {
+    keyword.value = q
+    page.value = 1
+    loadProducts()
   }
 })
 
 onUnmounted(() => {
+  document.removeEventListener('click', onDocClick)
   ctx?.revert()
 })
 </script>
@@ -441,113 +629,337 @@ onUnmounted(() => {
 /* ====== Hero 区域 ====== */
 .hero {
   position: relative;
-  background: linear-gradient(135deg, #1a1a2e 0%, #2d2d50 50%, #1a1a2e 100%);
-  border-radius: var(--ds-radius-xl, 20px);
-  padding: 48px 44px;
-  margin-bottom: 28px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, #f6f7fa 0%, #eef1f7 55%, #e7edfa 100%);
+  border: 1px solid var(--ds-line, #e7e9ee);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    var(--ds-shadow, 0 2px 10px rgba(31, 38, 48, 0.05));
   overflow: hidden;
   isolation: isolate;
+  padding: 44px 48px;
+  margin-bottom: 28px;
 }
-.hero-content {
+.hero-inner {
   position: relative;
   z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 40px;
+  align-items: center;
+}
+.hero-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--ds-primary, #2d7ff9);
+  background: var(--ds-primary-tint, rgba(45, 127, 249, 0.08));
+  border: 1px solid var(--ds-primary-border, rgba(45, 127, 249, 0.25));
+  padding: 5px 12px;
+  border-radius: var(--ds-r-pill, 999px);
+  margin-bottom: 16px;
 }
 .hero-title {
-  font-size: 34px;
+  font-size: 36px;
+  line-height: 1.25;
   font-weight: 800;
-  color: #fff;
-  margin-bottom: 8px;
-  letter-spacing: -0.5px;
+  letter-spacing: -1px;
+  color: var(--ds-text, #1e2632);
+  margin: 0 0 12px;
+}
+.hero-highlight {
+  color: var(--ds-primary, #2d7ff9);
 }
 .hero-desc {
-  font-size: 16px;
-  color: rgba(255, 255, 255, 0.65);
-  margin-bottom: 24px;
+  font-size: 15px;
+  color: var(--ds-text-2, #5a6474);
+  margin: 0 0 22px;
 }
-.search-mode-toggle {
+
+/* 搜索模式切换 */
+.hero-search-wrap { max-width: 540px; position: relative; }
+.search-mode { display: flex; gap: 4px; margin-bottom: 10px; }
+.mode-item {
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ds-text-3, #98a1af);
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+.mode-item:hover { color: var(--ds-primary, #2d7ff9); }
+.mode-item.active {
+  color: var(--ds-primary, #2d7ff9);
+  font-weight: 700;
+  background: var(--ds-primary-tint, rgba(45, 127, 249, 0.08));
+}
+
+/* 搜索条 */
+.hero-search { display: flex; gap: 10px; }
+.search-input-box {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 10px;
+  height: 48px;
+  padding: 0 14px;
+  background: var(--ds-card, #fff);
+  border: 1.5px solid var(--ds-line-2, #d8dce4);
+  border-radius: 12px;
+  transition: all 0.2s;
 }
-.mode-option {
-  font-size: 13px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.5);
+.search-input-box:focus-within,
+.search-input-box.focused {
+  border-color: var(--ds-primary, #2d7ff9);
+  box-shadow: 0 0 0 4px var(--ds-primary-tint, rgba(45, 127, 249, 0.08));
+}
+.search-icon { color: var(--ds-text-3, #98a1af); flex-shrink: 0; }
+.search-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 15px;
+  color: var(--ds-text, #1e2632);
+}
+.search-input::placeholder { color: var(--ds-text-3, #98a1af); }
+.search-clear {
+  border: none;
+  background: var(--ds-bg-2, #eef0f4);
+  color: var(--ds-text-3, #98a1af);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   transition: all 0.2s;
-  user-select: none;
-  padding: 2px 0;
 }
-.mode-option:hover { color: rgba(255, 255, 255, 0.8); }
-.mode-option.active {
+.search-clear:hover { color: var(--ds-text, #1e2632); }
+.search-btn {
+  height: 48px;
+  padding: 0 22px;
+  border: none;
+  border-radius: 12px;
+  background: var(--ds-primary-grad, linear-gradient(135deg, #5aa3ff, #2d7ff9));
   color: #fff;
+  font-size: 15px;
   font-weight: 700;
-  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  box-shadow: var(--ds-shadow-brand, 0 4px 14px rgba(45, 127, 249, 0.25));
+  transition: all 0.2s;
 }
-.mode-option.active::after {
-  content: '';
-  position: absolute;
-  bottom: -2px;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: var(--ds-coral, #e94560);
-  border-radius: 1px;
+.search-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(45, 127, 249, 0.32);
 }
-.mode-divider {
-  color: rgba(255, 255, 255, 0.25);
-  font-size: 13px;
-}
-.search-mode-hint {
-  margin-top: 10px;
+.search-hint {
+  margin: 8px 2px 0;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
-  letter-spacing: 0.3px;
-}
-.hero-search {
-  display: flex;
-  gap: 10px;
-  max-width: 480px;
-}
-.hero-search-input {
-  flex: 1;
-}
-.hero-search-input :deep(.el-input__wrapper) {
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.15) !important;
-  box-shadow: none !important;
-  height: 48px;
-  border-radius: var(--ds-radius, 10px);
-}
-.hero-search-input :deep(.el-input__inner) {
-  color: #fff;
-  font-size: 15px;
-}
-.hero-search-input :deep(.el-input__inner::placeholder) {
-  color: rgba(255, 255, 255, 0.4);
-}
-.hero-search-input :deep(.el-input__prefix-inner) {
-  color: rgba(255, 255, 255, 0.5);
-}
-.hero-search-btn {
-  height: 48px;
-  padding: 0 28px;
-  border-radius: var(--ds-radius, 10px);
-  font-weight: 600;
-  font-size: 15px;
+  color: var(--ds-text-3, #98a1af);
 }
 
-/* 装饰圆点 */
-.hero-decoration { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
-.hero-dot {
+/* 搜索下拉面板 */
+.search-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  z-index: 60;
+  background: var(--ds-card, #fff);
+  border: 1px solid var(--ds-line, #e7e9ee);
+  border-radius: 14px;
+  box-shadow: var(--ds-shadow-hover, 0 12px 30px rgba(31, 38, 48, 0.1));
+  padding: 14px;
+}
+.sp-section + .sp-section {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--ds-line, #e7e9ee);
+}
+.sp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.sp-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ds-text, #1e2632);
+}
+.sp-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  color: var(--ds-text-3, #98a1af);
+  font-size: 12px;
+  cursor: pointer;
+}
+.sp-clear:hover { color: var(--ds-primary, #2d7ff9); }
+.sp-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+.sp-tag {
+  padding: 5px 12px;
+  border-radius: var(--ds-r-pill, 999px);
+  background: var(--ds-bg-2, #eef0f4);
+  color: var(--ds-text-2, #5a6474);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.sp-tag:hover { background: var(--ds-primary, #2d7ff9); color: #fff; }
+.sp-hot { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
+.sp-hot-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: none;
+  background: transparent;
+  padding: 7px 8px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--ds-text, #1e2632);
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: left;
+}
+.sp-hot-item:hover { background: var(--ds-primary-tint, rgba(45, 127, 249, 0.08)); }
+.hot-rank {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  background: var(--ds-bg-2, #eef0f4);
+  color: var(--ds-text-3, #98a1af);
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.hot-rank.top {
+  background: var(--ds-primary-grad, linear-gradient(135deg, #5aa3ff, #2d7ff9));
+  color: #fff;
+}
+.hot-name { flex: 1; }
+.panel-enter-active,
+.panel-leave-active { transition: all 0.18s ease; }
+.panel-enter-from,
+.panel-leave-to { opacity: 0; transform: translateY(-6px); }
+
+/* 数据统计条 */
+.hero-stats {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  margin-top: 26px;
+  padding-top: 20px;
+  border-top: 1px dashed var(--ds-line-2, #d8dce4);
+}
+.stat-item { display: flex; flex-direction: column; gap: 2px; }
+.stat-num {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--ds-primary, #2d7ff9);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.5px;
+}
+.stat-label { font-size: 12px; color: var(--ds-text-3, #98a1af); }
+.stat-divider { width: 1px; height: 28px; background: var(--ds-line-2, #d8dce4); }
+
+/* 右侧装饰 */
+.hero-visual { position: relative; height: 220px; }
+.hero-glow {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 60% 40%, rgba(45, 127, 249, 0.14), transparent 65%);
+  border-radius: 24px;
+}
+.hero-blob {
   position: absolute;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(45, 127, 249, 0.08);
+  pointer-events: none;
 }
-.dot-1 { width: 300px; height: 300px; top: -80px; right: -60px; }
-.dot-2 { width: 180px; height: 180px; bottom: -40px; right: 120px; background: rgba(233, 69, 96, 0.06); }
-.dot-3 { width: 80px; height: 80px; top: 50%; right: 40%; background: rgba(233, 69, 96, 0.08); }
+.blob-1 { width: 260px; height: 260px; right: -60px; top: -80px; }
+.blob-2 {
+  width: 140px;
+  height: 140px;
+  right: 190px;
+  bottom: -40px;
+  background: rgba(45, 127, 249, 0.05);
+}
+.hero-card {
+  position: absolute;
+  left: 44px;
+  top: 28px;
+  width: 240px;
+  height: 160px;
+  background: #fff;
+  border: 1px solid var(--ds-line, #e7e9ee);
+  border-radius: 18px;
+  box-shadow: var(--ds-shadow-hover, 0 12px 30px rgba(31, 38, 48, 0.1));
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transform: rotate(-3deg);
+}
+.float-card { animation: floatCard 5s ease-in-out infinite; }
+@keyframes floatCard {
+  0%, 100% { transform: rotate(-3deg) translateY(0); }
+  50% { transform: rotate(-3deg) translateY(-8px); }
+}
+.hero-card-head { display: flex; gap: 6px; }
+.hero-card-dot { width: 8px; height: 8px; border-radius: 50%; }
+.hero-card-dot.dot-a { background: #e0404e; }
+.hero-card-dot.dot-b { background: #e08600; }
+.hero-card-dot.dot-c { background: #12a77d; }
+.hero-card-bars { display: flex; align-items: flex-end; gap: 10px; flex: 1; }
+.bar {
+  flex: 1;
+  border-radius: 6px 6px 2px 2px;
+  background: var(--ds-primary-grad, linear-gradient(135deg, #5aa3ff, #2d7ff9));
+  opacity: 0.92;
+}
+.bar-1 { height: 40%; }
+.bar-2 { height: 70%; }
+.bar-3 { height: 55%; }
+.bar-4 { height: 90%; }
+.bar-2,
+.bar-4 { background: linear-gradient(135deg, #a5c9ff, #2d7ff9); }
+.hero-chip {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #fff;
+  border: 1px solid var(--ds-line, #e7e9ee);
+  border-radius: var(--ds-r-pill, 999px);
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ds-text-2, #5a6474);
+  box-shadow: var(--ds-shadow, 0 2px 10px rgba(31, 38, 48, 0.05));
+}
+.hero-chip svg { color: var(--ds-primary, #2d7ff9); }
+.chip-1 { right: 4px; top: 16px; }
+.chip-2 { right: 64px; bottom: 6px; }
 
 /* ====== 布局 ====== */
 .shop-layout {
@@ -555,25 +967,20 @@ onUnmounted(() => {
   gap: 24px;
   align-items: flex-start;
 }
+.main-content { flex: 1; min-width: 0; }
 
 /* ====== 分类面板 ====== */
 .category-panel {
   width: 220px;
   flex-shrink: 0;
-  background: var(--ds-surface, #fff);
-  border: 1px solid var(--ds-border-light, #f0eee9);
-  border-radius: var(--ds-radius-lg, 16px);
+  background: var(--ds-card, #fff);
+  border: 1px solid var(--ds-line, #e7e9ee);
+  border-radius: var(--ds-r-lg, 16px);
   overflow: hidden;
   position: sticky;
-  top: 20px;
-  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
-  box-shadow: var(--ds-shadow-sm, 0 1px 3px rgba(26,26,46,0.06));
+  top: 84px;
+  box-shadow: var(--ds-shadow, 0 2px 10px rgba(31, 38, 48, 0.05));
 }
-.category-panel:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--ds-shadow-md, 0 4px 16px rgba(26,26,46,0.08));
-}
-
 .category-header {
   display: flex;
   align-items: center;
@@ -581,288 +988,211 @@ onUnmounted(() => {
   padding: 16px 18px 12px;
   font-size: 15px;
   font-weight: 700;
-  color: var(--ds-navy, #1a1a2e);
-  border-bottom: 1px solid var(--ds-border-light, #f0eee9);
+  color: var(--ds-text, #1e2632);
+  border-bottom: 1px solid var(--ds-line, #e7e9ee);
 }
-.category-icon { width: 18px; height: 18px; }
-
-.category-list { padding: 4px 0; }
-
+.category-header svg { color: var(--ds-primary, #2d7ff9); }
+.category-list { padding: 6px 0; }
 .category-item {
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 9px 18px;
+  padding: 10px 18px;
   cursor: pointer;
-  transition: all 0.2s;
+  border: none;
+  background: transparent;
   font-size: 14px;
-  color: var(--ds-text, #1a1a2e);
-  user-select: none;
-  position: relative;
+  color: var(--ds-text, #1e2632);
+  transition: all 0.2s;
+  text-align: left;
 }
 .category-item:hover {
-  background: var(--ds-surface-hover, #faf9f7);
-  color: var(--ds-coral, #e94560);
+  background: var(--ds-primary-tint, rgba(45, 127, 249, 0.08));
+  color: var(--ds-primary, #2d7ff9);
 }
-.category-item.active {
-  background: rgba(233, 69, 96, 0.06);
-  color: var(--ds-coral, #e94560);
+.category-item.expanded {
+  color: var(--ds-primary, #2d7ff9);
   font-weight: 600;
 }
-.category-item.active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3px;
-  height: 20px;
-  background: var(--ds-coral, #e94560);
-  border-radius: 0 3px 3px 0;
+.category-item.active {
+  background: var(--ds-primary-tint, rgba(45, 127, 249, 0.08));
+  color: var(--ds-primary, #2d7ff9);
+  font-weight: 600;
 }
 .category-item .category-name { flex: 1; }
-.category-item-wrap { position: relative; }
-
 .category-arrow {
-  width: 14px;
-  height: 14px;
-  color: var(--ds-text-muted, #b2bec3);
-  transition: transform 0.25s;
+  color: var(--ds-text-3, #98a1af);
+  transition: transform 0.2s;
   flex-shrink: 0;
 }
-.category-arrow.rotated { transform: rotate(90deg); color: var(--ds-coral, #e94560); }
-
-/* 子分类面板 - 在当前一级分类下方展开 */
+.category-arrow.rotated {
+  transform: rotate(90deg);
+  color: var(--ds-primary, #2d7ff9);
+}
 .subcategory-panel {
-  background: var(--ds-surface-hover, #faf9f7);
-  border-left: 2px solid var(--ds-coral, #e94560);
-  margin: 0 8px 4px;
+  background: var(--ds-bg-2, #eef0f4);
+  border-left: 2px solid var(--ds-primary, #2d7ff9);
+  margin: 0 8px 6px;
   border-radius: 8px;
   overflow: hidden;
 }
 .sub-slide-enter-active,
-.sub-slide-leave-active {
-  transition: all 0.25s ease;
-}
+.sub-slide-leave-active { transition: all 0.22s ease; }
 .sub-slide-enter-from,
-.sub-slide-leave-to {
-  max-height: 0;
-  opacity: 0;
-}
+.sub-slide-leave-to { max-height: 0; opacity: 0; }
 .sub-slide-enter-to,
-.sub-slide-leave-from {
-  max-height: 400px;
-  opacity: 1;
-}
-
+.sub-slide-leave-from { max-height: 400px; opacity: 1; }
 .subcategory-item {
-  padding: 8px 18px 8px 28px;
-  font-size: 13px;
-  color: var(--ds-text-secondary, #636e72);
+  width: 100%;
+  border: none;
+  background: transparent;
   cursor: pointer;
+  padding: 8px 18px 8px 26px;
+  font-size: 13px;
+  color: var(--ds-text-2, #5a6474);
+  text-align: left;
   transition: all 0.2s;
 }
-.subcategory-item:hover { background: rgba(233, 69, 96, 0.04); color: var(--ds-coral, #e94560); }
-.subcategory-item.selected { color: var(--ds-coral, #e94560); font-weight: 600; }
+.subcategory-item:hover {
+  background: rgba(45, 127, 249, 0.06);
+  color: var(--ds-primary, #2d7ff9);
+}
+.subcategory-item.selected {
+  color: var(--ds-primary, #2d7ff9);
+  font-weight: 600;
+}
 .subcategory-item.active {
-  color: var(--ds-text-secondary, #636e72);
+  color: var(--ds-text-3, #98a1af);
   font-style: italic;
   font-size: 12px;
 }
 
-/* 热门标签 */
+/* 热门分类 */
 .hot-tags {
-  border-top: 1px solid var(--ds-border-light, #f0eee9);
+  border-top: 1px solid var(--ds-line, #e7e9ee);
   padding: 12px 18px;
 }
-.hot-tags-label { font-size: 12px; color: var(--ds-text-muted, #b2bec3); margin-bottom: 8px; }
+.hot-tags-label {
+  font-size: 12px;
+  color: var(--ds-text-3, #98a1af);
+  margin-bottom: 8px;
+}
 .hot-tags-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .hot-tag {
   padding: 3px 10px;
-  border-radius: 12px;
+  border-radius: var(--ds-r-pill, 999px);
   font-size: 11px;
   cursor: pointer;
-  background: var(--ds-bg, #f5f3ef);
-  color: var(--ds-text-secondary, #636e72);
+  background: var(--ds-bg-2, #eef0f4);
+  color: var(--ds-text-2, #5a6474);
   transition: all 0.2s;
 }
-.hot-tag:hover { background: var(--ds-coral, #e94560); color: #fff; }
-.hot-tag.active { background: var(--ds-navy, #1a1a2e); color: #fff; }
-
-.category-footer { border-top: 1px solid var(--ds-border-light, #f0eee9); padding: 10px 18px; }
+.hot-tag:hover { background: var(--ds-primary, #2d7ff9); color: #fff; }
+.hot-tag.active { background: var(--ds-text, #1e2632); color: #fff; }
+.category-footer {
+  border-top: 1px solid var(--ds-line, #e7e9ee);
+  padding: 10px 18px;
+}
 .category-all {
   display: flex;
   align-items: center;
   gap: 6px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
   font-size: 13px;
-  color: var(--ds-text-secondary, #636e72);
+  color: var(--ds-text-2, #5a6474);
+  transition: all 0.2s;
+  padding: 0;
+}
+.category-all:hover { color: var(--ds-primary, #2d7ff9); }
+.category-all.active {
+  color: var(--ds-primary, #2d7ff9);
+  font-weight: 600;
+}
+
+/* ====== 主内容区 ====== */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding: 0 2px;
+}
+.filter-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ds-text-2, #5a6474);
+}
+.filter-info svg { color: var(--ds-primary, #2d7ff9); }
+.filter-reset {
+  border: 1px solid var(--ds-line, #e7e9ee);
+  background: var(--ds-card, #fff);
+  color: var(--ds-text-2, #5a6474);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: var(--ds-r-pill, 999px);
   cursor: pointer;
   transition: all 0.2s;
 }
-.category-all:hover { color: var(--ds-coral, #e94560); }
-.category-all.active { color: var(--ds-coral, #e94560); font-weight: 600; }
+.filter-reset:hover {
+  border-color: var(--ds-primary, #2d7ff9);
+  color: var(--ds-primary, #2d7ff9);
+}
 
-/* ====== 主内容区 ====== */
-.main-content { flex: 1; min-width: 0; }
-
-/* ====== 商品网格（Bento Grid） ====== */
+/* 商品网格 */
+.grid-area { min-height: 240px; }
 .product-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 20px;
-  min-height: 200px;
-  grid-auto-flow: dense;
-}
-/* 宽卡片（跨2列） */
-.product-card--wide {
-  grid-column: span 2;
 }
 
-/* 商品卡片 */
-.product-card {
-  overflow: hidden;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-}
-.product-card:hover {
-  transform: translateY(-6px);
-  box-shadow: var(--ds-shadow-lg, 0 12px 40px rgba(26,26,46,0.12));
-}
-
-/* 商品图片 — 占卡片 70%+ 面积 */
-.product-image-wrap {
-  position: relative;
-  width: 100%;
-  aspect-ratio: 4 / 3;
-  overflow: hidden;
-  background: #f8f7f4;
-}
-.product-card--wide .product-image-wrap {
-  aspect-ratio: 7 / 3;
-}
-.product-image {
-  width: 100%;
-  height: 100%;
-  transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-.product-card:hover .product-image { transform: scale(1.08); }
-
-.image-placeholder {
-  width: 100%;
-  height: 100%;
-  background: #f0eee9;
-}
-
-.product-badge {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  background: var(--ds-coral, #e94560);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 10px;
-  border-radius: 4px;
-  letter-spacing: 0.3px;
-}
-
-/* Hover 加购按钮 */
-.product-cart-hover {
-  position: absolute;
-  bottom: 12px;
-  left: 50%;
-  transform: translateX(-50%) translateY(20px);
-  opacity: 0;
-  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-.product-card:hover .product-cart-hover {
-  opacity: 1;
-  transform: translateX(-50%) translateY(0);
-}
-.product-cart-hover :deep(.el-button) {
-  background: var(--ds-coral-gradient, linear-gradient(135deg, #e94560, #ff6b81));
+/* 空状态按钮 */
+.empty-btn {
   border: none;
+  background: var(--ds-primary, #2d7ff9);
   color: #fff;
-  font-size: 12px;
-  padding: 8px 18px;
+  font-size: 13px;
   font-weight: 600;
-  box-shadow: 0 4px 16px rgba(233,69,96,0.3);
+  padding: 9px 22px;
+  border-radius: 10px;
+  cursor: pointer;
+  box-shadow: var(--ds-shadow-brand, 0 4px 14px rgba(45, 127, 249, 0.25));
+  transition: all 0.2s;
 }
-.product-cart-hover :deep(.el-button:hover) {
-  box-shadow: 0 6px 24px rgba(233,69,96,0.4);
+.empty-btn:hover {
+  background: var(--ds-primary-strong, #1e63d6);
   transform: translateY(-1px);
-}
-
-/* 商品信息 */
-.product-body {
-  padding: 14px 16px 18px;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-.product-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ds-text, #1a1a2e);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  margin-bottom: 4px;
-}
-.product-meta {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  color: var(--ds-text-muted, #b2bec3);
-  margin-bottom: 10px;
-}
-.product-pricing {
-  display: flex;
-  align-items: baseline;
-  gap: 2px;
-  margin-top: auto;
-}
-.price-symbol {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--ds-coral, #e94560);
-}
-.price-value {
-  font-size: 22px;
-  font-weight: 800;
-  color: var(--ds-coral, #e94560);
-  line-height: 1;
-}
-.price-original {
-  font-size: 13px;
-  color: var(--ds-text-muted, #b2bec3);
-  text-decoration: line-through;
-  margin-left: 6px;
 }
 
 /* ====== 分页 ====== */
 .pagination-wrapper {
   display: flex;
   justify-content: center;
-  margin-top: 36px;
-  padding-bottom: 12px;
+  margin-top: 32px;
 }
 
 /* ====== 响应式 ====== */
 @media (max-width: 1100px) {
+  .hero-inner { grid-template-columns: 1fr; }
+  .hero-visual { display: none; }
   .product-grid { grid-template-columns: repeat(3, 1fr); }
 }
 @media (max-width: 900px) {
   .shop-layout { flex-direction: column; }
   .category-panel { width: 100%; position: static; }
   .product-grid { grid-template-columns: repeat(2, 1fr); }
-  .hero { padding: 36px 28px; }
-  .hero-title { font-size: 26px; }
+  .hero { padding: 32px 24px; }
+  .hero-title { font-size: 28px; }
 }
 @media (max-width: 500px) {
   .product-grid { grid-template-columns: 1fr; }
-  .hero { padding: 28px 20px; }
   .hero-search { flex-direction: column; }
+  .hero-stats { gap: 14px; }
 }
 </style>

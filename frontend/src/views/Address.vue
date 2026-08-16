@@ -186,8 +186,11 @@ async function handleSave() {
   saving.value = true
   try {
     // TODO(占位): 本地增删改，后端接口就绪后替换为真实调用并刷新列表
-    if (editingId.value) {
-      const target = addressList.value.find(a => a.id === editingId.value)
+    // 先确定本次保存的地址 id：新增时提前生成新 id，避免"取消其他默认"循环用 null 误清空新增地址
+    const isEdit = !!editingId.value
+    let savedId = editingId.value
+    if (isEdit && savedId) {
+      const target = addressList.value.find(a => a.id === savedId)
       if (target) {
         target.receiverName = form.receiverName
         target.receiverPhone = form.receiverPhone
@@ -195,21 +198,22 @@ async function handleSave() {
         target.isDefault = form.isDefault ? 1 : 0
       }
     } else {
+      savedId = String(Date.now())
       addressList.value.unshift({
-        id: String(Date.now()),
+        id: savedId,
         receiverName: form.receiverName,
         receiverPhone: form.receiverPhone,
         detail: form.detail,
         isDefault: form.isDefault ? 1 : 0
       })
     }
-    // 设为默认时，其他地址取消默认
-    if (form.isDefault) {
+    // 设为默认时，其他地址取消默认（排除本次保存的地址本身）
+    if (form.isDefault && savedId) {
       addressList.value.forEach(a => {
-        if (a.id !== editingId.value) a.isDefault = 0
+        if (a.id !== savedId) a.isDefault = 0
       })
     }
-    message.success(editingId.value ? '地址已更新' : '地址已添加')
+    message.success(isEdit ? '地址已更新' : '地址已添加')
     closeForm()
   } finally {
     saving.value = false

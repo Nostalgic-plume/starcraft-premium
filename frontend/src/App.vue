@@ -1,7 +1,8 @@
 <template>
   <n-config-provider :theme-overrides="themeOverrides">
-    <n-message-provider>
-      <div id="app-root">
+    <n-dialog-provider>
+      <n-message-provider>
+        <div id="app-root">
         <!-- 顶部导航（共享组件） -->
         <AppHeader />
 
@@ -24,14 +25,15 @@
 
         <!-- 浮动智能客服 -->
         <FloatingChat />
-      </div>
-    </n-message-provider>
+        </div>
+      </n-message-provider>
+    </n-dialog-provider>
   </n-config-provider>
 </template>
 
 <script setup lang="ts">
 import { onMounted } from 'vue'
-import { NConfigProvider, NMessageProvider } from 'naive-ui'
+import { NConfigProvider, NDialogProvider, NMessageProvider } from 'naive-ui'
 import { themeOverrides } from '@shared/js/naive-theme'
 import { useUserStore } from '@/stores/user'
 import { useCartStore } from '@/stores/cart'

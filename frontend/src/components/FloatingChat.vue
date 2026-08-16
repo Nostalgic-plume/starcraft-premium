@@ -364,20 +364,20 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: var(--ds-coral, #e94560);
+  background: var(--ds-primary, #2d7ff9);
   border: none;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 20px rgba(233, 69, 96, 0.35);
+  box-shadow: 0 4px 20px rgba(45, 127, 249, 0.35);
   transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s;
   position: relative;
   color: #fff;
 }
 .chat-fab:hover {
   transform: scale(1.08);
-  box-shadow: 0 6px 28px rgba(233, 69, 96, 0.45);
+  box-shadow: 0 6px 28px rgba(45, 127, 249, 0.45);
 }
 .fab-icon { width: 26px; height: 26px; }
 .fab-badge {
@@ -442,7 +442,7 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  background: var(--ds-navy, #1a1a2e);
+  background: var(--ds-text, #1e2632);
   color: #fff;
   flex-shrink: 0;
   cursor: grab;
@@ -485,7 +485,7 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
   flex: 1;
   overflow-y: auto;
   padding: 16px;
-  background: #f8f7f4;
+  background: var(--ds-bg, #f6f7fa);
   scroll-behavior: smooth;
 }
 .chat-messages::-webkit-scrollbar { width: 4px; }
@@ -497,7 +497,7 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
   padding: 32px 16px;
 }
 .welcome-icon { font-size: 48px; margin-bottom: 12px; }
-.welcome-title { font-size: 16px; font-weight: 600; color: #1a1a2e; margin-bottom: 4px; }
+.welcome-title { font-size: 16px; font-weight: 600; color: var(--ds-text, #1e2632); margin-bottom: 4px; }
 .welcome-desc { font-size: 13px; color: #999; margin-bottom: 20px; }
 .quick-questions {
   display: flex;
@@ -509,19 +509,19 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
 }
 .quick-btn {
   padding: 7px 16px;
-  border: 1.5px solid var(--ds-border-light, #e0ddd5);
+  border: 1.5px solid var(--ds-line-2, #d8dce4);
   border-radius: 20px;
   background: #fff;
   font-size: 13px;
-  color: var(--ds-navy, #1a1a2e);
+  color: var(--ds-text, #1e2632);
   cursor: pointer;
   transition: all 0.2s;
   white-space: nowrap;
 }
 .quick-btn:hover {
-  border-color: var(--ds-coral, #e94560);
-  color: var(--ds-coral, #e94560);
-  background: rgba(233, 69, 96, 0.04);
+  border-color: var(--ds-primary, #2d7ff9);
+  color: var(--ds-primary, #2d7ff9);
+  background: var(--ds-primary-tint, rgba(45, 127, 249, 0.08));
 }
 .quick-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
@@ -543,13 +543,13 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
   word-break: break-word;
 }
 .message-user .message-bubble {
-  background: var(--ds-coral, #e94560);
+  background: var(--ds-primary, #2d7ff9);
   color: #fff;
   border-bottom-right-radius: 4px;
 }
 .message-ai .message-bubble {
   background: #fff;
-  color: #1a1a2e;
+  color: var(--ds-text, #1e2632);
   border-bottom-left-radius: 4px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
 }
@@ -580,7 +580,7 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
   color: rgba(255, 255, 255, 0.95);
 }
 .message-ai .message-content :deep(strong) {
-  color: #e94560;
+  color: var(--ds-primary, #2d7ff9);
 }
 
 /* 流式输出光标 */
@@ -588,7 +588,7 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
   content: '▊';
   display: inline;
   animation: blink-cursor 0.8s step-end infinite;
-  color: var(--ds-coral, #e94560);
+  color: var(--ds-primary, #2d7ff9);
   font-size: 14px;
   line-height: 1;
   margin-left: 1px;
@@ -605,7 +605,7 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--ds-coral, #e94560);
+  background: var(--ds-primary, #2d7ff9);
   animation: pulse 1.4s infinite ease-in-out both;
 }
 .dot-pulse:nth-child(1) { animation-delay: -0.32s; }
@@ -615,7 +615,7 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
 /* ====== 输入区 ====== */
 .chat-input-area {
   padding: 12px 14px;
-  border-top: 1px solid #f0eee9;
+  border-top: 1px solid var(--ds-line, #e7e9ee);
   background: #fff;
   flex-shrink: 0;
 }
@@ -623,7 +623,7 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
   display: flex;
   align-items: center;
   gap: 8px;
-  background: #f5f3ef;
+  background: var(--ds-bg-2, #eef0f4);
   border-radius: 24px;
   padding: 4px 4px 4px 16px;
 }
@@ -633,7 +633,7 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
   background: transparent;
   outline: none;
   font-size: 14px;
-  color: #1a1a2e;
+  color: var(--ds-text, #1e2632);
   height: 36px;
 }
 .chat-input::placeholder { color: #bbb; }
@@ -641,7 +641,7 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: var(--ds-coral, #e94560);
+  background: var(--ds-primary, #2d7ff9);
   border: none;
   color: #fff;
   cursor: pointer;
@@ -651,7 +651,7 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
   transition: all 0.2s;
   flex-shrink: 0;
 }
-.send-btn:hover { background: #d63a52; }
+.send-btn:hover { background: var(--ds-primary-strong, #1e63d6); }
 .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* ====== 动画关键帧 ====== */

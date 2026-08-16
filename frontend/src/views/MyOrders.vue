@@ -63,9 +63,9 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { NTab, NTabs, NPagination, NSpin, useMessage } from 'naive-ui'
-import { ElMessageBox } from 'element-plus'
 import { orderApi } from '@/api/order'
 import { cartApi } from '@/api/cart'
+import { useConfirm } from '@/utils/confirm'
 import BackBar from '@/components/BackBar.vue'
 import OrderCard from '@/components/OrderCard.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -73,6 +73,7 @@ import type { OrderVO } from '@/api/types'
 
 const router = useRouter()
 const message = useMessage()
+const { confirm } = useConfirm()
 
 /** 状态 tabs：value 为后端 status 参数（'' 表示全部） */
 const tabOptions = [
@@ -119,25 +120,27 @@ function onPay(order: OrderVO) {
 
 /** 待付款 → 取消订单 */
 async function onCancel(order: OrderVO) {
+  const ok = await confirm({ content: '确定取消该订单吗？' })
+  if (!ok) return
   try {
-    await ElMessageBox.confirm('确定取消该订单吗？', '提示', { type: 'warning' })
     await orderApi.cancel(order.id)
     message.success('订单已取消')
     loadOrders()
   } catch {
-    /* 用户取消操作或失败提示由拦截器处理 */
+    /* 失败提示由拦截器统一处理 */
   }
 }
 
 /** 待收货（已发货）→ 确认收货 */
 async function onReceive(order: OrderVO) {
+  const ok = await confirm({ content: '确认已收到商品吗？' })
+  if (!ok) return
   try {
-    await ElMessageBox.confirm('确认已收到商品吗？', '提示', { type: 'warning' })
     await orderApi.receive(order.id)
     message.success('已确认收货')
     loadOrders()
   } catch {
-    /* 用户取消操作或失败提示由拦截器处理 */
+    /* 失败提示由拦截器统一处理 */
   }
 }
 

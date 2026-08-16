@@ -222,6 +222,14 @@ export interface OrderTokenResult {
  */
 export type OrderCreateResult = string
 
+/**
+ * 异步落单轮询状态（对照 OrderServiceImpl.getProcessingStatus → Map.of("status", ...)）
+ * 值含义：PROCESSING（处理中，继续轮询）| 订单ID字符串（成功，雪花ID经 Long→String）| FAILED:原因 | EXPIRED（处理键过期）
+ */
+export interface OrderStatusResult {
+  status: string
+}
+
 /** 下单商品项（对照 OrderCreateDTO.OrderItemDTO） */
 export interface OrderItemPayload {
   skuId: string

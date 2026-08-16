@@ -1,14 +1,18 @@
 import { get, post } from './request'
-import type { OrderCreatePayload, OrderCreateResult, OrderPageQuery, OrderTokenResult, OrderVO, PageResult, Result } from './types'
+import type { OrderCreatePayload, OrderCreateResult, OrderPageQuery, OrderStatusResult, OrderTokenResult, OrderVO, PageResult, Result } from './types'
 
 export const orderApi = {
   /** 下单防重令牌 */
   getToken(): Promise<Result<OrderTokenResult>> {
     return get<OrderTokenResult>('/order/token')
   },
-  /** 创建订单（异步落单，返回订单ID字符串） */
+  /** 创建订单（异步落单，返回 processingId 供轮询） */
   create(data: OrderCreatePayload): Promise<Result<OrderCreateResult>> {
     return post<OrderCreateResult>('/order/create', data)
+  },
+  /** 查询异步落单状态（前端轮询） */
+  getStatus(processingId: string): Promise<Result<OrderStatusResult>> {
+    return get<OrderStatusResult>('/order/status/' + processingId)
   },
   cancel(id: string | number): Promise<Result<void>> {
     return post<void>('/order/cancel/' + id)

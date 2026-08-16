@@ -15,6 +15,9 @@ const emit = defineEmits<{
   (e: 'cancel', order: OrderVO): void
   (e: 'receive', order: OrderVO): void
   (e: 'view', order: OrderVO): void
+  (e: 'remind', order: OrderVO): void
+  (e: 'rebuy', order: OrderVO): void
+  (e: 'review', order: OrderVO): void
 }>()
 
 const router = useRouter()
@@ -40,11 +43,16 @@ function formatTime(t: string | null | undefined): string {
   return String(t).replace('T', ' ').slice(0, 16)
 }
 
-function emitAction(e: 'pay' | 'cancel' | 'receive' | 'view', order: OrderVO) {
-  if (e === 'pay') emit('pay', order)
-  else if (e === 'cancel') emit('cancel', order)
-  else if (e === 'receive') emit('receive', order)
-  else emit('view', order)
+function emitAction(e: 'pay' | 'cancel' | 'receive' | 'view' | 'remind' | 'rebuy' | 'review', order: OrderVO) {
+  switch (e) {
+    case 'pay': emit('pay', order); break
+    case 'cancel': emit('cancel', order); break
+    case 'receive': emit('receive', order); break
+    case 'remind': emit('remind', order); break
+    case 'rebuy': emit('rebuy', order); break
+    case 'review': emit('review', order); break
+    default: emit('view', order)
+  }
 }
 
 function goDetail() {
@@ -115,6 +123,24 @@ function goDetail() {
           type="button"
           @click="emitAction('receive', order)"
         >确认收货</button>
+        <button
+          v-if="order.status === 1"
+          class="op-btn op-btn-primary"
+          type="button"
+          @click="emitAction('remind', order)"
+        >提醒发货</button>
+        <button
+          v-if="order.status === 4"
+          class="op-btn"
+          type="button"
+          @click="emitAction('rebuy', order)"
+        >再次购买</button>
+        <button
+          v-if="order.status === 4"
+          class="op-btn"
+          type="button"
+          @click="emitAction('review', order)"
+        >评价</button>
         <button
           class="op-btn"
           type="button"

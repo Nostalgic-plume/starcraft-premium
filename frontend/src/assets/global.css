@@ -1,0 +1,38 @@
+/* ===================================================================
+   Shop 用户端 — 结构性全局样式（不含旧色板）
+   修复 C9 删除旧 style-base.css 引用导致的布局回归：
+   迁移 6 个页面（Home/Cart/CreateOrder/MyOrders/OrderDetail/ProductDetail）
+   根元素 class="page-container fade-in" 依赖的结构性规则。
+   色板仅用新设计令牌（shared/css/tokens.css），不引入旧珊瑚/墨蓝色板。
+   =================================================================== */
+
+/* ====== Reset & Base ====== */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--ds-bg, #f6f7fa);
+  color: var(--ds-text, #1e2632);
+  font-family: var(--ds-sans, "PingFang SC", "Microsoft YaHei", sans-serif);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.6;
+}
+
+a { color: inherit; text-decoration: none; }
+
+img { display: block; width: 100%; }
+
+/* ====== Layout ====== */
+.page-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 20px 40px;
+}
+
+/* ====== 页面进入淡入 ====== */
+.fade-in { animation: ds-fade-in 0.3s ease; }
+
+@keyframes ds-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

@@ -1,88 +1,98 @@
 <template>
   <div class="page-container fade-in">
-    <h2 class="page-title">📋 我的订单</h2>
+    <!-- 顶部返回 -->
+    <BackBar label="返回" />
 
-    <!-- 订单状态 Tab -->
-    <div class="card tabs-card">
-      <el-tabs v-model="activeStatus" @tab-change="loadOrders" class="order-tabs">
-        <el-tab-pane label="全部" name="" />
-        <el-tab-pane label="待支付" name="0" />
-        <el-tab-pane label="已支付" name="1" />
-        <el-tab-pane label="已发货" name="2" />
-        <el-tab-pane label="已完成" name="4" />
-        <el-tab-pane label="已取消" name="5" />
-      </el-tabs>
+    <h2 class="mo-title">我的订单</h2>
+
+    <!-- 状态筛选 tabs -->
+    <div class="tabs-card">
+      <n-tabs
+        v-model:value="activeStatus"
+        type="line"
+        class="order-tabs"
+        @update:value="onTabChange"
+      >
+        <n-tab v-for="t in tabOptions" :key="t.value" :name="t.value">
+          {{ t.label }}
+        </n-tab>
+      </n-tabs>
     </div>
 
     <!-- 订单列表 -->
-    <div v-loading="loading">
-      <div v-for="order in orderList" :key="order.id" class="order-card card" :class="{ expanded: expandedOrder == order.id }">
-        <div class="order-header" @click="toggleExpand(order.id)">
-          <div class="order-header-left">
-            <svg class="expand-arrow" :class="{ rotated: expandedOrder == order.id }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="9 18 15 12 9 6"/>
-            </svg>
-            <span class="order-no">订单号：{{ order.orderNo }}</span>
-          </div>
-          <el-tag :type="statusType(order.status)" class="order-status-tag">{{ order.statusText }}</el-tag>
-        </div>
-        <transition name="order-slide">
-          <div v-show="expandedOrder == order.id" class="order-body">
-            <div v-for="item in order.items" :key="item.skuId" class="order-item" @click.stop="goDetail(order)">
-              <el-image :src="item.productImage || '/placeholder.png'" class="order-item-img" fit="cover" />
-              <div class="order-item-info">
-                <div class="order-item-name">{{ item.productName }}</div>
-                <div class="order-item-sku">{{ item.skuName }}</div>
-              </div>
-              <div class="order-item-price">¥{{ item.price }}</div>
-              <div class="order-item-qty">× {{ item.quantity }}</div>
-            </div>
-          </div>
-        </transition>
-        <div class="order-footer" @click="goDetail(order)">
-          共 {{ order.items?.length }} 件商品，合计：<span class="order-total">¥{{ order.actualAmount }}</span>
-        </div>
+    <n-spin :show="loading">
+      <div v-if="orderList.length" class="order-list">
+        <OrderCard
+          v-for="order in orderList"
+          :key="order.id"
+          :order="order"
+          @pay="onPay"
+          @cancel="onCancel"
+          @receive="onReceive"
+          @remind="onRemind"
+          @rebuy="onRebuy"
+          @review="onReview"
+          @view="onView"
+        />
       </div>
 
-      <el-empty v-if="!loading && orderList.length === 0" description="暂无订单" class="empty-state" />
-    </div>
+      <EmptyState
+        v-else-if="!loading"
+        text="暂无订单"
+        description="去挑选心仪的商品吧"
+        icon="orders"
+      >
+        <button type="button" class="go-shop-btn" @click="router.push('/home')">去逛逛</button>
+      </EmptyState>
+    </n-spin>
 
     <!-- 分页 -->
     <div v-if="total > 0" class="pagination-wrap">
-      <el-pagination
-        v-model:current-page="page"
+      <n-pagination
+        v-model:page="page"
         :page-size="pageSize"
-        :total="total"
-        layout="prev, pager, next"
-        @current-change="loadOrders"
-        background
+        :item-count="total"
+        :page-slot="5"
+        @update:page="loadOrders"
       />
     </div>
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { NTab, NTabs, NPagination, NSpin, useMessage } from 'naive-ui'
+import { ElMessageBox } from 'element-plus'
 import { orderApi } from '@/api/order'
+import { cartApi } from '@/api/cart'
+import BackBar from '@/components/BackBar.vue'
+import OrderCard from '@/components/OrderCard.vue'
+import EmptyState from '@/components/EmptyState.vue'
+import type { OrderVO } from '@/api/types'
 
 const router = useRouter()
+const message = useMessage()
+
+/** 状态 tabs：value 为后端 status 参数（'' 表示全部） */
+const tabOptions = [
+  { label: '全部', value: '' },
+  { label: '待付款', value: '0' },
+  { label: '待发货', value: '1' },
+  { label: '待收货', value: '2' },
+  { label: '已完成', value: '4' }
+]
+
 const activeStatus = ref('')
-const orderList = ref([])
+const orderList = ref<OrderVO[]>([])
 const loading = ref(false)
 const page = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
 
-const expandedOrder = ref(null)
-
-function toggleExpand(id) {
-  expandedOrder.value = expandedOrder.value == id ? null : id
-}
-
-const statusType = (s) => {
-  const map = { 0: 'danger', 1: 'success', 2: 'primary', 3: 'success', 4: 'info', 5: 'info' }
-  return map[s] || 'info'
+function onTabChange() {
+  page.value = 1
+  loadOrders()
 }
 
 async function loadOrders() {
@@ -91,15 +101,78 @@ async function loadOrders() {
     const res = await orderApi.myOrders({
       page: page.value,
       pageSize: pageSize.value,
-      status: activeStatus.value || undefined
+      status: activeStatus.value === '' ? undefined : activeStatus.value
     })
     orderList.value = res.data?.list || []
-    total.value = res.data?.total || 0
-  } finally { loading.value = false }
+    total.value = Number(res.data?.total) || 0
+  } finally {
+    loading.value = false
+  }
 }
 
-function goDetail(order) {
-  // 使用订单ID跳转，确保传递正确的参数
+/* ====== 订单操作 ====== */
+
+/** 待付款 → 去支付：跳转订单详情（详情页含模拟支付与倒计时） */
+function onPay(order: OrderVO) {
+  router.push('/order/' + order.id)
+}
+
+/** 待付款 → 取消订单 */
+async function onCancel(order: OrderVO) {
+  try {
+    await ElMessageBox.confirm('确定取消该订单吗？', '提示', { type: 'warning' })
+    await orderApi.cancel(order.id)
+    message.success('订单已取消')
+    loadOrders()
+  } catch {
+    /* 用户取消操作或失败提示由拦截器处理 */
+  }
+}
+
+/** 待收货（已发货）→ 确认收货 */
+async function onReceive(order: OrderVO) {
+  try {
+    await ElMessageBox.confirm('确认已收到商品吗？', '提示', { type: 'warning' })
+    await orderApi.receive(order.id)
+    message.success('已确认收货')
+    loadOrders()
+  } catch {
+    /* 用户取消操作或失败提示由拦截器处理 */
+  }
+}
+
+/** 待发货 → 提醒发货（占位：后端无该接口） */
+function onRemind(_order: OrderVO) {
+  // TODO(P0): 后端未提供"提醒发货"接口，占位提示
+  message.success('已提醒商家尽快发货')
+}
+
+/** 已完成 → 再次购买：按订单快照 skuId 重新加入购物车 */
+async function onRebuy(order: OrderVO) {
+  const items = order.items || []
+  if (items.length === 0) {
+    message.warning('订单无商品可重新购买')
+    return
+  }
+  try {
+    for (const item of items) {
+      await cartApi.add({ skuId: item.skuId, quantity: item.quantity })
+    }
+    message.success('已重新加入购物车')
+    router.push('/cart')
+  } catch {
+    /* 失败提示由拦截器统一处理 */
+  }
+}
+
+/** 已完成 → 评价（占位：评价功能后端未就绪） */
+function onReview(_order: OrderVO) {
+  // TODO(P0): 评价模块后端未就绪，占位提示
+  message.info('评价功能开发中，敬请期待')
+}
+
+/** 查看详情 */
+function onView(order: OrderVO) {
   router.push('/order/' + order.id)
 }
 
@@ -107,86 +180,70 @@ onMounted(loadOrders)
 </script>
 
 <style scoped>
-.tabs-card { padding: 8px 20px 0; }
-.order-tabs { --el-tabs-header-height: 48px; }
-.order-tabs :deep(.el-tabs__item) { font-size: 14px; }
-
-/* 订单卡片 ———— 圆角卡片 + 折叠展开 */
-.order-card {
-  background: var(--ds-surface, #fff);
-  border: 1px solid var(--ds-border-light, #f0eee9);
-  border-radius: var(--ds-radius-lg, 16px);
-  margin-bottom: 12px;
-  overflow: hidden;
-  transition: var(--ds-transition);
-}
-.order-card:hover {
-  box-shadow: var(--ds-shadow-md);
-  transform: translateY(-2px);
-}
-.order-card.expanded {
-  box-shadow: var(--ds-shadow-lg);
-  border-color: var(--ds-coral, #e94560);
+.mo-title {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--ds-text, #1e2632);
+  letter-spacing: -0.5px;
+  margin: 0 0 20px;
 }
 
-/* 展开箭头 */
-.order-header {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 16px 20px;
-  cursor: pointer;
-  user-select: none;
-  transition: background 0.2s;
+/* 状态 tabs */
+.tabs-card {
+  background: var(--ds-card, #fff);
+  border: 1px solid var(--ds-line, #e7e9ee);
+  border-radius: var(--ds-r-lg, 16px);
+  padding: 6px 20px 0;
+  margin-bottom: 16px;
 }
-.order-header:hover { background: rgba(0,0,0,0.02); }
-.order-header-left { display: flex; align-items: center; gap: 10px; }
-.expand-arrow {
-  width: 18px; height: 18px;
-  color: var(--ds-coral, #e94560);
-  transition: transform 0.3s ease;
-  flex-shrink: 0;
+.order-tabs {
+  --n-tabs-bar-color: var(--ds-primary, #2d7ff9);
 }
-.expand-arrow.rotated { transform: rotate(90deg); }
-.order-no { font-size: 13px; color: #999; font-family: monospace; }
-.order-status-tag { font-size: 12px; padding: 4px 12px; flex-shrink: 0; }
-
-/* 展开内容 */
-.order-body { padding: 8px 20px; }
-.order-item {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 0; border-bottom: 1px solid #f8f8f8;
-  cursor: pointer;
-  border-radius: var(--ds-radius-sm, 6px);
-  transition: background 0.2s;
+.order-tabs :deep(.n-tabs-nav__segment) {
+  justify-content: flex-start;
 }
-.order-item:last-child { border-bottom: none; }
-.order-item:hover { background: rgba(233,69,96,0.04); }
-.order-item-img { width: 56px; height: 56px; border-radius: 10px; flex-shrink: 0; }
-.order-item-info { flex: 1; }
-.order-item-name { font-size: 14px; font-weight: 600; color: var(--ds-navy, #1a1a2e); }
-.order-item-sku { font-size: 12px; color: #999; margin-top: 2px; }
-.order-item-price { width: 70px; text-align: right; color: var(--ds-coral, #e94560); font-weight: 600; }
-.order-item-qty { width: 50px; text-align: right; color: #666; }
-
-.order-footer {
-  padding: 14px 20px;
-  border-top: 1px solid var(--ds-border-light, #f0eee9);
-  text-align: right;
+.order-tabs :deep(.n-tab) {
   font-size: 14px;
-  color: #666;
-  cursor: pointer;
-  transition: background 0.2s;
+  color: var(--ds-text-2, #5a6474);
+  transition: color 0.2s ease;
 }
-.order-footer:hover { background: var(--ds-bg, #f5f3ef); }
-.order-total { font-size: 18px; font-weight: 700; color: var(--ds-coral, #e94560); margin-left: 4px; }
+.order-tabs :deep(.n-tab:hover) {
+  color: var(--ds-primary, #2d7ff9);
+}
+.order-tabs :deep(.n-tab--active) {
+  color: var(--ds-primary, #2d7ff9);
+  font-weight: 700;
+}
 
-/* slide 折叠动画 */
-.order-slide-enter-active { transition: all 0.3s ease; }
-.order-slide-leave-active { transition: all 0.25s ease; }
-.order-slide-enter-from { opacity: 0; max-height: 0; }
-.order-slide-leave-to { opacity: 0; max-height: 0; }
-.order-slide-enter-to { opacity: 1; max-height: 1000px; }
-.order-slide-leave-from { opacity: 1; max-height: 1000px; }
+/* 订单列表 */
+.order-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
 
-.empty-state { margin-top: 40px; }
-.pagination-wrap { display: flex; justify-content: center; margin-top: 24px; }
+/* 分页 */
+.pagination-wrap {
+  display: flex;
+  justify-content: center;
+  margin-top: 28px;
+}
+
+/* 空状态按钮 */
+.go-shop-btn {
+  border: none;
+  background: var(--ds-primary, #2d7ff9);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 24px;
+  border-radius: 10px;
+  cursor: pointer;
+  box-shadow: var(--ds-shadow-brand, 0 4px 14px rgba(45, 127, 249, 0.25));
+  transition: all 0.2s;
+}
+.go-shop-btn:hover {
+  background: var(--ds-primary-strong, #1e63d6);
+  transform: translateY(-1px);
+}
 </style>

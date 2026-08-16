@@ -168,10 +168,10 @@ async function onRebuy(order: OrderVO) {
   }
 }
 
-/** 已完成 → 评价（占位：评价功能后端未就绪） */
-function onReview(_order: OrderVO) {
-  // TODO(P0): 评价模块后端未就绪，占位提示
-  message.info('评价功能开发中，敬请期待')
+/** 已完成 → 去评价：跳转我的评价页（评价模块占位，可带 orderId 供后续接入） */
+function onReview(order: OrderVO) {
+  // TODO(P0): 评价模块后端未就绪，先跳转评价页（前端占位）；接入后传 orderId 直达商品评价
+  router.push({ path: '/my-reviews/new', query: order.id ? { orderId: order.id } : {} })
 }
 
 /** 查看详情 */

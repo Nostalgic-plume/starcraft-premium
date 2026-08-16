@@ -34,6 +34,9 @@
             <n-button v-if="order.status === 2" type="primary" size="large" class="ops-btn" @click="handleReceive">
               确认收货
             </n-button>
+            <n-button v-if="order.status === 4" type="primary" size="large" class="ops-btn" @click="goReview">
+              去评价
+            </n-button>
           </div>
         </div>
 
@@ -317,6 +320,12 @@ async function handleReceive() {
   } catch {
     /* 失败提示由拦截器统一处理 */
   }
+}
+
+/** 已完成 → 去评价：跳转我的评价页（评价模块占位，可带 orderId 供后续接入） */
+function goReview() {
+  // TODO(P0): 评价模块后端未就绪，先跳转评价页（前端占位）
+  router.push({ path: '/my-reviews/new', query: order.value?.id ? { orderId: order.value.id } : {} })
 }
 
 onMounted(loadOrder)

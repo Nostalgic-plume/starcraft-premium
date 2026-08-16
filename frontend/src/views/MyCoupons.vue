@@ -91,7 +91,8 @@ const couponList = ref<MyCoupon[]>([
   // TODO(占位): 以下为本地占位数据
   { id: 'u1', name: '新人专享券', amount: 30, condition: '满 199 可用', scope: '全平台通用', expireAt: '2026-12-31', status: 'usable', statusText: '可使用' },
   { id: 'u2', name: '数码专营店券', amount: 50, condition: '满 499 可用', scope: '数码专营店', expireAt: '2026-10-31', status: 'usable', statusText: '可使用' },
-  { id: 'u3', name: '夏日大促券', amount: 100, condition: '满 999 可用', scope: '全平台通用', expireAt: '2026-08-10', status: 'used', statusText: '已使用' },
+  // 已使用券的有效期需晚于当前日期，避免演示数据自相矛盾（先用后过期）
+  { id: 'u3', name: '夏日大促券', amount: 100, condition: '满 999 可用', scope: '全平台通用', expireAt: '2026-09-15', status: 'used', statusText: '已使用' },
   { id: 'u4', name: '美妆旗舰店券', amount: 20, condition: '满 99 可用', scope: '美妆旗舰店', expireAt: '2026-07-31', status: 'expired', statusText: '已过期' }
 ])
 

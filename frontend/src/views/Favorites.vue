@@ -51,10 +51,11 @@ const message = useMessage()
 /** 占位数据：接口未就绪，前端先用静态数据演示（TODO(占位) 接入 GET /api/favorite/list 后移除） */
 const favoriteList = ref<ProductVO[]>([
   // TODO(占位): 以下为本地占位商品，mainImage 留空以展示 SVG 占位图
-  { id: 'f1', name: '星创无线蓝牙耳机 Pro', description: '', categoryId: '', categoryName: '数码', brand: '星创', mainImage: '', images: [], detail: '', minPrice: 299, maxPrice: 299, totalStock: 100, soldCount: 1200, status: 1, skuList: [] },
-  { id: 'f2', name: '轻奢便携保温杯 500ml', description: '', categoryId: '', categoryName: '家居', brand: '星创', mainImage: '', images: [], detail: '', minPrice: 89, maxPrice: 99, totalStock: 200, soldCount: 860, status: 1, skuList: [] },
-  { id: 'f3', name: '智能手环 8 代', description: '', categoryId: '', categoryName: '数码', brand: '星创', mainImage: '', images: [], detail: '', minPrice: 199, maxPrice: 249, totalStock: 150, soldCount: 3200, status: 1, skuList: [] },
-  { id: 'f4', name: '氨基酸温和洁面乳', description: '', categoryId: '', categoryName: '美妆', brand: '星创', mainImage: '', images: [], detail: '', minPrice: 59, maxPrice: 69, totalStock: 300, soldCount: 540, status: 1, skuList: [] }
+  // status: 0 避免 ProductCard 渲染"在售"角标（收藏页占位商品不做状态角标）
+  { id: 'f1', name: '星创无线蓝牙耳机 Pro', description: '', categoryId: '', categoryName: '数码', brand: '星创', mainImage: '', images: [], detail: '', minPrice: 299, maxPrice: 299, totalStock: 100, soldCount: 1200, status: 0, skuList: [] },
+  { id: 'f2', name: '轻奢便携保温杯 500ml', description: '', categoryId: '', categoryName: '家居', brand: '星创', mainImage: '', images: [], detail: '', minPrice: 89, maxPrice: 99, totalStock: 200, soldCount: 860, status: 0, skuList: [] },
+  { id: 'f3', name: '智能手环 8 代', description: '', categoryId: '', categoryName: '数码', brand: '星创', mainImage: '', images: [], detail: '', minPrice: 199, maxPrice: 249, totalStock: 150, soldCount: 3200, status: 0, skuList: [] },
+  { id: 'f4', name: '氨基酸温和洁面乳', description: '', categoryId: '', categoryName: '美妆', brand: '星创', mainImage: '', images: [], detail: '', minPrice: 59, maxPrice: 69, totalStock: 300, soldCount: 540, status: 0, skuList: [] }
 ])
 
 /** 取消收藏（本地移除，TODO(占位): 后端就绪后改调 favoriteApi.remove 并刷新） */

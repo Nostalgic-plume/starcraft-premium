@@ -39,7 +39,7 @@
 
         <!-- 订单进度：下单 → 支付 → 发货 → 收货 → 完成 -->
         <div class="steps-card">
-          <n-steps size="small" class="od-steps">
+          <n-steps size="small">
             <n-step
               v-for="(step, i) in orderSteps"
               :key="step.title"
@@ -411,14 +411,6 @@ onUnmounted(() => {
   border-radius: var(--ds-r-lg, 16px);
   padding: 22px 26px;
   margin-bottom: 16px;
-}
-.od-steps {
-  --n-step-header-text-color-process: var(--ds-primary, #2d7ff9);
-  --n-step-indicator-color-process: var(--ds-primary, #2d7ff9);
-  --n-step-indicator-border-color-process: var(--ds-primary, #2d7ff9);
-  --n-step-indicator-color-finish: var(--ds-primary, #2d7ff9);
-  --n-step-indicator-border-color-finish: var(--ds-primary, #2d7ff9);
-  --n-step-splitor-color-finish: var(--ds-primary, #2d7ff9);
 }
 
 /* ====== 通用卡片 ====== */

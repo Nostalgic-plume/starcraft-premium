@@ -24,7 +24,14 @@ const visibleNavItems = computed(() =>
   navItems.filter(item => !item.auth || userStore.isLoggedIn())
 )
 
+/** 用户中心下拉菜单：key 为路由路径，logout 为特殊处理 */
 const userMenuOptions = [
+  { label: '我的收藏', key: '/favorites' },
+  { label: '我的订单', key: '/orders' },
+  { label: '我的优惠券', key: '/my-coupons' },
+  { label: '地址管理', key: '/address' },
+  { label: '我的售后', key: '/after-sales' },
+  { type: 'divider', key: 'divider' },
   { label: '退出登录', key: 'logout' }
 ]
 
@@ -37,6 +44,10 @@ function onUserMenuSelect(key: string) {
   if (key === 'logout') {
     userStore.logout()
     router.push('/home')
+    return
+  }
+  if (key.startsWith('/')) {
+    router.push(key)
   }
 }
 

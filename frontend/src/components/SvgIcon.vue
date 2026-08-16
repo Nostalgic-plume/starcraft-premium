@@ -38,7 +38,9 @@ const icons: Record<string, string> = {
   cancel: '<circle cx="12" cy="12" r="8.5"/><path d="m9 9 6 6M15 9l-6 6"/>',
   receive: '<path d="M21 8.5v7.4a1 1 0 0 1-.5.9l-7 3.9a1 1 0 0 1-1 0l-7-3.9a1 1 0 0 1-.5-.9V8.5"/><path d="m3.5 8.6 7.9 4.4a1 1 0 0 0 1 0l7.6-4.2"/><path d="M12 21.4V12.5"/><path d="m8.5 9.5 3 3 4.5-4.5"/>',
   filter: '<path d="M4 6h16M7 12h10M10 18h4"/>',
-  image: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="m5 18 4.5-4.5L13 17l3-3 4 4"/>'
+  image: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="m5 18 4.5-4.5L13 17l3-3 4 4"/>',
+  lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2Z"/>'
 }
 
 const inner = computed(() => icons[props.name] || icons.box)

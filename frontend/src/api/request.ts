@@ -1,11 +1,16 @@
 import axios from 'axios'
-import { ElMessage } from 'element-plus'
+import { createDiscreteApi } from 'naive-ui/es/discrete'
 import { createRequest } from '@shared/js/createRequest'
 import router from '../router'
 import type { AxiosRequestConfig } from 'axios'
 import type { Result } from './types'
 
-const request = createRequest({ tokenKey: 'token', router, axios, ElMessage })
+// C9：用户端已移除旧组件库依赖，拦截器错误提示改用 Naive 的离散式 message
+//（createDiscreteApi 独立于 n-message-provider 渲染，可在模块作用域安全使用；
+//  createRequest 接口的 ElMessage 选项键接收的即是此 message 实例）
+const { message } = createDiscreteApi(['message'])
+
+const request = createRequest({ tokenKey: 'token', router, axios, ElMessage: message })
 
 /**
  * 类型化请求包装

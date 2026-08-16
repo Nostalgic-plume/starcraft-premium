@@ -111,7 +111,7 @@
           <!-- 数据统计条 -->
           <div class="hero-stats">
             <div class="stat-item">
-              <span class="stat-num">{{ total }}</span>
+              <span class="stat-num">{{ totalProducts }}</span>
               <span class="stat-label">甄选商品</span>
             </div>
             <div class="stat-divider" />
@@ -319,6 +319,8 @@ const expandedCategoryId = ref<string | null>(null)
 const page = ref(1)
 const pageSize = 12
 const total = ref(0)
+/** 全量商品总数（Hero 统计条，不受分类/搜索筛选影响） */
+const totalProducts = ref(0)
 /** 语义搜索命中结果：不参与分页 */
 const isRagResult = ref(false)
 
@@ -417,6 +419,16 @@ async function loadProducts() {
     total.value = 0
   } finally {
     loading.value = false
+  }
+}
+
+/** 全量商品总数（Hero 统计条用，pageSize=1 轻量拉一次 total） */
+async function loadTotalProducts() {
+  try {
+    const res = await productApi.page({ page: 1, pageSize: 1 })
+    totalProducts.value = Number(res.data?.total) || 0
+  } catch {
+    totalProducts.value = 0
   }
 }
 
@@ -603,20 +615,29 @@ function onDocClick(e: MouseEvent) {
 onMounted(async () => {
   loadHistory()
   document.addEventListener('click', onDocClick)
-  // 支持从 AppHeader 搜索跳转携带 ?keyword=
-  const q = typeof route.query.keyword === 'string' ? route.query.keyword : ''
-  if (q) keyword.value = q
-  await Promise.all([loadCategories(), loadProducts()])
+  // 支持从 AppHeader 搜索跳转携带 ?keyword=：写入搜索历史，与本地搜索保持一致
+  const q = typeof route.query.keyword === 'string' ? route.query.keyword.trim() : ''
+  if (q) {
+    keyword.value = q
+    recordHistory(q)
+  }
+  await Promise.all([loadCategories(), loadProducts(), loadTotalProducts()])
   nextTick(() => initHeroAnimation())
 })
 
-// 同路由下 query 变化（AppHeader 搜索再次跳转）时刷新关键词
+// 同路由下 query 变化（AppHeader 全局搜索跳转）时：
+// 1. 清空首页分类筛选，确保搜索结果跨全部分类
+// 2. 写入搜索历史（最近 10 条去重，与本地搜索一致）
+// 3. 切回关键词搜索模式并刷新商品
 watch(() => route.query.keyword, (q) => {
-  if (typeof q === 'string' && q.trim()) {
-    keyword.value = q
-    page.value = 1
-    loadProducts()
-  }
+  currentCategory.value = null
+  expandedCategoryId.value = null
+  const kw = typeof q === 'string' ? q.trim() : ''
+  keyword.value = kw
+  if (kw) recordHistory(kw)
+  searchMode.value = 'keyword'
+  page.value = 1
+  loadProducts()
 })
 
 onUnmounted(() => {
@@ -635,7 +656,6 @@ onUnmounted(() => {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.85),
     var(--ds-shadow, 0 2px 10px rgba(31, 38, 48, 0.05));
-  overflow: hidden;
   isolation: isolate;
   padding: 44px 48px;
   margin-bottom: 28px;
@@ -781,6 +801,9 @@ onUnmounted(() => {
   border-radius: 14px;
   box-shadow: var(--ds-shadow-hover, 0 12px 30px rgba(31, 38, 48, 0.1));
   padding: 14px;
+  /* 长内容（历史+热搜）高度受限时面板内部滚动，避免超出可视区 */
+  max-height: min(440px, calc(100vh - 150px));
+  overflow-y: auto;
 }
 .sp-section + .sp-section {
   margin-top: 14px;
@@ -883,7 +906,12 @@ onUnmounted(() => {
 .stat-divider { width: 1px; height: 28px; background: var(--ds-line-2, #d8dce4); }
 
 /* 右侧装饰 */
-.hero-visual { position: relative; height: 220px; }
+.hero-visual {
+  position: relative;
+  height: 220px;
+  overflow: hidden;
+  border-radius: 20px;
+}
 .hero-glow {
   position: absolute;
   inset: 0;

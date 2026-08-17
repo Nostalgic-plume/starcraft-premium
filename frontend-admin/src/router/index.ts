@@ -1,7 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import type { RouteRecordRaw } from 'vue-router'
 import { createAppRouter } from '@shared/js/createRouter'
 
-const routes = [
+const routes: RouteRecordRaw[] = [
   { path: '/', redirect: '/login' },
   { path: '/login', name: 'Login', component: () => import('@/views/Login.vue'), meta: { title: '管理员登录' } },
   {

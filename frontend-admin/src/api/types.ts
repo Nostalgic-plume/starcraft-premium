@@ -214,10 +214,10 @@ export interface ProductSalesVO {
   totalSales: string
 }
 
-/** 订单状态分布项（后端返回 List<Map>，含 status/cnt） */
+/** 订单状态分布项（后端返回 List<Map>，含 status/cnt；cnt 为 COUNT(*) 即 Long→string） */
 export interface OrderDistItem {
   status: number
-  cnt: number
+  cnt: number | string
 }
 
 // ==================== 数据看板（对照 DashboardAllVO） ====================

@@ -1,0 +1,38 @@
+/* ===================================================================
+   Shop 管理后台 — 结构性全局样式（新设计令牌基座）
+   结构规则（reset / body / page-container / fade-in）供批次2+ 重写的
+   Naive UI 页面使用；本批叠加保留旧 style.css（Element Plus 覆盖），
+   故本文件在 style.css 之前引入，避免覆盖后台 1400px 宽布局覆盖。
+   色板仅用设计令牌（shared/css/tokens.css），不引入旧珊瑚/墨蓝色板。
+   =================================================================== */
+
+/* ====== Reset & Base ====== */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--ds-bg, #f6f7fa);
+  color: var(--ds-text, #1e2632);
+  font-family: var(--ds-sans, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.6;
+}
+
+a { color: inherit; text-decoration: none; }
+
+img { display: block; width: 100%; }
+
+/* ====== Layout ====== */
+.page-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 20px 40px;
+}
+
+/* ====== 页面进入淡入 ====== */
+.fade-in { animation: ds-fade-in 0.3s ease; }
+
+@keyframes ds-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

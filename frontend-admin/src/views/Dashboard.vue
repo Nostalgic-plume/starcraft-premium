@@ -116,7 +116,9 @@ async function loadData() {
   loading.value = true
   error.value = ''
   try {
-    const [s, t, p, g, dist, allRes] = await Promise.all([
+    // Promise.allSettled：单个接口 403/超时/失败不拖垮整屏，
+    // 失败的卡片回退空态（图表显示「暂无数据」，横幅/KPI 显示 —），仅全部失败才进入全局错误态
+    const results = await Promise.allSettled([
       dashboardApi.getStats(),
       dashboardApi.getSalesTrend(trendDays.value),
       dashboardApi.getProductSales(),
@@ -124,13 +126,22 @@ async function loadData() {
       dashboardApi.getOrderDistribution(),
       fetchDashboardAll()
     ])
-    stats.value = (s?.data as AdminStatsVO | undefined) || null
-    trend.value = ((t?.data as SalesTrendVO[] | undefined) || []) as SalesTrendVO[]
-    productSales.value = ((p?.data as ProductSalesVO[] | undefined) || []) as ProductSalesVO[]
-    userGrowth.value = ((g?.data as SalesTrendVO[] | undefined) || []) as SalesTrendVO[]
-    distribution.value = ((dist?.data as OrderDistItem[] | undefined) || []) as OrderDistItem[]
-    all.value = allRes.data || null
+    const [s, t, p, g, dist, allRes] = results
+    stats.value = s.status === 'fulfilled' ? ((s.value?.data as AdminStatsVO | undefined) || null) : null
+    trend.value = t.status === 'fulfilled' ? (((t.value?.data as SalesTrendVO[] | undefined) || []) as SalesTrendVO[]) : []
+    productSales.value = p.status === 'fulfilled' ? (((p.value?.data as ProductSalesVO[] | undefined) || []) as ProductSalesVO[]) : []
+    userGrowth.value = g.status === 'fulfilled' ? (((g.value?.data as SalesTrendVO[] | undefined) || []) as SalesTrendVO[]) : []
+    distribution.value = dist.status === 'fulfilled' ? (((dist.value?.data as OrderDistItem[] | undefined) || []) as OrderDistItem[]) : []
+    all.value = allRes.status === 'fulfilled' ? (allRes.value.data || null) : null
+
+    const failedCount = results.filter((r) => r.status === 'rejected').length
+    if (failedCount === results.length) {
+      error.value = '看板数据加载失败，请确认账号具备数据看板权限后重试'
+    } else if (failedCount > 0) {
+      console.warn(`Dashboard 部分数据接口加载失败（${failedCount}/${results.length}），已回退空态`, results.filter((r) => r.status === 'rejected'))
+    }
   } catch (e) {
+    // Promise.allSettled 本身不抛出，此处仅为兜底
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
     loading.value = false

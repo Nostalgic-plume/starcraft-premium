@@ -78,6 +78,12 @@ async function handleLogin() {
     // 管理员独立登录接口（/api/admin/login，admin 表独立账号，loginId = admin_id）
     const res = await request.post('/admin/login', form)
     store.setToken(res.data.token)
+    // 后端返回 { token, adminId, nickname }，写入 store 供顶栏展示真实昵称
+    store.setUserInfo({
+      nickname: res.data.nickname,
+      username: form.username,
+      adminId: res.data.adminId
+    })
     message.success('登录成功')
     router.push('/dashboard')
   } catch {

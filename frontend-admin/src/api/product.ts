@@ -1,5 +1,5 @@
 import { get, post, put } from './request'
-import type { PageResult, ProductPageQuery, ProductStatusPayload, ProductStockPayload, ProductVO, Result } from './types'
+import type { PageResult, ProductPageQuery, ProductVO, Result } from './types'
 
 export const productApi = {
   /** 商品分页 */
@@ -17,13 +17,5 @@ export const productApi = {
   /** 更新商品状态 */
   updateStatus(id: string | number, status: number): Promise<Result<void>> {
     return put<void>('/product/status/' + id, null, { params: { status } })
-  },
-  /** 批量更新商品状态 */
-  batchUpdateStatus(data: ProductStatusPayload): Promise<Result<void>> {
-    return put<void>('/product/batch-status', data)
-  },
-  /** 批量更新库存 */
-  batchUpdateStock(data: ProductStockPayload): Promise<Result<void>> {
-    return put<void>('/product/batch-stock', data)
   }
 }

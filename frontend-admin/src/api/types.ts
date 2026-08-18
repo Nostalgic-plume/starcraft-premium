@@ -127,17 +127,6 @@ export interface ProductPageQuery {
   status?: number | string
 }
 
-/** 商品批量状态入参（对照后端批量接口） */
-export interface ProductStatusPayload {
-  ids: string[]
-  status: number
-}
-
-/** 商品批量库存入参（对照后端批量库存接口） */
-export interface ProductStockPayload {
-  items: { id: string; stock: number }[]
-}
-
 // ==================== 订单（对照 OrderVO） ====================
 
 /** 订单商品快照 */

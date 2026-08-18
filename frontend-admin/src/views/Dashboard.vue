@@ -158,22 +158,40 @@ interface Delta {
   up: boolean
 }
 
-/** 销售趋势最后两日环比（amount=销售额 / cnt=订单数） */
+/**
+ * 销售趋势最后两日环比（amount=销售额 / cnt=订单数）。
+ * 后端 sales-trend SQL 不含 cnt（恒 null → Number() 为 0），
+ * 前后均为 0 / 数据缺失时返回 null，避免恒显「▲ 0.0%」。
+ */
 function trendDelta(key: 'amount' | 'cnt'): Delta | null {
   if (trend.value.length < 2) return null
   const vals = trend.value.map((d) => Number(d[key]) || 0)
   const cur = vals[vals.length - 1]
   const prev = vals[vals.length - 2]
+  if (cur === 0 && prev === 0) return null
   if (prev === 0) return { pct: cur > 0 ? 100 : 0, up: cur >= 0 }
   return { pct: ((cur - prev) / prev) * 100, up: cur >= prev }
 }
 
-/** 用户增长趋势最后两日环比 */
+/** 看板全量 GMV 日趋势最后两日环比（orderCount，取自 dashboard/all 同源） */
+function gmvTrendDelta(): Delta | null {
+  const gmvTrend = all.value?.gmvTrend
+  if (!gmvTrend || gmvTrend.length < 2) return null
+  const vals = gmvTrend.map((p) => Number(p.orderCount) || 0)
+  const cur = vals[vals.length - 1]
+  const prev = vals[vals.length - 2]
+  if (cur === 0 && prev === 0) return null
+  if (prev === 0) return { pct: cur > 0 ? 100 : 0, up: cur >= 0 }
+  return { pct: ((cur - prev) / prev) * 100, up: cur >= prev }
+}
+
+/** 用户增长趋势最后两日环比（同样加 0/0 空值守卫） */
 function growthDelta(): Delta | null {
   if (userGrowth.value.length < 2) return null
   const vals = userGrowth.value.map((d) => Number(d.cnt) || 0)
   const cur = vals[vals.length - 1]
   const prev = vals[vals.length - 2]
+  if (cur === 0 && prev === 0) return null
   if (prev === 0) return { pct: cur > 0 ? 100 : 0, up: cur >= 0 }
   return { pct: ((cur - prev) / prev) * 100, up: cur >= prev }
 }
@@ -212,7 +230,8 @@ const bannerList = computed<BannerItem[]>(() => {
   const userNew = all.value?.userNewRetain
   const orderStats = all.value?.orderStats
   const tDelta = trendDelta('amount')
-  const oDelta = trendDelta('cnt')
+  // sales-trend 无 cnt，今日订单涨跌改从 dashboard/all.gmvTrend 的同源 orderCount 计算
+  const oDelta = gmvTrendDelta()
   const gDelta = growthDelta()
   let refundText = '—'
   if (orderStats && Number(orderStats.totalOrders) > 0) {
@@ -268,6 +287,8 @@ const kpiList = computed<KpiItem[]>(() => {
 function buildTrendOption(): echarts.EChartsOption {
   const dates = trend.value.map((d) => (d.date || '').slice(5))
   const amounts = trend.value.map((d) => Number(d.amount) || 0)
+  // 后端 sales-trend SQL 不含 cnt（恒 null），仅在有真实订单数时才展示折线
+  const hasOrder = trend.value.some((d) => d.cnt != null && Number(d.cnt) > 0)
   const orders = trend.value.map((d) => Number(d.cnt) || 0)
   return {
     tooltip: {
@@ -283,6 +304,7 @@ function buildTrendOption(): echarts.EChartsOption {
       icon: 'circle',
       itemWidth: 8,
       itemHeight: 8,
+      data: hasOrder ? ['销售额', '订单数'] : ['销售额'],
       textStyle: { color: CHART_TEXT, fontSize: 12 }
     },
     grid: { left: 8, right: 8, top: 34, bottom: 0, containLabel: true },
@@ -293,50 +315,78 @@ function buildTrendOption(): echarts.EChartsOption {
       axisTick: { show: false },
       axisLabel: { color: CHART_TEXT, fontSize: 11 }
     },
-    yAxis: [
-      {
-        type: 'value',
-        name: '销售额',
-        nameTextStyle: { color: CHART_TEXT, fontSize: 11 },
-        axisLabel: { color: CHART_TEXT, fontSize: 11, formatter: (v: number) => axisMoney(v) },
-        splitLine: { lineStyle: { color: '#EEF0F4', type: 'dashed' } }
-      },
-      {
-        type: 'value',
-        name: '订单数',
-        nameTextStyle: { color: CHART_TEXT, fontSize: 11 },
-        axisLabel: { color: CHART_TEXT, fontSize: 11 },
-        splitLine: { show: false }
-      }
-    ],
-    series: [
-      {
-        name: '销售额',
-        type: 'bar',
-        yAxisIndex: 0,
-        barWidth: '38%',
-        itemStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: '#5AA3FF' },
-            { offset: 1, color: '#2D7FF9' }
-          ]),
-          borderRadius: [4, 4, 0, 0]
-        },
-        emphasis: { itemStyle: { color: '#1E63D6' } },
-        data: amounts
-      },
-      {
-        name: '订单数',
-        type: 'line',
-        yAxisIndex: 1,
-        smooth: true,
-        symbol: 'circle',
-        symbolSize: 5,
-        lineStyle: { width: 2.2, color: CHART_BARS[3] },
-        itemStyle: { color: CHART_BARS[3] },
-        data: orders
-      }
-    ]
+    yAxis: hasOrder
+      ? [
+          {
+            type: 'value',
+            name: '销售额',
+            nameTextStyle: { color: CHART_TEXT, fontSize: 11 },
+            axisLabel: { color: CHART_TEXT, fontSize: 11, formatter: (v: number) => axisMoney(v) },
+            splitLine: { lineStyle: { color: '#EEF0F4', type: 'dashed' } }
+          },
+          {
+            type: 'value',
+            name: '订单数',
+            nameTextStyle: { color: CHART_TEXT, fontSize: 11 },
+            axisLabel: { color: CHART_TEXT, fontSize: 11 },
+            splitLine: { show: false }
+          }
+        ]
+      : [
+          {
+            type: 'value',
+            name: '销售额',
+            nameTextStyle: { color: CHART_TEXT, fontSize: 11 },
+            axisLabel: { color: CHART_TEXT, fontSize: 11, formatter: (v: number) => axisMoney(v) },
+            splitLine: { lineStyle: { color: '#EEF0F4', type: 'dashed' } }
+          }
+        ],
+    series: hasOrder
+      ? [
+          {
+            name: '销售额',
+            type: 'bar',
+            yAxisIndex: 0,
+            barWidth: '38%',
+            itemStyle: {
+              color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                { offset: 0, color: '#5AA3FF' },
+                { offset: 1, color: '#2D7FF9' }
+              ]),
+              borderRadius: [4, 4, 0, 0]
+            },
+            emphasis: { itemStyle: { color: '#1E63D6' } },
+            data: amounts
+          },
+          {
+            name: '订单数',
+            type: 'line',
+            yAxisIndex: 1,
+            smooth: true,
+            symbol: 'circle',
+            symbolSize: 5,
+            lineStyle: { width: 2.2, color: CHART_BARS[3] },
+            itemStyle: { color: CHART_BARS[3] },
+            data: orders
+          }
+        ]
+      : [
+          {
+            name: '销售额',
+            type: 'bar',
+            yAxisIndex: 0,
+            barWidth: '38%',
+            itemStyle: {
+              color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                { offset: 0, color: '#5AA3FF' },
+                { offset: 1, color: '#2D7FF9' }
+              ]),
+              borderRadius: [4, 4, 0, 0]
+            },
+            emphasis: { itemStyle: { color: '#1E63D6' } },
+            data: amounts
+          }
+        ]
   }
 }
 

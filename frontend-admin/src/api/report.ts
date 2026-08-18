@@ -1,15 +1,14 @@
-import axios from 'axios'
+import { get } from './request'
 import type { DashboardAllVO, Result } from './types'
 
-const api = axios.create({
-  baseURL: '/api/dashboard',
-  timeout: 10000
-})
-
-/** 加载看板全量数据 */
+/**
+ * 加载看板全量数据。
+ * 必须走 admin 的 request 实例（shared createRequest 拦截器注入 token 头）——
+ * 后端 /api/dashboard/all 标注 @SaCheckLogin，裸 axios 无 token 会 401 导致看板数值全空。
+ * URL 拼装后仍为 /api/dashboard/all，命中 vite / Nginx 同一代理规则。
+ */
 export async function fetchDashboardAll(): Promise<Result<DashboardAllVO>> {
-  const resp = await api.get<Result<DashboardAllVO>>('/all')
-  return resp.data
+  return get<DashboardAllVO>('/dashboard/all')
 }
 
 /** 格式化金额：单位自动切换（元/万元/亿元） */

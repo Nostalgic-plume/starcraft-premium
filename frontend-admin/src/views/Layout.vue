@@ -69,6 +69,9 @@ const menuOptions: MenuOption[] = [
   { label: '数据看板', key: '/dashboard', icon: renderIcon('M18 20V10M12 20V4M6 20v-6') },
   { label: '商品管理', key: '/dashboard/products', icon: renderIcon('M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16zM3.27 6.96L12 12.01l8.73-5.05M12 22.08V12') },
   { label: '订单管理', key: '/dashboard/orders', icon: renderIcon('M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8') },
+  { label: '优惠券管理', key: '/dashboard/coupons', icon: renderIcon('M20 12a4 4 0 0 0-4-4h-1V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2h1a4 4 0 0 0 4-4zM14 6h.01') },
+  { label: '评价管理', key: '/dashboard/reviews', icon: renderIcon('M12 2l2.9 6.26L21 9.27l-4.5 4.38L17.8 20 12 16.77 6.2 20l1.3-6.35L3 9.27l6.1-1.01L12 2z') },
+  { label: '售后管理', key: '/dashboard/after-sales', icon: renderIcon('M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5') },
   { label: '用户管理', key: '/dashboard/users', icon: renderIcon('M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75') },
   { label: '分类管理', key: '/dashboard/categories', icon: renderIcon('M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82zM7 7h.01') },
   { label: '系统设置', key: '/dashboard/settings', icon: renderIcon('M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6') }

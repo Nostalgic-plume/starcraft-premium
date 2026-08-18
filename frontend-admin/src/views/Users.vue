@@ -1,176 +1,302 @@
 <template>
-  <div class="page-container">
-    <!-- 搜索与批量操作栏 -->
-    <div class="card-elevated mb-16">
-      <div class="flex-between" style="flex-wrap: wrap; gap: 12px">
-        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap">
-          <el-input
-            v-model="keyword"
-            placeholder="搜索用户名/昵称/手机号"
-            clearable
-            style="width: 260px"
-            @keyup.enter="handleSearch"
-          />
-          <el-button type="primary" @click="handleSearch">搜索</el-button>
-        </div>
-        <div>
-          <el-button
-            type="warning"
-            :disabled="selectedIds.length === 0"
-            @click="openBatchDialog"
-          >
-            批量修改状态
-          </el-button>
-          <span v-if="selectedIds.length > 0" style="margin-left: 8px; font-size: 13px; color: var(--ds-text-muted, #999)">
-            已选 {{ selectedIds.length }} 项
-          </span>
-        </div>
-      </div>
+  <div class="page fade-in">
+    <!-- 工具条：关键词搜索 + 状态筛选 -->
+    <div class="toolbar">
+      <n-input
+        v-model:value="keyword"
+        placeholder="搜索用户名 / 昵称 / 手机号"
+        clearable
+        style="width: 260px"
+        @keyup.enter="handleSearch"
+        @clear="handleSearch"
+      />
+      <n-select
+        v-model:value="statusFilter"
+        :options="statusOptions"
+        placeholder="状态筛选"
+        clearable
+        style="width: 140px"
+        @update:value="handleFilterChange"
+      />
+      <n-button type="primary" @click="handleSearch">搜索</n-button>
+      <n-button quaternary @click="handleReset">重置</n-button>
     </div>
 
-    <div class="card-elevated">
-      <!-- 状态筛选标签 -->
-      <el-tabs v-model="statusFilter" @tab-change="handleTabChange" class="mb-16">
-        <el-tab-pane label="全部" name="" />
-        <el-tab-pane label="正常" name="0" />
-        <el-tab-pane label="停用" name="1" />
-        <el-tab-pane label="注销中" name="2" />
-        <el-tab-pane label="封禁中" name="3" />
-      </el-tabs>
-
-      <!-- 用户表格 -->
-      <el-table
+    <!-- 用户表格 -->
+    <div class="table-card">
+      <n-data-table
+        :columns="columns"
         :data="list"
-        v-loading="loading"
-        stripe
-        style="width: 100%"
-        @selection-change="handleSelectionChange"
-      >
-        <el-table-column type="selection" width="50" />
-        <el-table-column prop="id" label="ID" width="70" />
-        <el-table-column prop="username" label="用户名" width="120" />
-        <el-table-column prop="nickname" label="昵称" width="120" show-overflow-tooltip />
-        <el-table-column prop="phone" label="手机号" width="130" />
-        <el-table-column prop="email" label="邮箱" min-width="160" show-overflow-tooltip />
-        <el-table-column label="管理员级别" width="120" align="center">
-          <template #default="{ row }">
-            <el-tag v-if="row.adminLevel === 2" type="danger" size="small" effect="dark">超级管理员</el-tag>
-            <el-tag v-else-if="row.adminLevel === 1" type="primary" size="small" effect="dark">普通管理员</el-tag>
-            <span v-else style="color: var(--ds-text-muted, #999); font-size: 12px">非管理员</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="90" align="center">
-          <template #default="{ row }">
-            <el-tag :type="statusTypeMap[row.status] || 'info'" size="small" effect="dark">
-              {{ statusTextMap[row.status] || '未知' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="createTime" label="创建时间" width="170" />
-        <el-table-column label="操作" width="120" fixed="right">
-          <template #default="{ row }">
-            <el-button text type="primary" size="small" @click="openModifyDialog(row)">
-              修改状态
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+        :loading="loading"
+        :row-key="rowKey"
+        :checked-row-keys="checkedRowKeys"
+        :scroll-x="1000"
+        @update:checked-row-keys="handleCheckChange"
+      />
 
-      <el-empty v-if="!loading && list.length === 0" description="暂无用户数据" />
-
-      <!-- 分页 -->
-      <div v-if="total > 0" class="flex-center mt-16">
-        <el-pagination
-          v-model:current-page="page"
+      <!-- 底部：批量操作 + 分页 -->
+      <div class="table-footer">
+        <div class="footer-left">
+          <n-button
+            v-if="checkedRowKeys.length > 0"
+            size="small"
+            type="primary"
+            secondary
+            @click="openBatchDialog"
+          >
+            批量设置状态
+          </n-button>
+          <span v-if="checkedRowKeys.length > 0" class="selected-tip">
+            已选 {{ checkedRowKeys.length }} 项
+          </span>
+        </div>
+        <n-pagination
+          v-if="total > 0"
+          v-model:page="page"
           :page-size="pageSize"
-          :total="total"
-          layout="total, prev, pager, next"
-          @current-change="loadUsers"
+          :item-count="total"
+          :page-slot="5"
+          @update:page="loadUsers"
         />
       </div>
     </div>
 
-    <!-- 修改状态对话框（单条/批量共用） -->
-    <el-dialog
-      v-model="dialogVisible"
-      :title="dialogMode === 'batch' ? '批量修改用户状态' : '修改用户状态'"
-      width="440px"
-      :close-on-click-modal="false"
+    <!-- 状态变更弹窗（单条 / 批量共用） -->
+    <n-modal
+      v-model:show="dialogVisible"
+      preset="card"
+      :title="dialogMode === 'batch' ? '批量设置用户状态' : '设置用户状态'"
+      style="width: 440px"
+      :mask-closable="false"
     >
-      <p v-if="dialogMode === 'batch'" style="margin-bottom: 16px; color: var(--ds-text-muted, #666)">
-        已选择 <span style="color: var(--ds-coral, #e94560); font-weight: 600">{{ selectedIds.length }}</span> 位用户
+      <p v-if="dialogMode === 'batch'" class="dialog-tip">
+        已选择 <span class="tip-strong">{{ checkedRowKeys.length }}</span> 位用户
       </p>
-      <p v-else-if="currentUser" style="margin-bottom: 16px; color: var(--ds-text-muted, #666)">
-        用户: <strong>{{ currentUser.username }}</strong>（{{ currentUser.nickname }}）
+      <p v-else-if="currentUser" class="dialog-tip">
+        用户：<span class="tip-strong">{{ currentUser.username }}</span>（{{ currentUser.nickname }}）
       </p>
-      <el-form :model="dialogForm" label-width="80px">
-        <el-form-item label="目标状态" required>
-          <el-select v-model="dialogForm.status" placeholder="请选择状态" style="width: 100%">
-            <el-option label="正常" :value="0" />
-            <el-option label="停用" :value="1" />
-            <el-option label="注销中" :value="2" />
-            <el-option label="封禁中" :value="3" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="原因说明">
-          <el-input
-            v-model="dialogForm.reason"
+      <n-form :model="dialogForm" label-placement="left" label-width="90">
+        <n-form-item label="目标状态">
+          <n-select
+            v-model:value="dialogForm.status"
+            :options="statusOptions"
+            placeholder="请选择目标状态"
+          />
+        </n-form-item>
+        <n-form-item label="原因说明">
+          <n-input
+            v-model:value="dialogForm.reason"
             type="textarea"
             :rows="3"
             placeholder="请输入状态变更原因（可选）"
           />
-        </el-form-item>
-      </el-form>
+        </n-form-item>
+      </n-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitModify">
-          确定
-        </el-button>
+        <n-button @click="dialogVisible = false">取消</n-button>
+        <n-button type="primary" :loading="submitting" @click="submitModify">确定</n-button>
       </template>
-    </el-dialog>
+    </n-modal>
   </div>
 </template>
 
-<script setup>
-import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+<script setup lang="ts">
+import { h, onMounted, ref } from 'vue'
+import { NButton, NDataTable, NInput, NPagination, NSelect, useMessage } from 'naive-ui'
+import type { DataTableColumns } from 'naive-ui'
 import { adminApi } from '@/api/admin'
+import StatusTag, { type StatusType } from '@/components/StatusTag.vue'
+import type { UserPageQuery, UserVO } from '@/api/types'
 
-const list = ref([])
+const message = useMessage()
+
+/* ==================== 数据状态 ==================== */
+
+const list = ref<UserVO[]>([])
 const loading = ref(false)
 const page = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
+
+/** 关键词：匹配用户名 / 昵称 / 手机号（后端 like） */
 const keyword = ref('')
-const statusFilter = ref('')
-const selectedIds = ref([])
+/** 状态筛选：null = 全部 */
+const statusFilter = ref<number | null>(null)
 
-// 状态映射
-const statusTextMap = { 0: '正常', 1: '停用', 2: '注销中', 3: '封禁中' }
-const statusTypeMap = { 0: 'success', 1: 'warning', 2: 'info', 3: 'danger' }
+/** 表格勾选的行 id */
+const checkedRowKeys = ref<string[]>([])
 
-// 对话框
-const dialogVisible = ref(false)
-const dialogMode = ref('single')
-const dialogForm = ref({ status: 0, reason: '' })
-const currentUser = ref(null)
-const submitting = ref(false)
+/** 用户状态选项（后端约定：0正常 1停用 2注销中 3封禁中） */
+const statusOptions = [
+  { label: '正常', value: 0 },
+  { label: '停用', value: 1 },
+  { label: '注销中', value: 2 },
+  { label: '封禁中', value: 3 }
+]
 
-// 表格选择变更
-function handleSelectionChange(selection) {
-  selectedIds.value = selection.map(s => s.id)
+/** 用户状态 → StatusTag 语义色：0正常绿 / 1停用、2注销灰 / 3封禁红 */
+function userStatusType(status: number): StatusType {
+  switch (status) {
+    case 0: return 'completed'
+    case 1: return 'disabled'
+    case 2: return 'cancelled'
+    case 3: return 'failed'
+    default: return 'disabled'
+  }
 }
 
-// 加载用户列表
+const statusTextMap: Record<number, string> = { 0: '正常', 1: '停用', 2: '注销中', 3: '封禁中' }
+
+/* ==================== 状态变更弹窗 ==================== */
+
+const dialogVisible = ref(false)
+const dialogMode = ref<'single' | 'batch'>('single')
+const dialogForm = ref<{ status: number | null; reason: string }>({ status: 0, reason: '' })
+const currentUser = ref<UserVO | null>(null)
+const submitting = ref(false)
+
+function openModifyDialog(row: UserVO, targetStatus: number) {
+  dialogMode.value = 'single'
+  currentUser.value = row
+  dialogForm.value = { status: targetStatus, reason: '' }
+  dialogVisible.value = true
+}
+
+function openBatchDialog() {
+  if (checkedRowKeys.value.length === 0) {
+    message.warning('请先勾选用户')
+    return
+  }
+  dialogMode.value = 'batch'
+  currentUser.value = null
+  dialogForm.value = { status: 0, reason: '' }
+  dialogVisible.value = true
+}
+
+async function submitModify() {
+  if (dialogForm.value.status === null || dialogForm.value.status === undefined) {
+    message.warning('请选择目标状态')
+    return
+  }
+  submitting.value = true
+  try {
+    if (dialogMode.value === 'batch') {
+      await adminApi.batchUpdateUserStatus({
+        ids: checkedRowKeys.value,
+        status: dialogForm.value.status,
+        reason: dialogForm.value.reason
+      })
+      message.success(`已批量修改 ${checkedRowKeys.value.length} 位用户状态`)
+      checkedRowKeys.value = []
+    } else {
+      const target = currentUser.value
+      if (!target) return
+      await adminApi.updateUserStatus(target.id, {
+        status: dialogForm.value.status,
+        reason: dialogForm.value.reason
+      })
+      message.success(`用户 ${target.username} 状态已修改`)
+    }
+    dialogVisible.value = false
+    loadUsers()
+  } catch (e) {
+    console.error('修改用户状态失败:', e)
+    message.error('操作失败')
+  } finally {
+    submitting.value = false
+  }
+}
+
+/* ==================== 表格 ==================== */
+
+function rowKey(row: UserVO) {
+  return row.id
+}
+
+function handleCheckChange(keys: (string | number)[]) {
+  checkedRowKeys.value = keys.map((k) => String(k))
+}
+
+const columns: DataTableColumns<UserVO> = [
+  { type: 'selection', width: 50 },
+  {
+    title: '用户名',
+    key: 'username',
+    width: 120,
+    render: (row) => h('span', { class: 'cell-mono' }, row.username || '-')
+  },
+  { title: '昵称', key: 'nickname', width: 120, render: (row) => h('span', {}, row.nickname || '-') },
+  { title: '手机号', key: 'phone', width: 140, render: (row) => h('span', {}, row.phone || '-') },
+  {
+    title: '状态',
+    key: 'status',
+    width: 100,
+    align: 'center',
+    render: (row) =>
+      h(StatusTag, {
+        type: userStatusType(row.status),
+        label: statusTextMap[row.status] || '未知'
+      })
+  },
+  {
+    title: '注册时间',
+    key: 'createTime',
+    width: 170,
+    render: (row) => h('span', { class: 'cell-muted' }, row.createTime || '-')
+  },
+  {
+    title: '操作',
+    key: 'actions',
+    width: 180,
+    align: 'center',
+    fixed: 'right',
+    render: (row) => {
+      const btns = []
+      if (row.status !== 0) {
+        btns.push(
+          h(
+            NButton,
+            { size: 'small', quaternary: true, type: 'primary', onClick: () => openModifyDialog(row, 0) },
+            { default: () => '启用' }
+          )
+        )
+      }
+      if (row.status !== 1) {
+        btns.push(
+          h(
+            NButton,
+            { size: 'small', quaternary: true, type: 'warning', onClick: () => openModifyDialog(row, 1) },
+            { default: () => '停用' }
+          )
+        )
+      }
+      if (row.status !== 3) {
+        btns.push(
+          h(
+            NButton,
+            { size: 'small', quaternary: true, type: 'error', onClick: () => openModifyDialog(row, 3) },
+            { default: () => '封禁' }
+          )
+        )
+      }
+      return h('div', { class: 'action-btns' }, btns)
+    }
+  }
+]
+
+/* ==================== 数据加载 ==================== */
+
 async function loadUsers() {
   loading.value = true
   try {
-    const params = { page: page.value, pageSize: pageSize.value }
-    if (keyword.value) params.keyword = keyword.value
-    if (statusFilter.value !== '') params.status = parseInt(statusFilter.value)
+    const params: UserPageQuery = { page: page.value, pageSize: pageSize.value }
+    if (keyword.value.trim()) params.keyword = keyword.value.trim()
+    if (statusFilter.value !== null) {
+      params.status = statusFilter.value
+    }
     const res = await adminApi.pageUsers(params)
     list.value = res.data?.list || []
-    total.value = res.data?.total || 0
+    total.value = Number(res.data?.total) || 0
   } catch (e) {
     console.error('加载用户列表失败:', e)
     list.value = []
@@ -185,95 +311,86 @@ function handleSearch() {
   loadUsers()
 }
 
-function handleTabChange() {
+function handleFilterChange() {
   page.value = 1
   loadUsers()
 }
 
-// 打开单条修改对话框
-function openModifyDialog(row) {
-  dialogMode.value = 'single'
-  currentUser.value = row
-  dialogForm.value = { status: row.status ?? 0, reason: '' }
-  dialogVisible.value = true
-}
-
-// 打开批量修改对话框
-function openBatchDialog() {
-  if (selectedIds.value.length === 0) {
-    ElMessage.warning('请先选择用户')
-    return
-  }
-  dialogMode.value = 'batch'
-  currentUser.value = null
-  dialogForm.value = { status: 0, reason: '' }
-  dialogVisible.value = true
-}
-
-// 提交状态修改
-async function submitModify() {
-  if (dialogForm.value.status === undefined || dialogForm.value.status === null) {
-    ElMessage.warning('请选择目标状态')
-    return
-  }
-  submitting.value = true
-  try {
-    if (dialogMode.value === 'batch') {
-      await adminApi.batchUpdateUserStatus({
-        ids: selectedIds.value,
-        status: dialogForm.value.status,
-        reason: dialogForm.value.reason
-      })
-      ElMessage.success(`已批量修改 ${selectedIds.value.length} 位用户状态`)
-      selectedIds.value = []
-    } else {
-      await adminApi.updateUserStatus(currentUser.value.id, {
-        status: dialogForm.value.status,
-        reason: dialogForm.value.reason
-      })
-      ElMessage.success(`用户 ${currentUser.value.username} 状态已修改`)
-    }
-    dialogVisible.value = false
-    loadUsers()
-  } catch (e) {
-    console.error('修改用户状态失败:', e)
-    ElMessage.error('操作失败')
-  } finally {
-    submitting.value = false
-  }
+function handleReset() {
+  keyword.value = ''
+  statusFilter.value = null
+  page.value = 1
+  loadUsers()
 }
 
 onMounted(loadUsers)
 </script>
 
 <style scoped>
-.page-container {
-  height: 100%;
-  max-width: none;
-  display: flex;
-  flex-direction: column;
-}
-.page-container > .card-elevated:last-child {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-:deep(.el-tabs) { flex-shrink: 0; }
-:deep(.el-table) {
-  flex: 1;
-  min-height: 0;
+.page {
+  padding: 20px;
 }
 
-/* Table header & row hover */
-:deep(.el-table) {
-  --el-table-header-bg-color: var(--ds-bg, #f5f3ef);
-  --el-table-row-hover-bg-color: var(--ds-bg, #f5f3ef);
+/* ====== 工具条 ====== */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: var(--ds-card, #fff);
+  border: 1px solid var(--ds-line, #e7e9ee);
+  border-radius: var(--ds-r, 12px);
+  padding: 14px 16px;
+  margin-bottom: 16px;
 }
 
-/* Dialog title */
-:deep(.el-dialog__title) {
-  color: var(--ds-navy, #1a1a2e);
+/* ====== 表格卡 ====== */
+.table-card {
+  background: var(--ds-card, #fff);
+  border: 1px solid var(--ds-line, #e7e9ee);
+  border-radius: var(--ds-r, 12px);
+  padding: 16px;
+}
+.table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+}
+.footer-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.selected-tip {
+  font-size: 13px;
+  color: var(--ds-text-3, #98a1af);
+}
+.action-btns {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+/* ====== 弹窗 ====== */
+.dialog-tip {
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: var(--ds-text-3, #98a1af);
+}
+.tip-strong {
+  color: var(--ds-primary, #2d7ff9);
+  font-weight: 600;
+}
+
+/* ====== 单元格 ====== */
+.cell-muted {
+  color: var(--ds-text-3, #98a1af);
+}
+.cell-mono {
+  font-family: var(--ds-mono, Consolas, monospace);
 }
 </style>
-

@@ -1,9 +1,9 @@
 /* ===================================================================
    Shop 管理后台 — 结构性全局样式（新设计令牌基座）
-   结构规则（reset / body / page-container / fade-in）供批次2+ 重写的
-   Naive UI 页面使用；本批叠加保留旧 style.css（Element Plus 覆盖），
-   故本文件在 style.css 之前引入，避免覆盖后台 1400px 宽布局覆盖。
+   结构规则（reset / body / page-container / fade-in）供 Naive UI 页面使用。
    色板仅用设计令牌（shared/css/tokens.css），不引入旧珊瑚/墨蓝色板。
+   注意：旧的 Element Plus 主题覆盖样式（含旧共享主题变量）已在本批
+   （M3 批次4）随 Element Plus 整体移除，后台页面已全量 Naive 化。
    =================================================================== */
 
 /* ====== Reset & Base ====== */

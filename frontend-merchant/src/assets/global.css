@@ -1,0 +1,38 @@
+/* ===================================================================
+   Shop 商家中心 — 结构性全局样式（不含旧色板）
+   参考 M2 用户端 frontend/src/assets/global.css 模板。
+   本文件提供 reset/body/.page-container/.fade-in 结构规则；
+   商家端专属旧样式（style-base.css 品牌墨蓝/珊瑚 + style.css 覆盖）
+   在 main.ts 中最后 import，按「叠加」策略保留原视觉。
+   =================================================================== */
+
+/* ====== Reset & Base ====== */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--ds-bg, #f6f7fa);
+  color: var(--ds-text, #1e2632);
+  font-family: var(--ds-sans, "PingFang SC", "Microsoft YaHei", sans-serif);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.6;
+}
+
+a { color: inherit; text-decoration: none; }
+
+img { display: block; max-width: 100%; }
+
+/* ====== Layout ====== */
+.page-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 20px 40px;
+}
+
+/* ====== 页面进入淡入 ====== */
+.fade-in { animation: ds-fade-in 0.3s ease; }
+
+@keyframes ds-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

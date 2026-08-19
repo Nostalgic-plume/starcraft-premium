@@ -1,58 +1,118 @@
 <template>
-  <div class="layout">
-    <el-aside width="220px" class="aside">
+  <n-layout has-sider class="layout-root">
+    <!-- 左侧 180px 导航 -->
+    <n-layout-sider
+      bordered
+      class="sider"
+      :width="180"
+      :collapsed-width="0"
+      :show-trigger="false"
+      :native-scrollbar="false"
+    >
       <div class="logo">
         <span class="logo-mark">S</span>
-        <span class="logo-label">商家中心</span>
+        <span class="logo-text">商家中心</span>
       </div>
-      <el-menu
-        :default-active="$route.path"
-        router
+      <n-menu
         class="nav-menu"
-      >
-        <el-menu-item index="/dashboard">
-          <el-icon><DataAnalysis /></el-icon><span>控制台</span>
-        </el-menu-item>
-        <el-menu-item index="/dashboard/products">
-          <el-icon><Goods /></el-icon><span>商品管理</span>
-        </el-menu-item>
-        <el-menu-item index="/dashboard/orders">
-          <el-icon><List /></el-icon><span>订单管理</span>
-        </el-menu-item>
-      </el-menu>
-    </el-aside>
-    <div class="right-area">
-      <el-header class="header">
-        <div></div>
-        <div class="flex-center gap-8">
-          <el-avatar :size="28" :src="store.userInfo?.avatar" style="background: var(--ds-coral, #e94560); flex-shrink: 0;">
-            {{ (store.userInfo?.shopName || store.userInfo?.username || 'M')[0] }}
-          </el-avatar>
-          <span class="user-name">{{ store.userInfo?.shopName || store.userInfo?.username || '商家' }}</span>
-          <el-button text type="danger" @click="handleLogout">退出</el-button>
+        :value="activeMenu"
+        :options="menuOptions"
+        :root-indent="16"
+        @update:value="handleMenuSelect"
+      />
+    </n-layout-sider>
+
+    <!-- 右侧：顶栏 + 内容区 -->
+    <n-layout class="right-area">
+      <n-layout-header bordered class="header">
+        <div class="shop-brand">
+          <n-avatar round :size="32" :src="shopLogo || undefined" class="shop-avatar">
+            {{ avatarText }}
+          </n-avatar>
+          <span class="shop-name">{{ shopName }}</span>
         </div>
-      </el-header>
-      <el-main class="main">
+        <div class="header-right">
+          <span class="user-name">{{ username }}</span>
+          <n-button quaternary size="small" class="logout-btn" @click="handleLogout">退出</n-button>
+        </div>
+      </n-layout-header>
+      <n-layout-content class="content" :native-scrollbar="false">
         <router-view />
-      </el-main>
-    </div>
-  </div>
+      </n-layout-content>
+    </n-layout>
+  </n-layout>
 </template>
 
-<script setup>
-import { onMounted } from 'vue'
-import { useRouter } from 'vue-router'
-import { useMerchantStore } from '@/stores/user'
+<script setup lang="ts">
+import { computed, h, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { NAvatar, NButton, NLayout, NLayoutContent, NLayoutHeader, NLayoutSider, NMenu, useMessage } from 'naive-ui'
+import type { MenuOption } from 'naive-ui'
 import { merchantApi } from '@/api/merchant'
-import { DataAnalysis, Goods, List } from '@element-plus/icons-vue'
+import type { ShopInfoVO } from '@/api/types'
+import { useMerchantStore } from '@/stores/user'
 
+const route = useRoute()
 const router = useRouter()
+const message = useMessage()
 const store = useMerchantStore()
 
-async function fetchUserInfo() {
+const activeMenu = computed(() => route.path)
+
+/** 当前店铺信息（读 /merchant/info → shopName/shopLogo） */
+const shopInfo = ref<Partial<ShopInfoVO> | null>(null)
+const shopName = computed(() => shopInfo.value?.shopName || '商家中心')
+const shopLogo = computed(() => shopInfo.value?.shopLogo || '')
+const username = computed(() => shopInfo.value?.username || shopInfo.value?.contactName || '商家')
+const avatarText = computed(() => (shopName.value || '商').slice(0, 1))
+
+/** 可跳转路由菜单 key（其余菜单项为占位，点击提示暂未开放） */
+const ROUTE_KEYS = new Set(['/dashboard', '/dashboard/products', '/dashboard/orders'])
+
+/** SVG 线性图标渲染（中性蓝，随文字 currentColor 着色） */
+function renderIcon(d: string) {
+  return () =>
+    h(
+      'svg',
+      {
+        viewBox: '0 0 24 24',
+        width: '16',
+        height: '16',
+        fill: 'none',
+        stroke: 'currentColor',
+        'stroke-width': '2',
+        'stroke-linecap': 'round',
+        'stroke-linejoin': 'round'
+      },
+      [h('path', { d })]
+    )
+}
+
+const menuOptions: MenuOption[] = [
+  { label: '本店看板', key: '/dashboard', icon: renderIcon('M18 20V10M12 20V4M6 20v-6') },
+  { label: '商品管理', key: '/dashboard/products', icon: renderIcon('M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16zM3.27 6.96L12 12.01l8.73-5.05M12 22.08V12') },
+  { label: '订单管理', key: '/dashboard/orders', icon: renderIcon('M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8') },
+  { label: '优惠券', key: 'coupons', icon: renderIcon('M20 12a4 4 0 0 0-4-4h-1V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2h1a4 4 0 0 0 4-4zM14 6h.01') },
+  { label: '评价管理', key: 'reviews', icon: renderIcon('M12 2l2.9 6.26L21 9.27l-4.5 4.38L17.8 20 12 16.77 6.2 20l1.3-6.35L3 9.27l6.1-1.01L12 2z') },
+  { label: '售后处理', key: 'after-sales', icon: renderIcon('M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5') },
+  { label: '库存预警', key: 'stock-warn', icon: renderIcon('M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0') }
+]
+
+function handleMenuSelect(key: string) {
+  if (key === route.path) return
+  if (ROUTE_KEYS.has(key)) {
+    router.push(key)
+  } else {
+    message.info('该模块暂未开放，敬请期待')
+  }
+}
+
+async function fetchShopInfo() {
   try {
     const res = await merchantApi.getInfo()
-    store.userInfo = res.data || res
+    const data = (res?.data || {}) as ShopInfoVO
+    shopInfo.value = data
+    store.userInfo = data as unknown as Record<string, unknown>
   } catch (e) {
     console.error('获取商家信息失败:', e)
   }
@@ -64,105 +124,124 @@ function handleLogout() {
 }
 
 onMounted(() => {
-  fetchUserInfo()
+  fetchShopInfo()
 })
 </script>
 
 <style scoped>
-.layout { height: 100vh; overflow: hidden; display: flex; }
-.aside {
-  position: fixed;
-  left: 0;
-  top: 0;
-  width: 220px;
+.layout-root {
   height: 100vh;
-  z-index: 100;
-  background: var(--ds-navy, #1a1a2e);
-  overflow-y: auto;
 }
-.right-area {
-  margin-left: 220px;
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
+
+/* ====== 左侧 180px 浅色导航（中性底 + 蓝 tint） ====== */
+.sider {
+  background: var(--ds-card, #fff);
+  border-right: 1px solid var(--ds-line, #e7e9ee);
 }
+
 .logo {
   height: 64px;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  color: var(--ds-text-inverse, #fff);
-  border-bottom: 1px solid var(--ds-navy-light, #2d2d50);
+  color: var(--ds-text, #1e2632);
+  border-bottom: 1px solid var(--ds-line, #e7e9ee);
   flex-shrink: 0;
 }
 .logo-mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  background: var(--ds-coral, #e94560);
-  border-radius: var(--ds-radius-sm, 8px);
-  color: var(--ds-text-inverse, #fff);
-  font-size: 16px;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #5aa3ff, #2d7ff9);
+  color: #fff;
+  font-size: 15px;
   font-weight: 800;
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--ds-mono, Consolas, monospace);
 }
-.logo-label {
-  font-size: 18px;
+.logo-text {
+  font-size: 15px;
   font-weight: 700;
-  letter-spacing: 1px;
-}
-.header {
-  background: var(--ds-surface, #fff);
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 0 24px;
-  box-shadow: var(--ds-shadow-sm, 0 1px 3px rgba(26,26,46,0.06));
-  flex-shrink: 0;
-  height: 56px;
-}
-.user-name {
-  font-size: 14px;
-  color: var(--ds-text, #1a1a2e);
-  font-weight: 500;
-}
-.main {
-  background: var(--ds-bg, #f5f3ef);
-  flex: 1;
-  overflow-y: auto;
-}
-.flex-center { display: flex; align-items: center; }
-.gap-8 { gap: 8px; }
-
-/* Element Plus Menu Override — CSS 变量注入 */
-:deep(.nav-menu) {
-  --el-menu-bg-color: var(--ds-navy, #1a1a2e);
-  --el-menu-text-color: var(--ds-text-inverse, #ffffff);
-  --el-menu-active-color: var(--ds-coral, #e94560);
-  --el-menu-hover-bg-color: var(--ds-navy-light, #2d2d50);
-  border-right: none;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
 }
 
-:deep(.el-menu-item) {
-  transition: var(--ds-transition-fast, all 0.15s ease);
+/* NMenu 浅色覆写（选中蓝 tint） */
+.nav-menu {
+  --n-item-color-active: rgba(45, 127, 249, 0.1);
+  --n-item-color-active-hover: rgba(45, 127, 249, 0.16);
+  --n-item-color-hover: rgba(31, 38, 48, 0.05);
+  --n-item-text-color: var(--ds-text-2, #5a6474);
+  --n-item-text-color-hover: var(--ds-text, #1e2632);
+  --n-item-text-color-active: var(--ds-primary, #2d7ff9);
+  --n-item-text-color-active-hover: var(--ds-primary, #2d7ff9);
+  --n-item-border-radius: 10px;
+  padding: 12px 10px;
 }
-
-:deep(.el-menu-item.is-active) {
-  background: var(--ds-navy-light, #2d2d50) !important;
-  border-left: 3px solid var(--ds-coral, #e94560) !important;
+.nav-menu :deep(.n-menu-item-content) {
+  border-left: 3px solid transparent;
+}
+.nav-menu :deep(.n-menu-item-content--active) {
+  border-left-color: var(--ds-primary, #2d7ff9);
   font-weight: 600;
 }
 
-:deep(.el-menu-item:hover) {
-  background: var(--ds-navy-light, #2d2d50) !important;
+/* ====== 右侧区域 ====== */
+.right-area {
+  min-width: 0;
+}
+.header {
+  height: 56px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--ds-line, #e7e9ee);
+  flex-shrink: 0;
+}
+.shop-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.shop-avatar {
+  background: linear-gradient(135deg, #5aa3ff, #2d7ff9);
+  color: #fff;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.shop-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ds-text, #1e2632);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.user-name {
+  font-size: 13px;
+  color: var(--ds-text-3, #98a1af);
+}
+.logout-btn {
+  color: var(--ds-text-3, #98a1af);
+}
+.logout-btn:hover {
+  color: var(--ds-red, #e0404e);
 }
 
-:deep(.el-menu-item.is-active:hover) {
-  background: var(--ds-navy-light, #2d2d50) !important;
+.content {
+  background: var(--ds-bg, #f6f7fa);
+  height: calc(100vh - 56px);
+  overflow: auto;
 }
 </style>

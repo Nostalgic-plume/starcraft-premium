@@ -240,3 +240,25 @@ export interface SalesTrendPoint {
   /** 当日销售额 */
   amount: number
 }
+
+/** 订单状态分布项（前端从订单列表按 status 分组组装） */
+export interface OrderDistItem {
+  status: number
+  cnt: number
+}
+
+/** 每日订单数点（前端按 createTime 日期分组组装） */
+export interface DailyOrdersPoint {
+  /** MM-DD */
+  date: string
+  count: number
+}
+
+/**
+ * 本店商品销量排行项（前端从商品列表 soldCount 组装）
+ * ⚠️ 商家端 /merchant/product/page 无 totalSales 字段，排行统一用 soldCount
+ */
+export interface ProductRankItem {
+  name: string
+  soldCount: number
+}

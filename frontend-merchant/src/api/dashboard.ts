@@ -1,16 +1,17 @@
-import request from '@/api/request'
+import { get } from '@/api/request'
+import type { DashboardStats, MerchantStatsVO, OrderVO, PageResult, ProductVO, SalesTrendPoint } from './types'
 
 /**
  * 获取仪表盘统计数据（使用商家专用 API）
  */
-export const getDashboardStats = async () => {
+export const getDashboardStats = async (): Promise<DashboardStats> => {
   try {
     const [productRes, statsRes] = await Promise.all([
-      request.get('/merchant/product/page', { params: { page: 1, pageSize: 1 } }),
-      request.get('/merchant/stats/dashboard')
+      get<PageResult<ProductVO>>('/merchant/product/page', { params: { page: 1, pageSize: 1 } }),
+      get<MerchantStatsVO>('/merchant/stats/dashboard')
     ])
     const totalProducts = Number(productRes.data?.total) || 0
-    const stats = statsRes.data || {}
+    const stats = statsRes.data
     return {
       totalProducts,
       onShelf: 0,
@@ -25,21 +26,21 @@ export const getDashboardStats = async () => {
 
 /**
  * 获取销售趋势（基于订单数据按日期分组）
- * @param {number} days 天数，默认7天
+ * @param days 天数，默认7天
  */
-export const getSalesTrend = async (days = 7) => {
+export const getSalesTrend = async (days = 7): Promise<SalesTrendPoint[]> => {
   try {
-    const res = await request.get('/merchant/order/page', { params: { page: 1, pageSize: 999 } })
+    const res = await get<PageResult<OrderVO>>('/merchant/order/page', { params: { page: 1, pageSize: 999 } })
     const orders = res.data?.list || []
 
-    const dates = []
+    const dates: string[] = []
     for (let i = days - 1; i >= 0; i--) {
       const d = new Date()
       d.setDate(d.getDate() - i)
       dates.push(d.toISOString().slice(0, 10))
     }
 
-    const dailyMap = {}
+    const dailyMap: Record<string, number> = {}
     orders
       .filter(o => o.status >= 1 && o.status < 5)
       .forEach(o => {

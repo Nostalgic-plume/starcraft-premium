@@ -1,15 +1,17 @@
 import axios from 'axios'
-import { ElMessage } from 'element-plus'
+import { createDiscreteApi } from 'naive-ui/es/discrete'
 import { createRequest } from '@shared/js/createRequest'
 import router from '../router'
 import type { AxiosRequestConfig } from 'axios'
 import type { Result } from './types'
 
-// M4 商家中心批次1：基础设施 TS 化。
-// 商家端本批为「叠加式」，仍保留 Element Plus（现有页面使用 el-*），
-// 故拦截器错误提示保留 ElMessage，与 createRequest 的 ElMessage 选项签名兼容；
-// 批次2+ 页面重写移除 Element Plus 时再切 Naive 离散式 message（同 admin 批次4）。
-const request = createRequest({ tokenKey: 'merchant-token', router, axios, ElMessage })
+// M4 商家中心批次2：Layout/Dashboard 已重写为 Naive UI，
+// 拦截器错误提示改用 Naive 离散式 message（同 admin 批次4）。
+// createDiscreteApi 独立于 n-message-provider 渲染，可在模块作用域安全使用；
+// 旧页面（Orders/Products/Login）仍走本 request，错误提示风格随之统一为 Naive。
+const { message } = createDiscreteApi(['message'])
+
+const request = createRequest({ tokenKey: 'merchant-token', router, axios, ElMessage: message })
 
 /**
  * 类型化请求包装

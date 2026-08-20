@@ -143,12 +143,13 @@ function buildTrend() {
   const amountMap: Record<string, number> = {}
   const countMap: Record<string, number> = {}
   // 销售额趋势只统计已支付且未取消/退款的订单（1=已支付 2=已发货 3=已收货 4=已完成）
+  // 金额口径与 KPI「销售总额」对齐：后端 SUM(actual_amount)，故趋势累加 actualAmount
   orders.value
     .filter((o) => Number(o.status) >= 1 && Number(o.status) < 5)
     .forEach((o) => {
       const date = (o.createTime || '').slice(0, 10)
       if (!date) return
-      amountMap[date] = (amountMap[date] || 0) + Number(o.totalAmount || 0)
+      amountMap[date] = (amountMap[date] || 0) + Number(o.actualAmount || 0)
       countMap[date] = (countMap[date] || 0) + 1
     })
   trend.value = dates.map((d) => ({ date: d, amount: amountMap[d] || 0, count: countMap[d] || 0 }))

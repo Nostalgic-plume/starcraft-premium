@@ -12,7 +12,11 @@ const routes: RouteRecordRaw[] = [
     children: [
       { path: '', component: () => import('@/views/Dashboard.vue'), meta: { title: '控制台' } },
       { path: 'products', component: () => import('@/views/Products.vue'), meta: { title: '商品管理' } },
-      { path: 'orders', component: () => import('@/views/Orders.vue'), meta: { title: '订单管理' } }
+      { path: 'orders', component: () => import('@/views/Orders.vue'), meta: { title: '订单管理' } },
+      { path: 'coupons', component: () => import('@/views/Coupons.vue'), meta: { title: '本店优惠券' } },
+      { path: 'reviews', component: () => import('@/views/Reviews.vue'), meta: { title: '评价管理' } },
+      { path: 'after-sales', component: () => import('@/views/AfterSales.vue'), meta: { title: '售后处理' } },
+      { path: 'stock-alert', component: () => import('@/views/StockAlert.vue'), meta: { title: '库存预警' } }
     ]
   }
 ]

@@ -46,7 +46,7 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NAvatar, NButton, NLayout, NLayoutContent, NLayoutHeader, NLayoutSider, NMenu, useMessage } from 'naive-ui'
+import { NAvatar, NButton, NLayout, NLayoutContent, NLayoutHeader, NLayoutSider, NMenu } from 'naive-ui'
 import type { MenuOption } from 'naive-ui'
 import { merchantApi } from '@/api/merchant'
 import type { ShopInfoVO } from '@/api/types'
@@ -54,7 +54,6 @@ import { useMerchantStore } from '@/stores/user'
 
 const route = useRoute()
 const router = useRouter()
-const message = useMessage()
 const store = useMerchantStore()
 
 const activeMenu = computed(() => route.path)
@@ -66,8 +65,7 @@ const shopLogo = computed(() => shopInfo.value?.shopLogo || '')
 const username = computed(() => shopInfo.value?.username || shopInfo.value?.contactName || '商家')
 const avatarText = computed(() => (shopName.value || '商').slice(0, 1))
 
-/** 可跳转路由菜单 key（其余菜单项为占位，点击提示暂未开放） */
-const ROUTE_KEYS = new Set(['/dashboard', '/dashboard/products', '/dashboard/orders'])
+/** 菜单 key 与路由路径一一对应（全部为真实路由，含本批 4 个功能页） */
 
 /** SVG 线性图标渲染（中性蓝，随文字 currentColor 着色） */
 function renderIcon(d: string) {
@@ -92,19 +90,14 @@ const menuOptions: MenuOption[] = [
   { label: '本店看板', key: '/dashboard', icon: renderIcon('M18 20V10M12 20V4M6 20v-6') },
   { label: '商品管理', key: '/dashboard/products', icon: renderIcon('M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16zM3.27 6.96L12 12.01l8.73-5.05M12 22.08V12') },
   { label: '订单管理', key: '/dashboard/orders', icon: renderIcon('M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8') },
-  { label: '优惠券', key: 'coupons', icon: renderIcon('M20 12a4 4 0 0 0-4-4h-1V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2h1a4 4 0 0 0 4-4zM14 6h.01') },
-  { label: '评价管理', key: 'reviews', icon: renderIcon('M12 2l2.9 6.26L21 9.27l-4.5 4.38L17.8 20 12 16.77 6.2 20l1.3-6.35L3 9.27l6.1-1.01L12 2z') },
-  { label: '售后处理', key: 'after-sales', icon: renderIcon('M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5') },
-  { label: '库存预警', key: 'stock-warn', icon: renderIcon('M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0') }
+  { label: '优惠券', key: '/dashboard/coupons', icon: renderIcon('M20 12a4 4 0 0 0-4-4h-1V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2h1a4 4 0 0 0 4-4zM14 6h.01') },
+  { label: '评价管理', key: '/dashboard/reviews', icon: renderIcon('M12 2l2.9 6.26L21 9.27l-4.5 4.38L17.8 20 12 16.77 6.2 20l1.3-6.35L3 9.27l6.1-1.01L12 2z') },
+  { label: '售后处理', key: '/dashboard/after-sales', icon: renderIcon('M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5') },
+  { label: '库存预警', key: '/dashboard/stock-alert', icon: renderIcon('M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0') }
 ]
 
 function handleMenuSelect(key: string) {
-  if (key === route.path) return
-  if (ROUTE_KEYS.has(key)) {
-    router.push(key)
-  } else {
-    message.info('该模块暂未开放，敬请期待')
-  }
+  if (key !== route.path) router.push(key)
 }
 
 async function fetchShopInfo() {

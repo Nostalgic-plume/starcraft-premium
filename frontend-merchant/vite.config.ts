@@ -11,5 +11,16 @@ export default defineConfig({
     }
   },
   base: '/merchant/',
-  server: { port: 3002, proxy: { '/api': { target: 'http://localhost:8080', changeOrigin: true } } }
+  server: { port: 3002, proxy: { '/api': { target: 'http://localhost:8080', changeOrigin: true } } },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vue-vendor': ['vue', 'vue-router', 'pinia'],
+          'naive-ui': ['naive-ui'],
+          'echarts': ['echarts', 'vue-echarts']
+        }
+      }
+    }
+  }
 })

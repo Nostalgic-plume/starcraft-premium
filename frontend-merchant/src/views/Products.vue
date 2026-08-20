@@ -1,179 +1,514 @@
 <template>
-  <div class="page-container">
-    <div class="flex-between mb-16">
-      <h2>商品管理</h2>
-      <el-button type="primary" @click="openAdd">
-        <el-icon><Plus /></el-icon>新增商品
-      </el-button>
-    </div>
-
-    <!-- 搜索栏 -->
-    <div class="card-elevated mb-16">
-      <div style="display: flex; gap: 12px; flex-wrap: wrap">
-        <el-input v-model="keyword" placeholder="搜索商品名称" clearable style="width: 200px" @keyup.enter="handleSearch" />
-        <el-select v-model="selectedCategoryId" placeholder="商品分类" clearable style="width: 140px" @change="handleSearch">
-          <el-option v-for="c in subCategories" :key="c.id" :label="c.name" :value="c.id" />
-        </el-select>
-        <el-button type="primary" @click="handleSearch">搜索</el-button>
+  <div class="page fade-in">
+    <!-- 工具条：搜索 + 状态筛选 + 新增 -->
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <n-input
+          v-model:value="keyword"
+          placeholder="搜索商品名称"
+          clearable
+          style="width: 220px"
+          @keyup.enter="handleSearch"
+          @clear="handleSearch"
+        />
+        <n-select
+          v-model:value="statusFilter"
+          :options="productStatusOptions"
+          placeholder="商品状态"
+          clearable
+          style="width: 140px"
+          @update:value="handleFilterChange"
+        />
+        <n-button type="primary" @click="handleSearch">搜索</n-button>
       </div>
+      <n-button type="primary" @click="openAdd">
+        新增商品
+      </n-button>
     </div>
 
-    <!-- 批量操作栏 -->
-    <div class="batch-bar mb-16" v-if="selectedIds.length > 0">
-      <span style="color: var(--ds-text-muted, #b2bec3); margin-right: 12px">已选 {{ selectedIds.length }} 项</span>
-      <el-button size="small" type="success" plain @click="batchStatus(1)">批量上架</el-button>
-      <el-button size="small" type="warning" plain @click="batchStatus(2)">批量下架</el-button>
-      <el-button size="small" text @click="clearSelection">取消选择</el-button>
-    </div>
+    <!-- 状态筛选为前端过滤（后端 /merchant/product/page 无 status 参数） -->
+    <n-alert v-if="statusFilter !== null" type="info" :bordered="false" class="filter-tip">
+      后端商品分页接口暂不支持状态筛选，当前为本店商品内按状态过滤（单店商品上限内）。
+    </n-alert>
 
-    <!-- 表格 -->
-    <div class="card-elevated">
-      <el-table :data="list" v-loading="loading" stripe @selection-change="onSelectionChange" style="width: 100%">
-        <el-table-column type="selection" width="50" />
-        <el-table-column label="商品" min-width="240">
-          <template #default="{ row }">
-            <div style="display: flex; align-items: center; gap: 12px">
-              <el-image v-if="row.mainImage" :src="row.mainImage" style="width: 60px; height: 60px; border-radius: var(--ds-radius-sm, 8px)" fit="cover" />
-              <div v-else style="width:60px;height:60px;background:var(--ds-bg, #f5f3ef);border-radius:var(--ds-radius-sm, 8px);display:flex;align-items:center;justify-content:center;color:var(--ds-text-muted, #b2bec3);font-size:12px">暂无</div>
-              <div>
-                <div style="font-weight: 500; margin-bottom: 4px">{{ row.name }}</div>
-                <div style="color: var(--ds-text-muted, #b2bec3); font-size: 12px">{{ row.brand || '-' }}</div>
-              </div>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="分类" width="100">
-          <template #default="{ row }">{{ row.categoryName || '-' }}</template>
-        </el-table-column>
-        <el-table-column label="价格区间" width="140">
-          <template #default="{ row }">
-            <span style="color: var(--ds-coral, #e94560); font-weight: 500">¥{{ row.minPrice || 0 }} ~ ¥{{ row.maxPrice || 0 }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="totalStock" label="库存" width="80" align="center" />
-        <el-table-column label="状态" width="110" align="center">
-          <template #default="{ row }">
-            <el-tag v-if="row.status === 0" type="info" effect="plain" size="small">待审核</el-tag>
-            <el-tag v-else-if="row.status === 1" type="success" effect="plain" size="small">上架</el-tag>
-            <el-tag v-else-if="row.status === 2" type="warning" effect="plain" size="small">下架</el-tag>
-            <el-tag v-else type="info" effect="plain" size="small">未知</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
-          <template #default="{ row }">
-            <el-button text type="primary" size="small" @click="openEdit(row)">编辑</el-button>
-            <el-button text :type="row.status === 1 ? 'warning' : 'success'" size="small" @click="toggleStatus(row)">
-              {{ row.status === 1 ? '下架' : '上架' }}
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <div class="text-center" style="margin-top: 20px" v-if="total > 0">
-        <el-pagination
-          v-model:current-page="page"
+    <!-- 商品表格 -->
+    <div class="table-card">
+      <n-data-table
+        :columns="columns"
+        :data="list"
+        :loading="loading"
+        :row-key="rowKey"
+        :scroll-x="1000"
+      />
+      <div v-if="total > 0" class="pagination-wrap">
+        <n-pagination
+          v-model:page="page"
           :page-size="pageSize"
-          :total="total"
-          layout="total, prev, pager, next"
-          @current-change="load"
+          :item-count="total"
+          :page-slot="5"
+          @update:page="loadProducts"
         />
       </div>
     </div>
 
-    <!-- 新增/编辑对话框 -->
-    <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑商品' : '新增商品'" width="640px" :close-on-click-modal="false">
-      <el-form :model="form" label-width="90px">
-        <el-form-item label="商品名称">
-          <el-input v-model="form.name" placeholder="请输入商品名称" />
-        </el-form-item>
-        <el-form-item label="商品描述">
-          <el-input v-model="form.description" type="textarea" :rows="3" placeholder="请输入商品描述" />
-        </el-form-item>
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="品牌">
-              <el-input v-model="form.brand" placeholder="品牌名称" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="商品分类">
-              <el-select v-model="form.categoryId" placeholder="请选择分类（如「手机」而非「手机数码」）" style="width: 100%">
-                <el-option v-for="cat in subCategories" :key="cat.id" :label="cat.name" :value="cat.id" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-form-item label="主图链接">
-          <el-input v-model="form.mainImage" placeholder="https://..." />
-        </el-form-item>
-        <el-form-item label="SKU 列表">
-          <div v-for="(s, i) in form.skuList" :key="i" style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px">
-            <el-input v-model="s.name" placeholder="规格名称" style="width: 130px" />
-            <el-input v-model.number="s.price" placeholder="价格" type="number" min="0" style="width: 110px" />
-            <el-input v-model.number="s.stock" placeholder="库存" type="number" min="0" style="width: 90px" />
-            <el-button type="danger" :icon="Delete" circle size="small" @click="form.skuList.splice(i, 1)" />
+    <!-- 新增 / 编辑抽屉 -->
+    <n-drawer v-model:show="showDrawer" :width="600" placement="right">
+      <n-drawer-content :title="isEdit ? '编辑商品' : '新增商品'" closable>
+        <n-alert v-if="isEdit" type="warning" :bordered="false" class="form-alert">
+          后端暂未开放商品信息编辑接口，名称 / 分类 / 价格 / 库存仅作展示；可调整状态后保存。
+        </n-alert>
+
+        <n-form :label-placement="'left'" label-width="96" :show-feedback="false">
+          <n-form-item label="商品名称">
+            <n-input v-model:value="form.name" :disabled="isEdit" placeholder="请输入商品名称" />
+          </n-form-item>
+          <n-form-item label="商品分类">
+            <n-select
+              v-model:value="form.categoryId"
+              :disabled="isEdit"
+              :options="categoryOptions"
+              placeholder="请选择叶子分类（如「手机」而非「手机数码」）"
+            />
+          </n-form-item>
+          <n-form-item label="主图 URL">
+            <n-input v-model:value="form.mainImage" :disabled="isEdit" placeholder="请输入商品主图 URL" />
+          </n-form-item>
+          <n-form-item label="主图预览">
+            <img
+              v-if="form.mainImage"
+              :src="form.mainImage"
+              class="preview-img"
+              alt="主图预览"
+              @error="onPreviewError"
+            />
+            <span v-else class="cell-muted">暂无图片</span>
+          </n-form-item>
+          <n-form-item label="状态">
+            <div class="status-form-row">
+              <n-select
+                v-model:value="form.status"
+                :disabled="!isEdit"
+                :options="productStatusOptions"
+                style="width: 140px"
+              />
+              <span v-if="!isEdit" class="form-hint">新增商品默认在售</span>
+            </div>
+          </n-form-item>
+          <n-form-item label="SKU 规格">
+            <div class="sku-list">
+              <div v-for="(sku, idx) in form.skuList" :key="idx" class="sku-row">
+                <n-input
+                  v-model:value="sku.name"
+                  :disabled="isEdit"
+                  placeholder="规格名"
+                  size="small"
+                  style="width: 130px"
+                />
+                <n-input-number
+                  v-model:value="sku.price"
+                  :disabled="isEdit"
+                  :min="0"
+                  placeholder="价格"
+                  size="small"
+                  style="width: 100px"
+                />
+                <n-input-number
+                  v-model:value="sku.originalPrice"
+                  :disabled="isEdit"
+                  :min="0"
+                  placeholder="原价"
+                  size="small"
+                  style="width: 96px"
+                />
+                <n-input-number
+                  v-model:value="sku.stock"
+                  :disabled="isEdit"
+                  :min="0"
+                  placeholder="库存"
+                  size="small"
+                  style="width: 96px"
+                />
+                <n-button
+                  v-if="!isEdit"
+                  size="tiny"
+                  quaternary
+                  type="error"
+                  :disabled="form.skuList.length <= 1"
+                  @click="removeSku(idx)"
+                >
+                  删除
+                </n-button>
+              </div>
+              <n-button v-if="!isEdit" size="small" secondary @click="addSku">添加规格</n-button>
+            </div>
+          </n-form-item>
+        </n-form>
+
+        <template #footer>
+          <div class="drawer-footer">
+            <n-button @click="showDrawer = false">取消</n-button>
+            <n-button type="primary" :loading="submitting" @click="handleSubmit">
+              {{ isEdit ? '保存状态' : '确定新增' }}
+            </n-button>
           </div>
-          <el-button size="small" @click="addSku">+ 添加 SKU</el-button>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="handleSubmit">确定</el-button>
-      </template>
-    </el-dialog>
+        </template>
+      </n-drawer-content>
+    </n-drawer>
   </div>
 </template>
 
-<script setup>
-import { ref, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Plus, Delete } from '@element-plus/icons-vue'
-import request from '@/api/request'
+<script setup lang="ts">
+import { computed, h, onMounted, ref } from 'vue'
+import {
+  NAlert, NButton, NDataTable, NDrawer, NDrawerContent, NForm, NFormItem,
+  NInput, NInputNumber, NPagination, NSelect, useDialog, useMessage
+} from 'naive-ui'
+import type { DataTableColumns } from 'naive-ui'
+import { merchantApi } from '@/api/merchant'
+import { get } from '@/api/request'
+import StatusTag, { type StatusType } from '@/components/StatusTag.vue'
+import type { ProductVO } from '@/api/types'
 
-/* ---------- 分类数据（从API加载） ---------- */
-const allCategories = ref([])
-const loadingCats = ref(false)
+const message = useMessage()
+const dialog = useDialog()
 
-// 只取二级分类（parent_id > 0），防止选择一级分类时 SQL 报错
-const subCategories = computed(() =>
-  allCategories.value.filter(c => c.parentId && c.parentId > 0)
-)
+/* ==================== 数据状态 ==================== */
 
-async function loadCategories() {
-  loadingCats.value = true
-  try {
-    const res = await request.get('/category/list')
-    allCategories.value = (res && res.data) || res || []
-  } catch (e) {
-    console.error('加载分类失败:', e)
-    allCategories.value = []
-  } finally {
-    loadingCats.value = false
-  }
-}
-
-/* ---------- 表格数据 ---------- */
-const list = ref([])
+const list = ref<ProductVO[]>([])
 const loading = ref(false)
 const page = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
-const keyword = ref('')
-const selectedCategoryId = ref('')
 
-async function load() {
+/** 搜索关键词（商品名） */
+const keyword = ref('')
+/** 状态筛选：null=全部，0=待审核，1=在售，2=下架 */
+const statusFilter = ref<number | null>(null)
+
+/** 商品状态选项（后端约定：0=待审核 1=在售 2=下架） */
+const productStatusOptions = [
+  { label: '待审核', value: 0 },
+  { label: '在售', value: 1 },
+  { label: '下架', value: 2 }
+]
+
+/**
+ * 后端 /merchant/product/page 无 status 参数，状态筛选在前端完成。
+ * 触发时拉取 keyword 匹配全量（上限内，口径同 Dashboard 组装），前端过滤 + 前端分页。
+ */
+const FILTER_ALL_LIMIT = 999
+
+/* ==================== 分类（新增表单用） ==================== */
+
+interface CategoryNode {
+  id: string | number
+  name: string
+  parentId: string | number | null
+}
+
+const categories = ref<CategoryNode[]>([])
+
+/** 叶子分类（parentId>0）才允许作为商品分类 */
+const categoryOptions = computed(() =>
+  categories.value
+    .filter((c) => Number(c.parentId) > 0)
+    .map((c) => ({ label: c.name, value: c.id }))
+)
+
+async function loadCategories() {
+  try {
+    const res = await get<CategoryNode[]>('/category/list')
+    categories.value = res.data || []
+  } catch (e) {
+    console.error('加载分类失败:', e)
+    categories.value = []
+  }
+}
+
+/* ==================== 新增 / 编辑表单 ==================== */
+
+interface SkuFormItem {
+  name: string
+  price: number
+  originalPrice: number
+  stock: number
+}
+
+interface ProductFormModel {
+  id: string | null
+  name: string
+  categoryId: string | number | null
+  mainImage: string
+  status: number
+  skuList: SkuFormItem[]
+}
+
+const showDrawer = ref(false)
+const isEdit = ref(false)
+const submitting = ref(false)
+
+const form = ref<ProductFormModel>({
+  id: null,
+  name: '',
+  categoryId: null,
+  mainImage: '',
+  status: 1,
+  skuList: [{ name: '标准版', price: 0, originalPrice: 0, stock: 0 }]
+})
+
+/** 无图占位（浅灰底 SVG，data URI 内联，避免外部依赖） */
+const IMG_PLACEHOLDER =
+  "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Crect width='48' height='48' fill='%23EEF0F4'/%3E%3C/svg%3E"
+
+function onPreviewError(e: Event) {
+  ;(e.target as HTMLImageElement).src = IMG_PLACEHOLDER
+}
+
+function openAdd() {
+  isEdit.value = false
+  form.value = {
+    id: null,
+    name: '',
+    categoryId: null,
+    mainImage: '',
+    status: 1,
+    skuList: [{ name: '标准版', price: 0, originalPrice: 0, stock: 0 }]
+  }
+  showDrawer.value = true
+}
+
+function openEdit(row: ProductVO) {
+  isEdit.value = true
+  const skus = row.skuList || []
+  form.value = {
+    id: row.id,
+    name: row.name || '',
+    categoryId: row.categoryId ?? null,
+    mainImage: row.mainImage || '',
+    status: row.status ?? 1,
+    skuList:
+      skus.length > 0
+        ? skus.map((s) => ({
+            name: s.name || '',
+            price: Number(s.price) || 0,
+            originalPrice: Number(s.originalPrice) || 0,
+            stock: Number(s.stock) || 0
+          }))
+        : [
+            {
+              name: '标准版',
+              price: Number(row.minPrice) || 0,
+              originalPrice: 0,
+              stock: Number(row.totalStock) || 0
+            }
+          ]
+  }
+  showDrawer.value = true
+}
+
+function addSku() {
+  form.value.skuList.push({ name: '', price: 0, originalPrice: 0, stock: 0 })
+}
+
+function removeSku(idx: number) {
+  form.value.skuList.splice(idx, 1)
+}
+
+async function handleSubmit() {
+  // 编辑：仅状态走真实 updateStatus（后端无商品信息编辑接口）
+  if (isEdit.value) {
+    if (form.value.status === null || form.value.status === undefined) {
+      message.warning('请选择商品状态')
+      return
+    }
+    submitting.value = true
+    try {
+      await merchantApi.productUpdateStatus(form.value.id as string, form.value.status)
+      message.success('商品状态已更新')
+      showDrawer.value = false
+      loadProducts()
+    } catch (e) {
+      console.error('更新商品状态失败:', e)
+      message.error('操作失败')
+    } finally {
+      submitting.value = false
+    }
+    return
+  }
+
+  // 新增：走真实 /merchant/product/add（shop_id 后端注入）
+  if (!form.value.name.trim()) {
+    message.warning('请输入商品名称')
+    return
+  }
+  if (form.value.categoryId === null || form.value.categoryId === undefined) {
+    message.warning('请选择商品分类')
+    return
+  }
+  if (form.value.skuList.length === 0 || form.value.skuList.some((s) => !s.name.trim())) {
+    message.warning('请填写完整 SKU 规格信息')
+    return
+  }
+  submitting.value = true
+  try {
+    await merchantApi.productAdd({
+      name: form.value.name.trim(),
+      categoryId: form.value.categoryId,
+      mainImage: form.value.mainImage,
+      skuList: form.value.skuList.map((s) => ({
+        name: s.name.trim(),
+        price: Number(s.price) || 0,
+        originalPrice: Number(s.originalPrice) || 0,
+        stock: Number(s.stock) || 0
+      }))
+    })
+    message.success('新增商品成功')
+    showDrawer.value = false
+    loadProducts()
+  } catch (e) {
+    console.error('新增商品失败:', e)
+    message.error('新增失败')
+  } finally {
+    submitting.value = false
+  }
+}
+
+/* ==================== 表格 ==================== */
+
+function rowKey(row: ProductVO) {
+  return row.id
+}
+
+/** 商品状态 → StatusTag 语义色：1在售蓝 / 0待审核灰 / 2下架灰红 */
+function productStatusType(status: number): StatusType {
+  if (status === 1) return 'on-sale'
+  if (status === 2) return 'off-shelf'
+  return 'disabled'
+}
+
+function formatPriceRange(row: ProductVO): string {
+  const min = Number(row.minPrice) || 0
+  const max = Number(row.maxPrice) || 0
+  return min === max ? `¥${min.toFixed(2)}` : `¥${min.toFixed(2)} ~ ¥${max.toFixed(2)}`
+}
+
+function renderProductCell(row: ProductVO) {
+  return h('div', { class: 'product-cell' }, [
+    h('img', {
+      class: 'product-thumb',
+      src: row.mainImage || IMG_PLACEHOLDER,
+      alt: row.name,
+      onError: (e: Event) => {
+        ;(e.target as HTMLImageElement).src = IMG_PLACEHOLDER
+      }
+    }),
+    h('div', { class: 'product-meta' }, [
+      h('div', { class: 'product-name' }, row.name),
+      row.brand ? h('div', { class: 'product-brand' }, row.brand) : null
+    ])
+  ])
+}
+
+function renderActions(row: ProductVO) {
+  return h('div', { class: 'action-cell' }, [
+    h(
+      NButton,
+      { size: 'small', quaternary: true, type: 'primary', onClick: () => openEdit(row) },
+      { default: () => '编辑' }
+    ),
+    row.status === 1
+      ? h(
+          NButton,
+          { size: 'small', quaternary: true, type: 'warning', onClick: () => toggleStatus(row, 2) },
+          { default: () => '下架' }
+        )
+      : h(
+          NButton,
+          { size: 'small', quaternary: true, type: 'success', onClick: () => toggleStatus(row, 1) },
+          { default: () => '上架' }
+        )
+  ])
+}
+
+const columns: DataTableColumns<ProductVO> = [
+  { title: '商品', key: 'name', minWidth: 240, render: renderProductCell },
+  {
+    title: '分类',
+    key: 'categoryName',
+    width: 110,
+    render: (row) => h('span', { class: 'cell-muted' }, row.categoryName || '-')
+  },
+  {
+    title: '价格',
+    key: 'price',
+    width: 160,
+    render: (row) => h('span', { class: 'cell-price' }, formatPriceRange(row))
+  },
+  {
+    title: '库存',
+    key: 'totalStock',
+    width: 80,
+    align: 'center',
+    render: (row) => h('span', {}, String(Number(row.totalStock) || 0))
+  },
+  {
+    title: '销量',
+    key: 'soldCount',
+    width: 80,
+    align: 'center',
+    render: (row) => h('span', { class: 'cell-muted' }, String(Number(row.soldCount) || 0))
+  },
+  {
+    title: '状态',
+    key: 'status',
+    width: 100,
+    align: 'center',
+    render: (row) =>
+      h(StatusTag, {
+        type: productStatusType(row.status),
+        label: row.status === 1 ? '在售' : row.status === 2 ? '下架' : '待审核'
+      })
+  },
+  { title: '操作', key: 'actions', width: 150, align: 'center', render: renderActions }
+]
+
+/* ==================== 操作 ==================== */
+
+/** 前端分页切片（状态筛选本地过滤后分页用） */
+function paginate<T>(arr: T[], p: number, size: number): T[] {
+  return arr.slice((p - 1) * size, p * size)
+}
+
+async function loadProducts() {
   loading.value = true
   try {
-    const params = { page: page.value, pageSize: pageSize.value }
-    if (keyword.value) params.keyword = keyword.value
-    if (selectedCategoryId.value) params.categoryId = selectedCategoryId.value
-    // 调用商家商品 API，后端自动注入 shop_id
-    const res = await request.get('/merchant/product/page', { params })
-    list.value = res.data?.list || []
-    total.value = res.data?.total || 0
+    const kw = keyword.value.trim()
+    if (statusFilter.value === null) {
+      // 后端分页（/merchant/product/page 支持 keyword）
+      const res = await merchantApi.productPage({
+        page: page.value,
+        pageSize: pageSize.value,
+        ...(kw ? { keyword: kw } : {})
+      })
+      list.value = res.data?.list || []
+      total.value = Number(res.data?.total) || 0
+    } else {
+      // 后端无 status 参数 → 拉取 keyword 匹配全量，前端按状态过滤 + 前端分页
+      const res = await merchantApi.productPage({
+        page: 1,
+        pageSize: FILTER_ALL_LIMIT,
+        ...(kw ? { keyword: kw } : {})
+      })
+      const filtered = (res.data?.list || []).filter(
+        (p) => Number(p.status) === statusFilter.value
+      )
+      total.value = filtered.length
+      list.value = paginate(filtered, page.value, pageSize.value)
+    }
   } catch (e) {
     console.error('加载商品列表失败:', e)
     list.value = []
+    total.value = 0
   } finally {
     loading.value = false
   }
@@ -181,146 +516,165 @@ async function load() {
 
 function handleSearch() {
   page.value = 1
-  load()
+  loadProducts()
 }
 
-/* ---------- 多选 ---------- */
-const selectedIds = ref([])
-
-function onSelectionChange(rows) {
-  selectedIds.value = rows.map(r => r.id)
+function handleFilterChange() {
+  page.value = 1
+  loadProducts()
 }
 
-function clearSelection() {
-  selectedIds.value = []
-}
-
-async function batchStatus(targetStatus) {
-  if (selectedIds.value.length === 0) {
-    ElMessage.warning('请先选择商品')
-    return
-  }
-  for (const id of selectedIds.value) {
-    try {
-      await request.put('/merchant/product/status/' + id, null, { params: { status: targetStatus } })
-    } catch (e) { console.error('批量更新状态失败:', e) }
-  }
-  ElMessage.success('批量操作完成')
-  selectedIds.value = []
-  load()
-}
-
-/* ---------- 状态切换 ---------- */
-async function toggleStatus(row) {
-  try {
-    await request.put('/merchant/product/status/' + row.id, null, { params: { status: row.status === 1 ? 2 : 1 } })
-    ElMessage.success('操作成功')
-    load()
-  } catch (e) { console.error('切换状态失败:', e) }
-}
-
-/* ---------- 新增/编辑 ---------- */
-const dialogVisible = ref(false)
-const isEdit = ref(false)
-const editId = ref(null)
-const submitting = ref(false)
-
-const defaultForm = () => ({
-  name: '',
-  description: '',
-  brand: '',
-  mainImage: '',
-  categoryId: null,
-  skuList: [{ name: '标准版', price: 99, stock: 100 }]
-})
-
-const form = ref(defaultForm())
-
-function addSku() {
-  form.value.skuList.push({ name: '', price: 0, stock: 0 })
-}
-
-function openAdd() {
-  isEdit.value = false
-  editId.value = null
-  form.value = defaultForm()
-  form.value.categoryId = allCategories.value.length > 0 ? allCategories.value[0].id : null
-  dialogVisible.value = true
-}
-
-async function openEdit(row) {
-  isEdit.value = true
-  editId.value = row.id
-  try {
-    const res = await request.get('/product/detail/' + row.id)
-    const data = res.data || res
-    form.value = {
-      name: data.name || '',
-      description: data.description || '',
-      brand: data.brand || '',
-      mainImage: data.mainImage || '',
-      categoryId: data.categoryId || (allCategories.value.length > 0 ? allCategories.value[0].id : null),
-      skuList: (data.skuList && data.skuList.length > 0)
-        ? data.skuList.map(s => ({ name: s.name, price: s.price, stock: s.stock }))
-        : [{ name: '标准版', price: 99, stock: 100 }]
+/** 上架 / 下架（走真实 /merchant/product/status/{id}） */
+function toggleStatus(row: ProductVO, newStatus: number) {
+  const action = newStatus === 1 ? '上架' : '下架'
+  dialog.warning({
+    title: '确认操作',
+    content: `确定${action}商品「${row.name}」吗？`,
+    positiveText: '确定',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        await merchantApi.productUpdateStatus(row.id, newStatus)
+        message.success(`已${action}`)
+        loadProducts()
+      } catch (e) {
+        console.error('更新商品状态失败:', e)
+        message.error('操作失败')
+      }
     }
-  } catch (e) {
-    console.error('加载商品详情失败:', e)
-    form.value = {
-      name: row.name || '',
-      description: row.description || '',
-      brand: row.brand || '',
-      mainImage: row.mainImage || '',
-      categoryId: row.categoryId || (allCategories.value.length > 0 ? allCategories.value[0].id : null),
-      skuList: [{ name: '标准版', price: 99, stock: 100 }]
-    }
-  }
-  dialogVisible.value = true
+  })
 }
 
-async function handleSubmit() {
-  if (!form.value.name) {
-    ElMessage.warning('请输入商品名称')
-    return
-  }
-  if (!form.value.categoryId) {
-    ElMessage.warning('请选择商品分类')
-    return
-  }
-  submitting.value = true
-  try {
-    await request.post('/merchant/product/add', form.value)
-    ElMessage.success(isEdit.value ? '更新成功' : '新增成功')
-    dialogVisible.value = false
-    load()
-  } catch (e) { console.error('提交商品失败:', e) } finally {
-    submitting.value = false
-  }
-}
-
-onMounted(() => {
-  loadCategories()
-  load()
+onMounted(async () => {
+  await loadCategories()
+  await loadProducts()
 })
 </script>
 
 <style scoped>
-.batch-bar {
+.page {
+  padding: 20px;
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease;
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ====== 工具条 ====== */
+.toolbar {
   display: flex;
   align-items: center;
-  padding: 10px 16px;
-  background: var(--ds-bg, #f5f3ef);
-  border-radius: var(--ds-radius-sm, 8px);
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: var(--ds-card, #fff);
+  border: 1px solid var(--ds-line, #e7e9ee);
+  border-radius: var(--ds-r, 12px);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
-/* Table header & row hover */
-:deep(.el-table) {
-  --el-table-header-bg-color: var(--ds-bg, #f5f3ef);
-  --el-table-row-hover-bg-color: var(--ds-bg, #f5f3ef);
+/* ====== 状态筛选提示 ====== */
+.filter-tip {
+  margin-bottom: 14px;
 }
 
-/* Dialog title */
-:deep(.el-dialog__title) {
-  color: var(--ds-navy, #1a1a2e);
+/* ====== 表格卡 ====== */
+.table-card {
+  background: var(--ds-card, #fff);
+  border: 1px solid var(--ds-line, #e7e9ee);
+  border-radius: var(--ds-r, 12px);
+  padding: 16px;
+}
+.pagination-wrap {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+/* ====== 单元格 ====== */
+.cell-price {
+  color: var(--ds-price, #2d7ff9);
+  font-weight: 600;
+  font-family: var(--ds-mono, Consolas, monospace);
+}
+.cell-muted {
+  color: var(--ds-text-3, #98a1af);
+}
+.product-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.product-thumb {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--ds-r-sm, 9px);
+  object-fit: cover;
+  background: var(--ds-bg-2, #eef0f4);
+  flex-shrink: 0;
+}
+.product-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ds-text, #1e2632);
+}
+.product-brand {
+  font-size: 12px;
+  color: var(--ds-text-3, #98a1af);
+  margin-top: 2px;
+}
+.action-cell {
+  display: inline-flex;
+  gap: 4px;
+}
+
+/* ====== 抽屉表单 ====== */
+.form-alert {
+  margin-bottom: 14px;
+}
+.drawer-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.status-form-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.form-hint {
+  font-size: 12px;
+  color: var(--ds-text-3, #98a1af);
+}
+.preview-img {
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border-radius: var(--ds-r-sm, 9px);
+  background: var(--ds-bg-2, #eef0f4);
+}
+.sku-list {
+  width: 100%;
+}
+.sku-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 </style>

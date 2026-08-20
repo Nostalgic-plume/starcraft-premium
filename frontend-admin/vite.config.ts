@@ -17,5 +17,16 @@ export default defineConfig({
       '/api/dashboard': { target: 'http://localhost:8081', changeOrigin: true },
       '/api': { target: 'http://localhost:8080', changeOrigin: true }
     }
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vue-vendor': ['vue', 'vue-router', 'pinia'],
+          'naive-ui': ['naive-ui'],
+          'echarts': ['echarts', 'vue-echarts']
+        }
+      }
+    }
   }
 })

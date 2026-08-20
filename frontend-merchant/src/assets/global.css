@@ -2,8 +2,8 @@
    Shop 商家中心 — 结构性全局样式（不含旧色板）
    参考 M2 用户端 frontend/src/assets/global.css 模板。
    本文件提供 reset/body/.page-container/.fade-in 结构规则；
-   商家端专属旧样式（style-base.css 品牌墨蓝/珊瑚 + style.css 覆盖）
-   在 main.ts 中最后 import，按「叠加」策略保留原视觉。
+   中性设计令牌由 @shared/css/tokens.css 提供（main.ts 先 import 令牌，再 import 本文件）。
+   旧的 style-base.css / style.css 已随 Element Plus 一并移除。
    =================================================================== */
 
 /* ====== Reset & Base ====== */

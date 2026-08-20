@@ -37,19 +37,6 @@ export interface PageResult<T = unknown> {
   list: T[]
 }
 
-// ==================== 登录 ====================
-
-/** 管理员登录返回（Result<Map<String,Object>>，仅取 token） */
-export interface LoginResult {
-  token: string
-}
-
-/** 登录入参（对照 AdminLoginDTO） */
-export interface LoginPayload {
-  username: string
-  password: string
-}
-
 // ==================== 用户（对照 UserDO） ====================
 
 /** 用户分页列表项 */

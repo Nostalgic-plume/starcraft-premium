@@ -39,21 +39,7 @@ export interface PageResult<T = unknown> {
   list: T[]
 }
 
-// ==================== 商家登录 / 信息 ====================
-
-/** 商家登录入参（对照 ShopLoginDTO） */
-export interface LoginPayload {
-  username: string
-  password: string
-}
-
-/** 商家登录返回（对照 ShopServiceImpl.login 的 Map：token/shopId/shopName） */
-export interface LoginResult {
-  token: string
-  /** Long→string */
-  shopId: string
-  shopName: string
-}
+// ==================== 商家信息 ====================
 
 /** 当前商家信息（对照 ShopServiceImpl.getCurrentShopInfo 的 Map；可空字段后端兜底为空串） */
 export interface ShopInfoVO {
@@ -65,21 +51,6 @@ export interface ShopInfoVO {
   shopDesc: string
   contactName: string
   contactPhone: string
-}
-
-// ==================== 分类（对照 CategoryDO） ====================
-
-/** 商品分类（列表项，含一级/二级） */
-export interface CategoryVO {
-  /** Long→string */
-  id: string
-  name: string
-  /** 父级分类ID（二级分类 parentId > 0；Long→string） */
-  parentId: string
-  sort: number
-  icon: string
-  /** 0=正常 1=停用 */
-  status: number
 }
 
 // ==================== 商品（对照 ProductVO / SkuVO / ProductDTO） ====================
@@ -225,21 +196,6 @@ export interface MerchantStatsVO {
 }
 
 // ==================== 前端组装结构（非后端直接返回） ====================
-
-/** 仪表盘统计卡片（前端 getDashboardStats 组装） */
-export interface DashboardStats {
-  totalProducts: number
-  onShelf: number
-  totalOrders: number
-  pendingShip: number
-}
-
-/** 销售额趋势点（前端 getSalesTrend 按日分组组装） */
-export interface SalesTrendPoint {
-  date: string
-  /** 当日销售额 */
-  amount: number
-}
 
 /** 订单状态分布项（前端从订单列表按 status 分组组装） */
 export interface OrderDistItem {

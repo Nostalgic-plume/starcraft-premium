@@ -1,55 +1,81 @@
 <template>
   <div class="login-page">
-    <el-card class="login-card" shadow="never">
+    <div class="login-card">
       <!-- Brand Logo -->
       <div class="login-brand">
-        <span class="brand-mark">S</span>
-        <span class="brand-label">商家中心</span>
+        <div class="brand-mark">星</div>
+        <div class="brand-label">商家中心</div>
       </div>
       <p class="login-subtitle">请使用店铺账号登录</p>
-      <el-form ref="formRef" :model="form" :rules="rules" @keyup.enter="handleLogin">
-        <el-form-item prop="username">
-          <el-input v-model="form.username" placeholder="店铺用户名" size="large" />
-        </el-form-item>
-        <el-form-item prop="password">
-          <el-input v-model="form.password" type="password" placeholder="密码" size="large" show-password />
-        </el-form-item>
-        <el-form-item>
-          <el-button size="large" class="btn-coral" style="width:100%" :loading="loading" @click="handleLogin">登录</el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
+
+      <n-form
+        ref="formRef"
+        :model="form"
+        :rules="rules"
+        :show-label="false"
+        size="large"
+        @keyup.enter="handleLogin"
+      >
+        <n-form-item path="username">
+          <n-input v-model:value="form.username" placeholder="店铺用户名" clearable />
+        </n-form-item>
+        <n-form-item path="password">
+          <n-input
+            v-model:value="form.password"
+            type="password"
+            placeholder="密码"
+            show-password-on="click"
+          />
+        </n-form-item>
+        <n-button class="login-btn" :loading="loading" @click="handleLogin">登录</n-button>
+      </n-form>
+    </div>
   </div>
 </template>
 
-<script setup>
-import { ref, reactive } from 'vue'
+<script setup lang="ts">
+import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { NButton, NForm, NFormItem, NInput, useMessage } from 'naive-ui'
+import type { FormInst, FormRules } from 'naive-ui'
 import { useMerchantStore } from '@/stores/user'
 import request from '@/api/request'
 
 const router = useRouter()
+const message = useMessage()
 const store = useMerchantStore()
-const formRef = ref(null)
+
+const formRef = ref<FormInst | null>(null)
 const loading = ref(false)
 const form = reactive({ username: 'merchant1', password: '123456' })
-const rules = {
-  username: [{ required: true, message: '请输入店铺用户名', trigger: 'blur' }],
-  password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
+
+const rules: FormRules = {
+  username: {
+    required: true,
+    message: '请输入店铺用户名',
+    trigger: ['blur', 'input']
+  },
+  password: {
+    required: true,
+    message: '请输入密码',
+    trigger: ['blur', 'input']
+  }
 }
 
 async function handleLogin() {
-  const valid = await formRef.value.validate().catch(() => false)
-  if (!valid) return
+  try {
+    await formRef.value?.validate()
+  } catch {
+    return
+  }
   loading.value = true
   try {
     const res = await request.post('/merchant/login', form)
     store.setToken(res.data.token)
-    ElMessage.success('登录成功')
+    message.success('登录成功')
     router.push('/dashboard')
-  } catch (e) {
-    // 错误已在响应拦截器中处理
+  } catch {
+    /* 登录失败提示由响应拦截器统一处理 */
   } finally {
     loading.value = false
   }
@@ -62,57 +88,67 @@ async function handleLogin() {
   justify-content: center;
   align-items: center;
   min-height: 100vh;
-  background: linear-gradient(135deg, var(--ds-bg, #f5f3ef) 0%, #f0e6e6 100%);
+  background:
+    radial-gradient(ellipse at 20% 40%, var(--ds-primary-tint, rgba(45, 127, 249, 0.08)) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 60%, rgba(45, 127, 249, 0.05) 0%, transparent 60%),
+    var(--ds-bg, #f6f7fa);
 }
 .login-card {
   width: 420px;
-  border-radius: var(--ds-radius-lg, 16px);
-  box-shadow: var(--ds-shadow-md, 0 4px 16px rgba(26,26,46,0.08));
+  max-width: 100%;
+  background: var(--ds-card, #fff);
+  border: 1px solid var(--ds-line, #e7e9ee);
+  border-radius: var(--ds-r-lg, 16px);
+  padding: 40px 32px 32px;
+  box-shadow: var(--ds-shadow-hover, 0 12px 30px rgba(31, 38, 48, 0.1));
 }
 .login-brand {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 10px;
+  gap: 12px;
   margin-bottom: 8px;
 }
 .brand-mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  background: var(--ds-navy, #1a1a2e);
-  border-radius: var(--ds-radius-sm, 8px);
-  color: var(--ds-text-inverse, #fff);
-  font-size: 18px;
+  width: 56px;
+  height: 56px;
+  background: var(--ds-primary-grad, linear-gradient(135deg, #5aa3ff, #2d7ff9));
+  border-radius: 18px;
+  color: #fff;
+  font-size: 24px;
   font-weight: 800;
+  box-shadow: var(--ds-shadow-brand, 0 4px 14px rgba(45, 127, 249, 0.25));
 }
 .brand-label {
   font-size: 22px;
   font-weight: 700;
-  color: var(--ds-navy, #1a1a2e);
+  color: var(--ds-text, #1e2632);
   letter-spacing: 1px;
 }
 .login-subtitle {
   text-align: center;
-  color: var(--ds-text-secondary, #636e72);
+  color: var(--ds-text-3, #98a1af);
   font-size: 14px;
-  margin-bottom: 28px;
+  margin-bottom: 24px;
 }
-.btn-coral {
-  background: var(--ds-coral-gradient, linear-gradient(135deg, #e94560, #ff6b81)) !important;
-  border: none !important;
+.login-btn {
+  width: 100%;
   height: 44px;
+  margin-top: 4px;
+  border-radius: var(--ds-r, 12px);
   font-size: 15px;
   font-weight: 600;
   letter-spacing: 0.5px;
-  border-radius: var(--ds-radius, 10px);
-  color: var(--ds-text-inverse, #fff);
-  transition: var(--ds-transition, all 0.3s cubic-bezier(0.4,0,0.2,1));
+  background: var(--ds-primary-grad, linear-gradient(135deg, #5aa3ff, #2d7ff9)) !important;
+  border: none !important;
+  color: #fff !important;
+  box-shadow: var(--ds-shadow-brand, 0 4px 14px rgba(45, 127, 249, 0.25)) !important;
 }
-.btn-coral:hover {
+.login-btn:hover {
+  box-shadow: 0 6px 20px rgba(45, 127, 249, 0.32) !important;
   transform: translateY(-1px);
-  box-shadow: var(--ds-shadow-coral, 0 4px 20px rgba(233,69,96,0.2));
 }
 </style>

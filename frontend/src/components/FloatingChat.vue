@@ -12,7 +12,6 @@
     <transition name="chat-slide">
       <div
         v-if="visible"
-        ref="panelRef"
         class="chat-panel"
         :class="{
           'is-zoomed': isZoomed,
@@ -61,7 +60,15 @@
         <!-- 消息列表 -->
         <div class="chat-messages" ref="messagesRef">
           <div v-if="messages.length === 0" class="chat-welcome">
-            <div class="welcome-icon">🤖</div>
+            <div class="welcome-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <rect x="4" y="7" width="16" height="12" rx="2"/>
+                <circle cx="12" cy="3.5" r="1.5"/>
+                <circle cx="9" cy="12" r="1.1" fill="currentColor" stroke="none"/>
+                <circle cx="15" cy="12" r="1.1" fill="currentColor" stroke="none"/>
+                <path d="M9 16h6"/>
+              </svg>
+            </div>
             <div class="welcome-title">你好！我是智能客服助手</div>
             <div class="welcome-desc">我可以帮你推荐商品、解答问题</div>
             <div class="quick-questions">
@@ -82,7 +89,17 @@
             :class="[msg.role === 'user' ? 'message-user' : 'message-ai']"
           >
             <div class="message-avatar">
-              {{ msg.role === 'user' ? '👤' : '🤖' }}
+              <svg v-if="msg.role === 'user'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <circle cx="12" cy="8" r="4"/>
+                <path d="M4 20c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5"/>
+              </svg>
+              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <rect x="4" y="7" width="16" height="12" rx="2"/>
+                <circle cx="12" cy="3.5" r="1.5"/>
+                <circle cx="9" cy="12" r="1.1" fill="currentColor" stroke="none"/>
+                <circle cx="15" cy="12" r="1.1" fill="currentColor" stroke="none"/>
+                <path d="M9 16h6"/>
+              </svg>
             </div>
             <div class="message-bubble">
               <div v-if="msg.loading && !msg.content" class="message-loading">
@@ -123,9 +140,17 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { postAsk, clearConversation } from '@/api/chat'
+
+/** 聊天消息 */
+interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+  loading: boolean
+  isRead: boolean
+}
 
 // 生成会话ID（持久化到 SessionStorage）
 const conversationId = 'chat-' + (sessionStorage.getItem('chat_conv_id') || (() => {
@@ -135,13 +160,12 @@ const conversationId = 'chat-' + (sessionStorage.getItem('chat_conv_id') || (() 
 })())
 
 const visible = ref(false)
-const messages = ref([])
+const messages = ref<ChatMessage[]>([])
 const inputText = ref('')
 const loading = ref(false)
 const unreadCount = ref(0)
-const messagesRef = ref(null)
-const inputRef = ref(null)
-const panelRef = ref(null)
+const messagesRef = ref<HTMLElement | null>(null)
+const inputRef = ref<HTMLInputElement | null>(null)
 
 // ====== 拖拽状态 ======
 const dragOffset = ref({ x: 0, y: 0 })
@@ -159,7 +183,7 @@ const panelStyle = computed(() => {
   return {}
 })
 
-function startDrag(e) {
+function startDrag(e: MouseEvent) {
   // 只响应左键
   if (e.button !== 0) return
   isDragging.value = true
@@ -167,7 +191,7 @@ function startDrag(e) {
   initialOffset.value = { ...dragOffset.value }
 }
 
-function onDragMove(e) {
+function onDragMove(e: MouseEvent) {
   if (!isDragging.value) return
   const dx = e.clientX - dragStart.value.x
   const dy = e.clientY - dragStart.value.y
@@ -215,7 +239,7 @@ function closeChat() {
 /**
  * 将 AI 返回文本渲染为带基本 Markdown 样式的 HTML
  */
-function renderContent(text) {
+function renderContent(text: string): string {
   if (!text) return ''
 
   // 1) 转义 HTML 防 XSS
@@ -271,12 +295,12 @@ function scrollToBottom() {
   })
 }
 
-function addMessage(role, content, loading = false) {
-  messages.value.push({ role, content, loading, isRead: true })
+function addMessage(role: ChatMessage['role'], content: string, isLoading = false) {
+  messages.value.push({ role, content, loading: isLoading, isRead: true })
   scrollToBottom()
 }
 
-function sendMessage(text) {
+function sendMessage(text: string) {
   if (!text.trim() || loading.value) return
   inputText.value = ''
 
@@ -496,7 +520,18 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
   text-align: center;
   padding: 32px 16px;
 }
-.welcome-icon { font-size: 48px; margin-bottom: 12px; }
+.welcome-icon {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  background: var(--ds-primary-tint, rgba(45, 127, 249, 0.1));
+  color: var(--ds-primary, #2d7ff9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.welcome-icon svg { width: 30px; height: 30px; }
 .welcome-title { font-size: 16px; font-weight: 600; color: var(--ds-text, #1e2632); margin-bottom: 4px; }
 .welcome-desc { font-size: 13px; color: #999; margin-bottom: 20px; }
 .quick-questions {
@@ -533,7 +568,25 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
   align-items: flex-start;
 }
 .message-user { flex-direction: row-reverse; }
-.message-avatar { font-size: 24px; flex-shrink: 0; margin-top: 2px; }
+.message-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.message-avatar svg { width: 18px; height: 18px; }
+.message-ai .message-avatar {
+  background: var(--ds-primary-tint, rgba(45, 127, 249, 0.12));
+  color: var(--ds-primary, #2d7ff9);
+}
+.message-user .message-avatar {
+  background: rgba(30, 38, 50, 0.08);
+  color: var(--ds-text, #1e2632);
+}
 .message-bubble {
   max-width: 80%;
   padding: 10px 14px;

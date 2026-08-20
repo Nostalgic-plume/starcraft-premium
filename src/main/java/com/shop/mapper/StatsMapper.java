@@ -66,7 +66,7 @@ public interface StatsMapper {
             "  0 AS totalUsers, " +
             "  COALESCE(COUNT(*), 0) AS totalOrders, " +
             "  COALESCE(SUM(CASE WHEN status IN (1,2,3,4) THEN actual_amount ELSE 0 END), 0) AS totalSales, " +
-            "  COALESCE(SUM(CASE WHEN status = 0 THEN 1 ELSE 0 END), 0) AS pendingOrders " +
+            "  COALESCE(SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END), 0) AS pendingOrders " +
             "FROM `orders` WHERE deleted = 0 AND shop_id = #{shopId}")
     DashboardStatsVO selectMerchantDashboard(Long shopId);
 }

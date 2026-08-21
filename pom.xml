@@ -30,7 +30,7 @@
         <hutool.version>5.8.35</hutool.version>
         <sa-token.version>1.45.0</sa-token.version>
         <springdoc.version>2.3.0</springdoc.version>
-        <langchain4j.version>0.36.1</langchain4j.version>
+        <langchain4j.version>1.19.0</langchain4j.version>
     </properties>
 
     <dependencies>
@@ -132,7 +132,9 @@
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-qdrant</artifactId>
-            <version>${langchain4j.version}</version>
+            <!-- 注意：qdrant 集成模块在 1.x 仅发布 beta（0.36.2 为最后稳定版）。
+                 1.19.0-beta29 依赖 langchain4j-core:1.19.0 + io.qdrant:client:1.17.0，与核心稳定版配套 -->
+            <version>1.19.0-beta29</version>
         </dependency>
 
         <!-- RocketMQ -->

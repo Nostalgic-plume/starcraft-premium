@@ -1,7 +1,0 @@
-com.shop:shop:jar:1.0.0
-+- dev.langchain4j:langchain4j:jar:0.36.1:compile
-|  \- dev.langchain4j:langchain4j-core:jar:0.36.1:compile
-+- dev.langchain4j:langchain4j-ollama:jar:0.36.1:compile
-+- dev.langchain4j:langchain4j-open-ai:jar:0.36.1:compile
-\- dev.langchain4j:langchain4j-qdrant:jar:0.36.1:compile
-   \- io.qdrant:client:jar:1.11.0:compile

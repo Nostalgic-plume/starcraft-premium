@@ -4,9 +4,9 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.model.StreamingResponseHandler;
+import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
-import dev.langchain4j.model.output.Response;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -73,16 +73,16 @@ public class QueryRewriter {
                     new SystemMessage(REWRITE_SYSTEM),
                     new UserMessage(prompt));
 
-            streamingChatModel.generate(messages, new StreamingResponseHandler<>() {
+            streamingChatModel.chat(messages, new StreamingChatResponseHandler() {
                 private final StringBuilder sb = new StringBuilder();
 
                 @Override
-                public void onNext(String token) {
+                public void onPartialResponse(String token) {
                     sb.append(token);
                 }
 
                 @Override
-                public void onComplete(Response<AiMessage> response) {
+                public void onCompleteResponse(ChatResponse response) {
                     future.complete(sb.toString().trim());
                 }
 

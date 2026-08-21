@@ -11,8 +11,9 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
+import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
-import dev.langchain4j.model.output.Response;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -134,19 +135,19 @@ public class ChatService {
 
                 // 8. 流式调用大模型
                 StringBuilder fullResponse = new StringBuilder();
-                streamingChatModel.generate(chatMemory.messages(), new dev.langchain4j.model.StreamingResponseHandler<AiMessage>() {
+                streamingChatModel.chat(chatMemory.messages(), new StreamingChatResponseHandler() {
                     @Override
-                    public void onNext(String token) {
+                    public void onPartialResponse(String token) {
                         fullResponse.append(token);
                         sendEvent(emitter, "token", token);
                     }
 
                     @Override
-                    public void onComplete(Response<AiMessage> response) {
+                    public void onCompleteResponse(ChatResponse response) {
                         String reply = "";
-                        if (response != null && response.content() != null) {
-                            reply = response.content().text();
-                            chatMemory.add(response.content());
+                        if (response != null && response.aiMessage() != null) {
+                            reply = response.aiMessage().text();
+                            chatMemory.add(response.aiMessage());
                         }
                         // 保存 AI 回复到 MySQL
                         ChatMessageDO aiMsgDO = new ChatMessageDO();

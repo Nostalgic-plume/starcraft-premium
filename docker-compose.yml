@@ -1,7 +1,7 @@
 # 中间件 Docker Compose 一键编排
 # 范围：Redis / Qdrant / RocketMQ / Nginx 四个中间件；后端 Spring Boot 保持本地运行
 # 启动：docker compose up -d（根目录 .env 提供 REDIS_PASSWORD 等敏感凭证，已 gitignore）
-# 参考：docs/superpowers/specs/2026-08-08-middleware-docker-compose-design.md
+# 说明：编排细节见 docs/README.md「离线数仓」与「快速开始」；设计稿已归档不随仓库分发
 services:
   # ====== Redis（仅本机可达，含密码）======
   redis:

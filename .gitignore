@@ -21,9 +21,12 @@ Thumbs.db
 CLAUDE.md
 *.zip
 docs/db-backup/
+# 个人文档（禁止推送 Gitee）
 docs/秋招备战计划书.md
 docs/面试知识点清单.md
 docs/会话存储-内存vsRedis.md
+docs/星创优品-面试话术手册.md
+bash.exe.stackdump
 deploy/html/
 deploy/nginx.exe
 deploy/mime.types

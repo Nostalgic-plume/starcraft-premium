@@ -7,7 +7,7 @@
 | 后端 | 数据库 & 中间件 | 前端 | AI / 大数据 |
 |------|---------------|------|------------|
 | Spring Boot 3.2.12 | MySQL 8 + Redis | Vue 3 + Vite | LangChain4j + Qdrant |
-| MyBatis-Plus 3.5.5 | Nginx 1.20.2 | Element Plus + Pinia | DashScope qwen-plus |
+| MyBatis-Plus 3.5.5 | Nginx 1.20.2 | Naive UI + Pinia | DashScope qwen-plus |
 | Sa-Token 1.45.0 | — | ECharts | Hive + Sqoop + Azkaban |
 
 ## 功能概览
@@ -44,9 +44,9 @@ cd deploy && nginx.exe -c conf/nginx.conf -p .
 
 | 端 | 地址 | 默认账号 |
 |----|------|---------|
-| 用户端 | `http://localhost:8088` | zhangsan |
-| 管理后台 | `http://localhost:8088/admin/` | admin |
-| 商家中心 | `http://localhost:8088/merchant/` | merchant1 |
+| 用户端 | `http://localhost` | zhangsan |
+| 管理后台 | `http://localhost/admin/` | admin |
+| 商家中心 | `http://localhost/merchant/` | merchant1 |
 
 > 所有账号密码统一 `123456`
 
@@ -75,7 +75,7 @@ shop/
 - **幂等** — Redis Token 防重下单 + 支付回调条件更新
 - **订单快照** — 下单时 name/price/image 写入 order_item，历史订单不受商品变更影响
 - **数据隔离** — 商家 loginId 直接映射 shop_id，Service 层自动 `WHERE shop_id = ?`
-- **缓存** — 商品详情 Redis 全量缓存（含 SKU/库存/销量），库存变更时主动淘汰
+- **缓存** — 商品详情逻辑过期缓存 + ID 布隆过滤（防穿透/击穿），库存 Redis Lua 原子预扣
 - **长整型 ID** — Jackson Long→String 全局序列化，解决 JS 精度丢失
 
 ## 在线文档

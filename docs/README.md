@@ -24,15 +24,15 @@ B2C 电商系统，**Spring Boot 单体后端 + Vue 3 三端分离前端**，Ngi
 | 组件 | 技术栈 |
 |------|--------|
 | 后端 | Spring Boot 3.2.12 + MyBatis-Plus 3.5.5 + Sa-Token 1.45.0 |
-| 数据库连接池 | Druid（连接池 + SQL 监控 + 防火墙），监控面板 `/druid/` | 1.2.25 |
-| 异步消息 | RocketMQ（异步落单 + 延迟取消） | client 4.9.7 / starter 2.2.3 |
-| 接口文档 | springdoc-openapi（Swagger UI，`/swagger-ui.html`） | 2.3.0 |
-| 配置加载 | spring-dotenv（`.env` 加载敏感凭证，已 gitignore） | 4.0.0 |
+| 数据库连接池 | Druid 1.2.25（连接池 + SQL 监控 + 防火墙），监控面板 `/druid/` |
+| 异步消息 | RocketMQ 4.9.7 / starter 2.2.3（异步落单 + 延迟取消） |
+| 接口文档 | springdoc-openapi 2.3.0（Swagger UI，`/swagger-ui.html`） |
+| 配置加载 | spring-dotenv 4.0.0（`.env` 加载敏感凭证，已 gitignore） |
 | 数据库 | MySQL 8 + Redis |
-| 前端 | Vue 3 + Vite + Element Plus + Pinia + ECharts |
+| 前端 | Vue 3 + Vite + Naive UI + Pinia + ECharts |
 | 反向代理 | Nginx 1.20.2 |
 | JDK | OpenJDK 22 |
-| RAG 语义搜索 | LangChain4j + Qdrant（1536维）+ DashScope（text-embedding-v1 嵌入） |
+| RAG 语义搜索 | LangChain4j 1.19.0 + Qdrant（1536维）+ DashScope（text-embedding-v1 嵌入） |
 | 智能客服 | SSE 流式 + DashScope qwen-plus（大模型）+ RAG 检索增强 + 分类名回退 |
 | 离线数仓 | Hive 3.x + Sqoop 1.4.x + Azkaban 3.x |
 
@@ -55,9 +55,9 @@ cd shop/deploy && nginx.exe -c conf/nginx.conf -p .
 
 | 地址 | 页面 | 默认账号 |
 |------|------|----------|
-| `http://localhost:8088` | 用户端 | zhangsan / lisi |
-| `http://localhost:8088/admin/` | 管理后台 | admin |
-| `http://localhost:8088/merchant/` | 商家中心 | merchant1 |
+| `http://localhost` | 用户端 | zhangsan / lisi |
+| `http://localhost/admin/` | 管理后台 | admin |
+| `http://localhost/merchant/` | 商家中心 | merchant1 |
 | `http://localhost:8080/swagger-ui.html` | 接口文档（Swagger UI） | — |
 
 > 所有账号密码统一 **`123456`**。

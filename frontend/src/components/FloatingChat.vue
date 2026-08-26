@@ -152,12 +152,13 @@ interface ChatMessage {
   isRead: boolean
 }
 
-// 生成会话ID（持久化到 SessionStorage）
-const conversationId = 'chat-' + (sessionStorage.getItem('chat_conv_id') || (() => {
-  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+// 生成会话ID（持久化到 SessionStorage）。
+// 注意：后端 chat_conversation.id 为 Long，前端必须传数字字符串（历史 'chat-' 前缀会 NumberFormatException）
+const conversationId = sessionStorage.getItem('chat_conv_id') || (() => {
+  const id = String(Date.now()) + String(Math.floor(Math.random() * 1000))
   sessionStorage.setItem('chat_conv_id', id)
   return id
-})())
+})()
 
 const visible = ref(false)
 const messages = ref<ChatMessage[]>([])
@@ -216,6 +217,11 @@ const quickQuestions = [
 ]
 
 function openChat() {
+  // 智能客服为登录后功能：未登录引导登录
+  if (!localStorage.getItem('token')) {
+    window.location.href = '/login'
+    return
+  }
   visible.value = true
   unreadCount.value = 0
   nextTick(() => {

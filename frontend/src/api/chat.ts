@@ -33,7 +33,7 @@ export function postAsk(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(token ? { Authorization: 'Bearer ' + token } : {})
+        ...(token ? { token: token } : {})
       },
       body: JSON.stringify({ message, conversationId: conversationId || 'default' })
     }).then(async (response) => {

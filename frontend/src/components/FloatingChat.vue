@@ -153,9 +153,12 @@ interface ChatMessage {
 }
 
 // 生成会话ID（持久化到 SessionStorage）。
-// 注意：后端 chat_conversation.id 为 Long，前端必须传数字字符串（历史 'chat-' 前缀会 NumberFormatException）
+// 注意：① 后端 chat_conversation.id 为 Long，前端必须传数字字符串（历史 'chat-' 前缀会 NumberFormatException）；
+//      ② 用安全随机源 crypto.getRandomValues 替代 Math.random，避免会话 ID 可预测；
+//         真正安全边界在后端：登录态 + getOrCreateConversation 按 userId 校验会话归属（猜中 ID 也无法访问他人会话）。
 const conversationId = sessionStorage.getItem('chat_conv_id') || (() => {
-  const id = String(Date.now()) + String(Math.floor(Math.random() * 1000))
+  const rand = crypto.getRandomValues(new Uint32Array(1))[0] % 1000000
+  const id = String(Date.now()) + String(rand).padStart(6, '0')
   sessionStorage.setItem('chat_conv_id', id)
   return id
 })()

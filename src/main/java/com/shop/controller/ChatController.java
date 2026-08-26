@@ -53,12 +53,8 @@ public class ChatController {
             return emitter;
         }
 
-        // 获取当前登录用户ID（未登录时使用0）
-        long userId = 0;
-        try {
-            userId = StpUtil.getLoginIdAsLong();
-        } catch (Exception ignored) {
-        }
+        // AI 客服为登录后功能：未登录抛 NotLoginException（GlobalExceptionHandler 统一返回 401）
+        long userId = StpUtil.getLoginIdAsLong();
 
         SseEmitter emitter = new SseEmitter(300_000L);
         chatService.ask(conversationId, userId, message, emitter);

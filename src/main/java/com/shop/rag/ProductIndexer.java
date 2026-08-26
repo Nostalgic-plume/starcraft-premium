@@ -52,6 +52,9 @@ public class ProductIndexer {
     private volatile int indexedCount = 0;
     private volatile long lastRebuildTime = 0;
 
+    /** 详情文本最大长度（embedding 单条 token 上限防护，超长截断） */
+    private static final int MAX_DETAIL_LENGTH = 500;
+
     /**
      * 检查 Qdrant 集合是否已有向量数据
      */
@@ -284,7 +287,7 @@ public class ProductIndexer {
                 safe(product.getDescription()),
                 safe(product.getBrand()),
                 categoryName,
-                stripHtml(safe(product.getDetail())));
+                truncateDetail(stripHtml(safe(product.getDetail()))));
     }
 
     /**
@@ -363,5 +366,13 @@ public class ProductIndexer {
         return html.replaceAll("<[^>]+>", "")
                 .replaceAll("\\s+", " ")
                 .trim();
+    }
+
+    /** 详情文本截断（防 embedding 单条 token 超限，保留开头关键信息） */
+    private static String truncateDetail(String text) {
+        if (text == null || text.length() <= MAX_DETAIL_LENGTH) {
+            return text;
+        }
+        return text.substring(0, MAX_DETAIL_LENGTH) + "...";
     }
 }

@@ -7,13 +7,13 @@ import com.shop.mapper.ProductMapper;
 import com.shop.model.entity.CategoryDO;
 import com.shop.model.entity.ChatMessageDO;
 import com.shop.model.entity.ProductDO;
-import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
-import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.memory.chat.MessageWindowChatMemory;
+import dev.langchain4j.memory.chat.TokenWindowChatMemory;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
+import dev.langchain4j.model.openai.OpenAiTokenCountEstimator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -44,13 +44,15 @@ public class ChatService {
     private final ObjectMapper objectMapper;
     private final CategoryMapper categoryMapper;
     private final ProductMapper productMapper;
+    private final MySqlChatMemoryStore mySqlChatMemoryStore;
 
     /** 会话记忆池：conversationId → ChatMemory（保留最近 10 轮） */
-    private final Map<String, MessageWindowChatMemory> chatMemoryMap = new ConcurrentHashMap<>();
+    private final Map<String, TokenWindowChatMemory> chatMemoryMap = new ConcurrentHashMap<>();
 
-    private final ExecutorService executor = Executors.newCachedThreadPool();
+    private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
-    private static final int MAX_TOKENS = 10;
+    /** 对话窗口 token 预算（TokenWindowChatMemory 按此裁剪，防 token 爆炸） */
+    private static final int TOKEN_BUDGET = 3000;
     private static final String SYSTEM_PROMPT_TEMPLATE = """
             你是「星辰优选」商城的智能客服「小星」，性格热情耐心，像朋友一样帮用户挑商品。
 
@@ -94,10 +96,12 @@ public class ChatService {
                 chatHistoryService.getOrCreateConversation(Long.valueOf(conversationId), userId);
 
                 // 2. 获取或创建会话记忆（提前获取，为 Query 改写提供对话上下文）
-                MessageWindowChatMemory chatMemory = chatMemoryMap.computeIfAbsent(
+                TokenWindowChatMemory chatMemory = chatMemoryMap.computeIfAbsent(
                         conversationId,
-                        k -> MessageWindowChatMemory.builder()
-                                .maxMessages(MAX_TOKENS)
+                        k -> TokenWindowChatMemory.builder()
+                                .id(conversationId)
+                                .maxTokens(TOKEN_BUDGET, new OpenAiTokenCountEstimator("gpt-4o"))
+                                .chatMemoryStore(mySqlChatMemoryStore)
                                 .build()
                 );
 
@@ -128,14 +132,15 @@ public class ChatService {
                 userMsgDO.setRagContext(buildRagContextJson(hits));
                 chatHistoryService.saveMessage(userMsgDO);
 
-                // 8. 构建消息列表
+                // 8. 构建消息列表：SystemMessage 每轮单条最新（不落库不累积），对话历史取窗口最近 N 条
                 String systemPrompt = String.format(SYSTEM_PROMPT_TEMPLATE, productContext);
-                chatMemory.add(new SystemMessage(systemPrompt));
-                chatMemory.add(new UserMessage(userMessage));
+                List<ChatMessage> llmMessages = new ArrayList<>();
+                llmMessages.add(new SystemMessage(systemPrompt));
+                llmMessages.addAll(chatMemory.messages());
 
                 // 8. 流式调用大模型
                 StringBuilder fullResponse = new StringBuilder();
-                streamingChatModel.chat(chatMemory.messages(), new StreamingChatResponseHandler() {
+                streamingChatModel.chat(llmMessages, new StreamingChatResponseHandler() {
                     @Override
                     public void onPartialResponse(String token) {
                         fullResponse.append(token);
@@ -147,7 +152,6 @@ public class ChatService {
                         String reply = "";
                         if (response != null && response.aiMessage() != null) {
                             reply = response.aiMessage().text();
-                            chatMemory.add(response.aiMessage());
                         }
                         // 保存 AI 回复到 MySQL
                         ChatMessageDO aiMsgDO = new ChatMessageDO();

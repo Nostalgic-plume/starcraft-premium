@@ -9,14 +9,19 @@ import com.shop.model.entity.ChatMessageDO;
 import com.shop.model.entity.ProductDO;
 import com.shop.service.OrderService;
 import dev.langchain4j.data.message.ChatMessage;
+import org.springframework.beans.factory.annotation.Qualifier;
 import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
+import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.memory.chat.TokenWindowChatMemory;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.PartialToolCall;
+import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiTokenCountEstimator;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.TokenStream;
+import dev.langchain4j.service.tool.ToolErrorHandlerResult;
 import dev.langchain4j.service.tool.ToolExecution;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -42,7 +47,12 @@ import java.util.concurrent.Executors;
 @RequiredArgsConstructor
 public class ChatService {
 
+    @Qualifier("openAiStreamingChatModel")
     private final OpenAiStreamingChatModel streamingChatModel;
+    @Qualifier("openAiStreamingChatModelBackup")
+    private final OpenAiStreamingChatModel streamingChatModelBackup;
+    private final CircuitBreaker circuitBreaker;
+    private final ToolCallLogger toolCallLogger;
     private final RagSearchService ragSearchService;
     private final ChatHistoryService chatHistoryService;
     private final QueryRewriter queryRewriter;
@@ -147,58 +157,15 @@ public class ChatService {
                 chatMemory.add(new SystemMessage(systemPrompt));
                 mySqlChatMemoryStore.updateMessages(conversationId, chatMemory.messages());
 
-                // 9. 组装 AiServices（每请求构建）：绑定会话记忆 + 当前用户订单工具。
-                //    agent loop 由框架处理：LLM 决策是否调工具 → 反序列化参数 → 执行工具 → 结果回填 → 流式生成最终文本
-                AiAssistant assistant = AiServices.builder(AiAssistant.class)
-                        .streamingChatModel(streamingChatModel)
-                        .chatMemory(chatMemory)
-                        .tools(new OrderTool(userId, orderService))
-                        .maxToolCallingRoundTrips(5)
-                        .compensateOnToolErrors(true)
-                        .build();
-
-                // 10. 流式调用（Agent Loop）
-                assistant.chat(userMessage)
-                        .onPartialResponse(token -> {
-                            if (token == null || token.isBlank()) {
-                                return; // 工具决策阶段的空 token 不推送
-                            }
-                            sendEvent(emitter, "token", token);
-                        })
-                        .onPartialToolCall(toolCall ->
-                                log.debug("工具调用意图: {} args={}", toolCall.name(), toolCall.partialArguments()))
-                        .onToolExecuted(toolExecuted -> {
-                            // 安全：日志只记录工具名与耗时，不记录参数/结果（含订单号等 PII）
-                            if (toolExecuted.hasFailed()) {
-                                log.warn("工具执行失败: {}", toolExecuted.request().name());
-                            } else {
-                                long cost = toolExecuted.duration() != null ? toolExecuted.duration().toMillis() : -1;
-                                log.info("工具执行成功: {} 耗时{}ms", toolExecuted.request().name(), cost);
-                            }
-                        })
-                        .onCompleteResponse(response -> {
-                            String reply = response != null && response.aiMessage() != null
-                                    ? response.aiMessage().text() : "";
-                            // 保存 AI 回复到 MySQL
-                            ChatMessageDO aiMsgDO = new ChatMessageDO();
-                            aiMsgDO.setConversationId(Long.valueOf(conversationId));
-                            aiMsgDO.setRole("assistant");
-                            aiMsgDO.setContent(reply);
-                            chatHistoryService.saveMessage(aiMsgDO);
-
-                            // 首次对话时自动生成标题
-                            boolean isFirstMessage = chatHistoryService.listMessages(Long.valueOf(conversationId)).size() <= 2;
-                            if (isFirstMessage) {
-                                chatHistoryService.updateConversationTitle(Long.valueOf(conversationId));
-                            }
-                            completeSse(emitter, reply);
-                        })
-                        .onError(error -> {
-                            log.error("大模型流式调用失败", error);
-                            sendEvent(emitter, "error", "AI 回复生成失败，请稍后重试");
-                            completeSse(emitter, "");
-                        })
-                        .start();
+                // 9. 生成层降级链（Phase 5 T5）：
+                //    DeepSeek(带工具) → 熔断 → qwen 纯 RAG 问答(不带工具) → 模板拼检索结果 → 提示不可用
+                if (circuitBreaker.isOpen()) {
+                    log.warn("DeepSeek 熔断中 → 降级到 qwen 纯 RAG 问答（不调用工具）");
+                    qwenRagFallback(systemPrompt, productContext, userMessage, conversationId, emitter);
+                } else {
+                    deepSeekAgentLoop(userId, systemPrompt, productContext, chatMemory,
+                            userMessage, conversationId, emitter);
+                }
 
             } catch (Exception e) {
                 log.error("ChatService 处理异常", e);
@@ -206,6 +173,128 @@ public class ChatService {
                 completeSse(emitter, "");
             }
         });
+    }
+
+    /**
+     * 主链路：DeepSeek + AiServices 工具链（agent loop）
+     * 熔断挂载：onError → onFailure()（并当场降级 qwen）；onCompleteResponse → onSuccess()
+     */
+    private void deepSeekAgentLoop(Long userId, String systemPrompt, String productContext,
+                                   TokenWindowChatMemory chatMemory, String userMessage,
+                                   String conversationId, SseEmitter emitter) {
+        AiAssistant assistant = AiServices.builder(AiAssistant.class)
+                .streamingChatModel(streamingChatModel)
+                .chatMemory(chatMemory)
+                .tools(new OrderTool(userId, orderService))
+                .maxToolCallingRoundTrips(5)
+                .compensateOnToolErrors(true)
+                // 工具容错（Phase 5 T4）：
+                // ① 参数解析/校验错误 → 错误信息回填给 LLM 修正重试（不直接降级）
+                // ② LLM 幻觉的工具名 → 返回"工具不存在"回填（不让它瞎编）
+                .toolArgumentsErrorHandler((error, context) ->
+                        ToolErrorHandlerResult.text("工具参数无效：" + error.getMessage() + "，请检查参数后重新调用"))
+                .hallucinatedToolNameStrategy(request ->
+                        new ToolExecutionResultMessage(request.id(), request.name(),
+                                "该工具不存在，请使用已提供的工具"))
+                .build();
+
+        assistant.chat(userMessage)
+                .onPartialResponse(token -> {
+                    if (token == null || token.isBlank()) {
+                        return; // 工具决策阶段的空 token 不推送
+                    }
+                    sendEvent(emitter, "token", token);
+                })
+                .onPartialToolCall(toolCall ->
+                        log.debug("工具调用意图: {} args={}", toolCall.name(), toolCall.partialArguments()))
+                .onToolExecuted(toolExecuted -> {
+                    boolean failed = toolExecuted.hasFailed();
+                    long cost = toolExecuted.duration() != null ? toolExecuted.duration().toMillis() : -1;
+                    // 工具日志（异步，可观测性）：只记录元数据，不记录 PII 参数/结果
+                    toolCallLogger.log(userId, toolExecuted.request().name(), cost, !failed, null);
+                    if (failed) {
+                        log.warn("工具执行失败: {}", toolExecuted.request().name());
+                    } else {
+                        log.info("工具执行成功: {} 耗时{}ms", toolExecuted.request().name(), cost);
+                    }
+                })
+                .onCompleteResponse(response -> {
+                    circuitBreaker.onSuccess();
+                    String reply = response != null && response.aiMessage() != null
+                            ? response.aiMessage().text() : "";
+                    saveAssistantMessage(conversationId, reply);
+                    completeSse(emitter, reply);
+                })
+                .onError(error -> {
+                    circuitBreaker.onFailure();
+                    log.error("DeepSeek 调用失败，当场降级到 qwen 纯 RAG 问答", error);
+                    qwenRagFallback(systemPrompt, productContext, userMessage, conversationId, emitter);
+                })
+                .start();
+    }
+
+    /**
+     * 降级链路：qwen 纯 RAG 问答（不带工具，仅检索上下文 + qwen 生成）
+     * qwen 也失败 → templateFallback（无 LLM 模板拼检索结果）
+     */
+    private void qwenRagFallback(String systemPrompt, String productContext,
+                                 String userMessage, String conversationId, SseEmitter emitter) {
+        try {
+            List<ChatMessage> messages = new ArrayList<>();
+            messages.add(new SystemMessage(systemPrompt));
+            messages.add(new UserMessage(userMessage));
+            streamingChatModelBackup.chat(messages, new StreamingChatResponseHandler() {
+                @Override
+                public void onPartialResponse(String token) {
+                    if (token != null && !token.isBlank()) {
+                        sendEvent(emitter, "token", token);
+                    }
+                }
+
+                @Override
+                public void onCompleteResponse(ChatResponse response) {
+                    String reply = response != null && response.aiMessage() != null
+                            ? response.aiMessage().text() : "";
+                    saveAssistantMessage(conversationId, reply);
+                    completeSse(emitter, reply);
+                }
+
+                @Override
+                public void onError(Throwable error) {
+                    log.warn("qwen 备用模型也失败，降级到模板拼检索结果", error);
+                    templateFallback(productContext, conversationId, emitter);
+                }
+            });
+        } catch (Exception e) {
+            log.warn("qwen 备用模型异常，降级到模板拼检索结果", e);
+            templateFallback(productContext, conversationId, emitter);
+        }
+    }
+
+    /**
+     * 最底层降级：无 LLM，把检索结果用模板拼成文本直接返回（AI 挂了客服不崩）
+     */
+    private void templateFallback(String productContext, String conversationId, SseEmitter emitter) {
+        String reply = (productContext != null && !productContext.isBlank())
+                ? "抱歉，AI 暂时不可用，以下相关商品供您参考：\n" + productContext
+                : "抱歉，AI 暂时不可用，请稍后再试";
+        saveAssistantMessage(conversationId, reply);
+        sendEvent(emitter, "end", reply);
+        completeSse(emitter, reply);
+    }
+
+    /** 保存 AI 回复到 MySQL + 首次对话自动生成标题（主链路与降级链路共用） */
+    private void saveAssistantMessage(String conversationId, String reply) {
+        ChatMessageDO aiMsgDO = new ChatMessageDO();
+        aiMsgDO.setConversationId(Long.valueOf(conversationId));
+        aiMsgDO.setRole("assistant");
+        aiMsgDO.setContent(reply);
+        chatHistoryService.saveMessage(aiMsgDO);
+
+        boolean isFirstMessage = chatHistoryService.listMessages(Long.valueOf(conversationId)).size() <= 2;
+        if (isFirstMessage) {
+            chatHistoryService.updateConversationTitle(Long.valueOf(conversationId));
+        }
     }
 
     /**

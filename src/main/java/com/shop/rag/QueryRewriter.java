@@ -9,6 +9,7 @@ import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -32,6 +33,7 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class QueryRewriter {
 
+    @Qualifier("openAiStreamingChatModel")
     private final OpenAiStreamingChatModel streamingChatModel;
 
     private static final String REWRITE_SYSTEM = "你是一个电商搜索关键词改写助手。";

@@ -9,6 +9,8 @@ import java.util.List;
 /**
  * 用户服务
  * 处理用户注册、登录、个人信息查询等业务逻辑
+ *
+ * @author shop
  */
 public interface UserService {
 

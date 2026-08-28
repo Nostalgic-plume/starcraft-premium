@@ -8,6 +8,8 @@ import java.util.List;
 
 /**
  * 权限 Mapper
+ *
+ * @author shop
  */
 public interface PermissionMapper extends BaseMapper<PermissionDO> {
 

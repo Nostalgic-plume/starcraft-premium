@@ -5,6 +5,8 @@ import com.shop.model.entity.ChatMessageDO;
 
 /**
  * 对话消息 Mapper
+ *
+ * @author shop
  */
 public interface ChatMessageMapper extends BaseMapper<ChatMessageDO> {
 }

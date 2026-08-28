@@ -17,6 +17,8 @@ import java.util.List;
  * 基于 Lua 脚本实现原子库存预扣，减少数据库并发压力。
  * 库存以数据库为最终凭证，Redis 作为前置快速校验层。
  * </p>
+ *
+ * @author shop
  */
 @Slf4j
 @Service
@@ -44,6 +46,9 @@ public class StockCacheService {
 
     /**
      * 初始化库存到 Redis（不存在时才设置，避免覆盖已有值）
+     *
+     * @param skuId SKU ID
+     * @param stock 数据库中的当前库存量
      */
     public void initStock(Long skuId, Integer stock) {
         String key = ProductConstants.CACHE_SKU_STOCK + skuId;
@@ -85,6 +90,9 @@ public class StockCacheService {
 
     /**
      * 回滚 Redis 库存（取消订单/事务回滚时调用）
+     *
+     * @param skuId    SKU ID
+     * @param quantity 回滚的数量（库存增加量）
      */
     public void restoreStock(Long skuId, Integer quantity) {
         String key = ProductConstants.CACHE_SKU_STOCK + skuId;

@@ -8,6 +8,8 @@ import java.util.List;
 
 /**
  * 用户-角色关联 Mapper
+ *
+ * @author shop
  */
 public interface UserRoleMapper extends BaseMapper<UserRoleDO> {
 

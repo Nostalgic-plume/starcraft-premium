@@ -43,6 +43,8 @@ import java.util.stream.Collectors;
 /**
  * 商品服务实现
  * 管理商品 SPU 及 SKU，支持价格区间计算、分页查询、分类联动
+ *
+ * @author shop
  */
 @Slf4j
 @Service
@@ -59,6 +61,14 @@ public class ProductServiceImpl implements ProductService {
     private final BloomFilter<Long> productBloomFilter;
     private final RedisCache redisCache;
 
+    /**
+     * 新增商品（SPU+SKU）：校验分类存在且必须为二级（叶子）分类，自动填充分类层级与商家ID（merchant 角色登录时），
+     * 入库后同步布隆过滤器与 RAG 索引，再批量插入 SKU 列表
+     *
+     * @param dto 商品参数（categoryId、name、images、skuList 等）
+     * @return 新商品ID
+     * @throws BusinessException 分类不存在、请选择具体的子分类（如「手机」而非「手机数码」）
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long addProduct(ProductDTO dto) {
@@ -119,6 +129,12 @@ public class ProductServiceImpl implements ProductService {
         return product.getId();
     }
 
+    /**
+     * 商品分页查询：按创建时间倒序，支持一级/二级分类联动筛选、商家筛选、关键字模糊搜索
+     *
+     * @param query 分页与筛选参数（page/pageSize、firstCategoryId、categoryId、shopId、keyword）
+     * @return 商品分页结果 {@code PageResult<ProductVO>}
+     */
     @Override
     public PageResult<ProductVO> page(ProductPageQuery query) {
         int[] pn = PaginationHelper.normalize(query.getPage(), query.getPageSize());
@@ -165,6 +181,14 @@ public class ProductServiceImpl implements ProductService {
         return PageResult.of(iPage, voList);
     }
 
+    /**
+     * 商品详情查询：Guava 布隆过滤器前置拦截不存在 ID 防穿透，再走逻辑过期缓存（防击穿，互斥锁异步重建），
+     * 缓存未命中回源 DB
+     *
+     * @param id 商品ID，必填
+     * @return 商品详情 VO（含价格区间、SKU 列表、销量、分类名）
+     * @throws BusinessException 商品不存在（布隆判定未入库或 DB 查无记录）
+     */
     @Override
     public ProductVO getDetail(Long id) {
         // 布隆过滤器前置拦截：Guava 布隆无假阴性，这里为 false 说明该 id 从未入库，
@@ -187,6 +211,14 @@ public class ProductServiceImpl implements ProductService {
                 });
     }
 
+    /**
+     * 更新商品状态：修改后主动删除商品详情缓存保证变更立即可见，并按状态同步 RAG 索引
+     * （上架则新增/更新索引，否则从索引移除）
+     *
+     * @param id     商品ID，必填
+     * @param status 新状态：0=待审核 1=上架 2=下架
+     * @throws BusinessException 商品不存在
+     */
     @Override
     public void updateStatus(Long id, Integer status) {
         ProductDO product = productMapper.selectById(id);
@@ -210,6 +242,12 @@ public class ProductServiceImpl implements ProductService {
         }
     }
 
+    /**
+     * 商家端商品分页：shop_id 取自当前登录商家并注入查询条件后复用公共分页逻辑（数据隔离）
+     *
+     * @param query 分页与筛选参数（page/pageSize 等，shopId 由内部覆盖为当前商家）
+     * @return 本店商品分页结果 {@code PageResult<ProductVO>}
+     */
     @Override
     public PageResult<ProductVO> merchantPage(ProductPageQuery query) {
         query.setShopId(StpUtil.getLoginIdAsLong());

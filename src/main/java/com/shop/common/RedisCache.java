@@ -35,6 +35,8 @@ import java.util.function.Supplier;
  * 删除后下一次读走「缓存不存在 → 同步重建」分支，拿到的是最新数据。
  *
  * 互斥锁用 Redis SETNX（自带 TTL 兜底防死锁），天然兼容未来多实例部署。
+ *
+ * @author shop
  */
 @Slf4j
 @Component
@@ -192,6 +194,12 @@ public class RedisCache {
         return JSONUtil.toBean(JSONUtil.toJsonStr(data), clazz);
     }
 
+    /**
+     * 创建带指定前缀的守护线程工厂（用于缓存异步重建线程池）
+     *
+     * @param prefix 线程名前缀
+     * @return 线程工厂，产出的线程以 prefix 命名且为 daemon 守护线程
+     */
     private ThreadFactory namedThreadFactory(String prefix) {
         return r -> {
             Thread t = new Thread(r, prefix);

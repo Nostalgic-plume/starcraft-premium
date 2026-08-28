@@ -17,6 +17,8 @@ import java.util.List;
 /**
  * 对话历史持久化服务
  * 将对话记录存入 MySQL，支持按用户 / 会话查询
+ *
+ * @author shop
  */
 @Slf4j
 @Service

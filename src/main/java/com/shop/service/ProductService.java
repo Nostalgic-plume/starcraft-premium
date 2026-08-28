@@ -8,6 +8,8 @@ import com.shop.common.PageResult;
 /**
  * 商品服务
  * 处理 SPU/SKU 管理，包含商品 CRUD、上下架、分页查询
+ *
+ * @author shop
  */
 public interface ProductService {
 

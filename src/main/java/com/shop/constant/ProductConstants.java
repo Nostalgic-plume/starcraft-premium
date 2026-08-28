@@ -3,6 +3,8 @@ package com.shop.constant;
 /**
  * 商品模块常量
  * 集中管理商品状态、缓存 Key 等魔数
+ *
+ * @author shop
  */
 public interface ProductConstants {
 

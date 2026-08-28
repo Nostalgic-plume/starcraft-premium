@@ -18,6 +18,8 @@ import java.util.Map;
 
 /**
  * 商家服务实现
+ *
+ * @author shop
  */
 @Slf4j
 @Service
@@ -27,6 +29,13 @@ public class ShopServiceImpl implements ShopService {
     private final ShopMapper shopMapper;
     private final StatsMapper statsMapper;
 
+    /**
+     * 商家登录：校验店铺账号存在性、BCrypt 密码与账号状态后，以 Sa-Token「shop」设备类型建立登录会话
+     *
+     * @param dto 登录请求参数（username 店铺用户名、password 明文密码，均必填）
+     * @return 登录成功后返回 token、shopId、shopName 组成的 Map
+     * @throws BusinessException 店铺账号不存在、密码错误、店铺账号已被停用
+     */
     @Override
     public Map<String, Object> login(ShopLoginDTO dto) {
         ShopDO shop = shopMapper.selectOne(
@@ -49,11 +58,22 @@ public class ShopServiceImpl implements ShopService {
                 "shopName", shop.getShopName());
     }
 
+    /**
+     * 查询当前登录商家的控制台统计概览（销售额/订单数等），shop_id 取自当前会话
+     *
+     * @return 商家看板统计 DashboardStatsVO
+     */
     @Override
     public DashboardStatsVO getDashboard() {
         return statsMapper.selectMerchantDashboard(getCurrentShopId());
     }
 
+    /**
+     * 获取当前登录商家的 shop_id
+     *
+     * @return 当前商家ID（Long）
+     * @throws BusinessException 未登录，请先登录
+     */
     @Override
     public Long getCurrentShopId() {
         try {
@@ -63,6 +83,12 @@ public class ShopServiceImpl implements ShopService {
         }
     }
 
+    /**
+     * 查询当前登录商家的店铺信息，可空字段（logo/简介/联系人等）兜底为空串，避免 Map.of 拒绝 null 值
+     *
+     * @return 店铺信息 Map（shopId、username、shopName、shopLogo、shopDesc、contactName、contactPhone）
+     * @throws BusinessException 店铺不存在
+     */
     @Override
     public Map<String, Object> getCurrentShopInfo() {
         ShopDO shop = shopMapper.selectById(getCurrentShopId());

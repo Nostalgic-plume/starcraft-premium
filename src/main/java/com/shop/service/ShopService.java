@@ -8,6 +8,8 @@ import java.util.Map;
 /**
  * 商家服务
  * 处理商家登录、数据统计等业务逻辑
+ *
+ * @author shop
  */
 public interface ShopService {
 
@@ -16,6 +18,7 @@ public interface ShopService {
      *
      * @param dto 登录参数（用户名、密码）
      * @return token、shopId、shopName
+     * @throws BusinessException 账号不存在、密码错误或账号已被停用时抛出
      */
     Map<String, Object> login(ShopLoginDTO dto);
 
@@ -29,7 +32,8 @@ public interface ShopService {
     /**
      * 获取当前登录商家的 shopId
      *
-     * @return shopId
+     * @return shopId（当前登录商家 ID）
+     * @throws BusinessException 未登录时抛出
      */
     Long getCurrentShopId();
 
@@ -37,6 +41,7 @@ public interface ShopService {
      * 获取当前登录商家信息（不含密码，供商家端展示店铺名称/Logo）
      *
      * @return shopId、shopName、shopLogo、shopDesc、contactName、contactPhone
+     * @throws BusinessException 店铺不存在时抛出
      */
     Map<String, Object> getCurrentShopInfo();
 }

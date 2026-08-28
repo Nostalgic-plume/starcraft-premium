@@ -10,6 +10,8 @@ import java.util.List;
  * 下单接口验证通过后，将订单数据发到 RocketMQ，由消费端异步完成 DB 写入。
  * orderToken 作为幂等键，保证消息重复投递时不会生成重复订单。
  * </p>
+ *
+ * @author shop
  */
 @Data
 public class OrderCreateMessage {

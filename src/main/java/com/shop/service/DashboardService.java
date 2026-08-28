@@ -13,6 +13,8 @@ public interface DashboardService {
     /**
      * 获取看板全量数据
      * 聚合数仓 9 张 ads_* 表的最新数据
+     *
+     * @return 看板全量数据 VO（含各指标聚合结果）
      */
     DashboardAllVO getDashboardAll();
 }

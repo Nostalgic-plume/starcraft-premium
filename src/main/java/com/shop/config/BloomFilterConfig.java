@@ -27,6 +27,8 @@ import java.util.List;
  *   <li>多实例部署时各实例过滤器独立：新商品只写入"新增时所在实例"的本地过滤器。单机/演示环境
  *       无碍；如需多实例一致，可改用 Redis 版布隆（如 Redisson RBloomFilter）。</li>
  * </ol>
+ *
+ * @author shop
  */
 @Slf4j
 @Configuration

@@ -14,6 +14,8 @@ import java.util.List;
  * <p>
  * 基于 MySQL FULLTEXT INDEX（ngram 分词器，n=2）进行中文关键词搜索，
  * 与 Qdrant 向量搜索构成双路检索（Hybrid Search），结果经 RRF 合并。
+ *
+ * @author shop
  */
 @Slf4j
 @Service

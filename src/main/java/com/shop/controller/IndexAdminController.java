@@ -17,6 +17,9 @@ import java.util.Map;
 
 /**
  * RAG 索引管理接口（管理后台）
+ * 提供全量重建 Qdrant 向量索引与 MySQL FULLTEXT 索引、查看索引状态等能力
+ *
+ * @author shop
  */
 @Tag(name = "RAG 索引管理")
 @RestController
@@ -26,6 +29,12 @@ public class IndexAdminController {
 
     private final ProductIndexer productIndexer;
 
+    /**
+     * 触发全量重建索引（需 product:edit 权限）
+     * 异步线程执行强重建（不清除已有 Qdrant 数据，而是全量重写），接口立即返回
+     *
+     * @return 触发成功提示（实际重建进度需通过状态接口查询）
+     */
     @PostMapping("/rebuild")
     @SaCheckPermission("product:edit")
     @Operation(summary = "触发全量重建索引（Qdrant 向量 + MySQL FULLTEXT）")
@@ -40,6 +49,12 @@ public class IndexAdminController {
         return Result.success(data);
     }
 
+    /**
+     * 查看索引状态（需 product:edit 权限）
+     * 返回 Qdrant 已索引商品数、最近重建时间（未重建时返回"未重建"）以及 FULLTEXT 索引健康检查结果
+     *
+     * @return 索引状态 Map（indexedCount/lastRebuildTime/fulltextIndex）
+     */
     @GetMapping("/status")
     @SaCheckPermission("product:edit")
     @Operation(summary = "查看索引状态（Qdrant + FULLTEXT）")

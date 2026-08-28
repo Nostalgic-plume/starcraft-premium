@@ -10,6 +10,8 @@ import java.util.stream.Collectors;
  * score = 1 / (k + rank_vector) + 1 / (k + rank_keyword)
  * <p>
  * k=60 为业界常用常数，对 rank 位置变化不敏感，适合向量+关键词异源融合。
+ *
+ * @author shop
  */
 public class RrfMerger {
 

@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
  * 数据看板控制器
  * 提供离线数仓各维度指标聚合数据，供 DataDashboard.vue 前端调用
  *
- * @author shop
+ * @author 陈
  */
 @Slf4j
 @RestController

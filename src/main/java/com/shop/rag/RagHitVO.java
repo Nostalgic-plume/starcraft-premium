@@ -9,6 +9,8 @@ import java.math.BigDecimal;
 
 /**
  * RAG 语义搜索结果 VO
+ *
+ * @author shop
  */
 @Data
 @Builder

@@ -27,6 +27,8 @@ import java.util.Map;
  * 商家端接口
  * 商家使用 shop 表独立账号登录，shop_id 即 Sa-Token loginId
  * 所有业务接口通过 ShopService 获取 shop_id 并委托 Service 处理
+ *
+ * @author shop
  */
 @Slf4j
 @Tag(name = "商家模块")
@@ -41,6 +43,13 @@ public class MerchantController {
 
     // ==================== 商家独立登录 ====================
 
+    /**
+     * 商家登录
+     * 使用 shop 表独立账号登录，成功后返回 Sa-Token token
+     *
+     * @param dto 登录请求体（含用户名、密码），由 @Valid 做非空与格式校验
+     * @return 登录结果，data 为 token 及账号信息的 Map
+     */
     @PostMapping("/login")
     @Operation(summary = "商家登录（使用 shop 表独立账号）")
     public Result<Map<String, Object>> login(@Valid @RequestBody ShopLoginDTO dto) {
@@ -49,6 +58,11 @@ public class MerchantController {
 
     // ==================== 商家信息 ====================
 
+    /**
+     * 获取当前登录商家信息
+     *
+     * @return 店铺名称/Logo 等商家信息 Map
+     */
     @SaCheckLogin
     @GetMapping("/info")
     @Operation(summary = "获取当前商家信息（店铺名称/Logo，供商家端头部展示）")
@@ -58,6 +72,11 @@ public class MerchantController {
 
     // ==================== 数据统计 ====================
 
+    /**
+     * 获取当前商家的控制台概览统计（仅本店数据）
+     *
+     * @return 本店仪表盘汇总数据（订单数、销售额等）
+     */
     @SaCheckLogin
     @GetMapping("/stats/dashboard")
     @Operation(summary = "商家控制台概览（本店数据）")
@@ -67,6 +86,14 @@ public class MerchantController {
 
     // ==================== 订单管理 ====================
 
+    /**
+     * 商家订单分页列表，仅返回本店（shop_id 隔离）订单
+     *
+     * @param page     页码，从 1 开始，默认 1
+     * @param pageSize 每页条数，默认 20
+     * @param status   订单状态：0=待支付 1=已支付 2=已发货 3=已收货 4=已完成 5=已取消 6=已退款，可空表示全部
+     * @return 本店订单分页结果
+     */
     @SaCheckLogin
     @GetMapping("/order/page")
     @Operation(summary = "商家订单分页列表（仅本店订单）")
@@ -77,6 +104,13 @@ public class MerchantController {
         return Result.success(orderService.merchantPageOrders(page, pageSize, status));
     }
 
+    /**
+     * 查询本店订单详情
+     * Service 层校验订单归属，非本店订单拒绝返回
+     *
+     * @param orderId 订单ID
+     * @return 订单详情（仅本店订单可查）
+     */
     @SaCheckLogin
     @GetMapping("/order/detail/{orderId}")
     @Operation(summary = "商家订单详情")
@@ -84,6 +118,13 @@ public class MerchantController {
         return Result.success(orderService.merchantGetDetail(orderId));
     }
 
+    /**
+     * 商家发货
+     * 校验订单归属且订单为已支付状态方可发货
+     *
+     * @param body 请求体：orderId 为本店订单ID（必填），logisticsNo 为物流单号（可空，默认空串）
+     * @return 发货成功提示
+     */
     @SaCheckLogin
     @PostMapping("/order/deliver")
     @Operation(summary = "商家发货")
@@ -96,6 +137,14 @@ public class MerchantController {
 
     // ==================== 商品管理 ====================
 
+    /**
+     * 商家商品分页列表，仅返回本店商品（shop_id 隔离）
+     *
+     * @param page     页码，从 1 开始，默认 1
+     * @param pageSize 每页条数，默认 20
+     * @param keyword  商品名称关键词搜索，可空
+     * @return 本店商品分页结果
+     */
     @SaCheckLogin
     @GetMapping("/product/page")
     @Operation(summary = "商家商品列表（仅本店商品）")
@@ -110,6 +159,12 @@ public class MerchantController {
         return Result.success(productService.merchantPage(query));
     }
 
+    /**
+     * 商家新增商品，自动绑定本店 shop_id（需 product:add 权限）
+     *
+     * @param dto 商品信息请求体（含名称、价格、分类等），由 @Valid 校验
+     * @return 新增成功的商品ID
+     */
     @SaCheckPermission(PermissionConstants.PRODUCT_ADD)
     @PostMapping("/product/add")
     @Operation(summary = "商家新增商品（自动绑定本店）")
@@ -117,6 +172,13 @@ public class MerchantController {
         return Result.success("新增成功", productService.addProduct(dto));
     }
 
+    /**
+     * 更新本店商品状态（需 product:status 权限）
+     *
+     * @param id     商品ID
+     * @param status 目标状态：0=待审核 1=上架 2=下架
+     * @return 操作成功提示
+     */
     @SaCheckPermission(PermissionConstants.PRODUCT_STATUS)
     @PutMapping("/product/status/{id}")
     @Operation(summary = "商家更新商品状态")

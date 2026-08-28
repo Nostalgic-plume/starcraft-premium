@@ -3,6 +3,8 @@ package com.shop.constant;
 /**
  * 权限编码常量
  * 用于 @SaCheckPermission 注解
+ *
+ * @author shop
  */
 public interface PermissionConstants {
 

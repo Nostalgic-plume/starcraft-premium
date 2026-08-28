@@ -29,6 +29,11 @@ public class AdminStatsController {
 
     private final StatsService statsService;
 
+    /**
+     * 控制台概览统计（需 stats:view 权限）
+     *
+     * @return 仪表盘汇总数据（用户数、订单数、销售额等）
+     */
     @SaCheckPermission(PermissionConstants.STATS_VIEW)
     @GetMapping("/dashboard")
     @Operation(summary = "控制台概览统计")
@@ -36,6 +41,12 @@ public class AdminStatsController {
         return Result.success(statsService.dashboard());
     }
 
+    /**
+     * 查询近 N 天销售额趋势（需 stats:view 权限）
+     *
+     * @param days 统计天数，默认 7
+     * @return 每日销售额趋势列表
+     */
     @SaCheckPermission(PermissionConstants.STATS_VIEW)
     @GetMapping("/sales-trend")
     @Operation(summary = "销售额趋势")
@@ -43,6 +54,11 @@ public class AdminStatsController {
         return Result.success(statsService.salesTrend(days));
     }
 
+    /**
+     * 查询商品销量排行 TOP10（需 stats:view 权限）
+     *
+     * @return 按销量降序的商品销售数据列表
+     */
     @SaCheckPermission(PermissionConstants.STATS_VIEW)
     @GetMapping("/product-sales")
     @Operation(summary = "商品销量排行 TOP10")
@@ -50,6 +66,11 @@ public class AdminStatsController {
         return Result.success(statsService.productSales());
     }
 
+    /**
+     * 查询近 30 天用户增长趋势（需 stats:view 权限）
+     *
+     * @return 每日新增/累计用户数据列表
+     */
     @SaCheckPermission(PermissionConstants.STATS_VIEW)
     @GetMapping("/user-growth")
     @Operation(summary = "用户增长趋势（近30天）")
@@ -57,6 +78,11 @@ public class AdminStatsController {
         return Result.success(statsService.userGrowth());
     }
 
+    /**
+     * 查询订单状态分布（需 stats:view 权限）
+     *
+     * @return 各订单状态的数量及占比分布列表
+     */
     @SaCheckPermission(PermissionConstants.STATS_VIEW)
     @GetMapping("/order-distribution")
     @Operation(summary = "订单状态分布")

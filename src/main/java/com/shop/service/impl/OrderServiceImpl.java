@@ -52,6 +52,8 @@ import java.util.stream.Collectors;
 /**
  * 订单服务实现
  * 覆盖完整订单生命周期：防重令牌 → 创建（库存行锁+shop_id绑定+购物车标记）→ 支付回调（幂等）→ 取消（库存回滚）→ 确认收货
+ *
+ * @author shop
  */
 @Slf4j
 @Service
@@ -68,6 +70,11 @@ public class OrderServiceImpl implements OrderService {
     private final OrderProducer orderProducer;
     private final Snowflake snowflake = IdUtil.getSnowflake(1, 1);
 
+    /**
+     * 生成下单防重令牌：随机 UUID 存入 Redis（key 绑定当前用户）有效期 5 分钟，创建订单时校验并消耗
+     *
+     * @return 防重令牌字符串
+     */
     @Override
     public String getOrderToken() {
         long userId = StpUtil.getLoginIdAsLong();
@@ -78,6 +85,14 @@ public class OrderServiceImpl implements OrderService {
         return token;
     }
 
+    /**
+     * 创建订单（异步削峰）：先校验并消耗防重令牌，再对每个 SKU 做存在性/上架状态/库存初判，
+     * 组装 MQ 消息、设置 PROCESSING 轮询状态后投递 RocketMQ，立即返回处理标识供前端轮询
+     *
+     * @param dto 下单参数（items 商品项列表、收件人姓名/电话/地址、备注，均必填）
+     * @return 处理标识 orderToken（同时作为前端轮询的 processingId）
+     * @throws BusinessException 请勿重复提交订单、未选择商品、商品不存在、商品已下架、库存不足、MQ 发送失败（系统繁忙）
+     */
     @Override
     public String createOrder(OrderCreateDTO dto) {
         long userId = StpUtil.getLoginIdAsLong();
@@ -143,6 +158,15 @@ public class OrderServiceImpl implements OrderService {
         return orderToken;
     }
 
+    /**
+     * 消费端异步落单（事务内）：重新查询 SKU/商品最新状态 → Redis Lua 预扣库存（前置校验）→ 注册事务回滚恢复
+     * → 校验单一商家 shop_id → MySQL 行锁扣库存（最终凭证）→ 创建订单与商品快照 → 标记购物车已下单 →
+     * 写订单缓存并淘汰商品缓存。任一步失败抛异常回滚整个事务（事务回滚时自动恢复 Redis 库存）
+     *
+     * @param msg RocketMQ 落单消息（userId、items、收件人信息等）
+     * @return 新创建的订单ID
+     * @throws BusinessException 商品不存在、商品已下架、库存不足、订单中包含多个商家的商品、商品所属商家信息缺失
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long processOrder(OrderCreateMessage msg) {
@@ -184,6 +208,11 @@ public class OrderServiceImpl implements OrderService {
         final List<Long> skuIds = deductSkuIds;
         final List<Integer> qtys = deductQtys;
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            /**
+             * 事务结束后回调：事务回滚时（STATUS_ROLLED_BACK）恢复本次已预扣的 Redis 库存，保证缓存库存与 DB 一致
+             *
+             * @param status 事务完成状态（STATUS_ROLLED_BACK=回滚，STATUS_COMMITTED=已提交）
+             */
             @Override
             public void afterCompletion(int status) {
                 if (status == STATUS_ROLLED_BACK) {
@@ -290,6 +319,12 @@ public class OrderServiceImpl implements OrderService {
         return order.getId();
     }
 
+    /**
+     * 查询异步落单状态（供前端轮询）：从 Redis 读取 PROCESSING / 订单ID / FAILED 等状态
+     *
+     * @param processingId 下单时返回的 orderToken，必填
+     * @return 状态 Map；Redis 中已无该 key 时返回 status=EXPIRED
+     */
     @Override
     public Map<String, Object> getProcessingStatus(String processingId) {
         String status = redisTemplate.opsForValue().get("order:process:" + processingId);
@@ -299,6 +334,13 @@ public class OrderServiceImpl implements OrderService {
         return Map.of("status", status);
     }
 
+    /**
+     * 支付回调处理：条件更新仅「待支付」订单可置为已支付并写入支付时间/方式（WHERE 待支付限定），
+     * 幂等防重复回调——受影响行数为 0 时视为重复回调直接返回
+     *
+     * @param orderNo 订单号，必填
+     * @param payType 支付方式（对应支付类型编码）
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void handlePaymentCallback(String orderNo, Integer payType) {
@@ -316,6 +358,12 @@ public class OrderServiceImpl implements OrderService {
         log.info("支付回调处理成功, orderNo: {}, payType: {}", orderNo, payType);
     }
 
+    /**
+     * 取消订单：校验订单归属与待支付状态后，逐项回滚 MySQL 库存与 Redis 库存、淘汰商品缓存，再将订单置为已取消
+     *
+     * @param orderId 订单ID，必填
+     * @throws BusinessException 订单不存在、无权操作该订单（非本人订单）、当前订单状态不允许取消（仅待支付可取消）
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void cancelOrder(Long orderId) {
@@ -343,6 +391,47 @@ public class OrderServiceImpl implements OrderService {
         log.info("订单已取消, orderNo: {}", order.getOrderNo());
     }
 
+    /**
+     * 按指定 userId 取消订单（AI 客服工具调用用）
+     * 与 cancelOrder 逻辑一致：归属校验 + 状态机（仅待支付可取消）+ 逐项回滚 MySQL/Redis 库存 + 淘汰商品缓存；
+     * 唯一区别是 userId 由入参显式传入（不依赖 StpUtil ThreadLocal，agent loop 异步线程可用）
+     *
+     * @param orderId 订单ID
+     * @param userId  用户ID
+     * @throws BusinessException 订单不存在、无权操作该订单、当前订单状态不允许取消
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void cancelOrderByUserId(Long orderId, Long userId) {
+        OrderDO order = orderMapper.selectById(orderId);
+        if (order == null) {
+            throw new BusinessException("订单不存在");
+        }
+        if (!order.getUserId().equals(userId)) {
+            throw new BusinessException("无权操作该订单");
+        }
+        if (!Objects.equals(order.getStatus(), OrderConstants.STATUS_PENDING_PAY)) {
+            throw new BusinessException("当前订单状态不允许取消");
+        }
+        // 回滚库存
+        List<OrderItemDO> items = orderItemMapper.selectList(
+                new LambdaQueryWrapper<OrderItemDO>().eq(OrderItemDO::getOrderId, orderId));
+        for (OrderItemDO item : items) {
+            skuMapper.restoreStock(item.getSkuId(), item.getQuantity());
+            stockCacheService.restoreStock(item.getSkuId(), item.getQuantity());
+            redisTemplate.delete(ProductConstants.CACHE_PRODUCT + item.getProductId());
+        }
+        order.setStatus(OrderConstants.STATUS_CANCELLED);
+        orderMapper.updateById(order);
+        log.info("订单已取消, orderNo: {}", order.getOrderNo());
+    }
+
+    /**
+     * 确认收货：校验订单归属与已发货状态后置为已收货并记录收货时间
+     *
+     * @param orderId 订单ID，必填
+     * @throws BusinessException 订单不存在、无权操作该订单、当前订单状态不允许确认收货（仅已发货可确认）
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void confirmReceive(Long orderId) {
@@ -363,6 +452,13 @@ public class OrderServiceImpl implements OrderService {
         log.info("订单确认收货, orderNo: {}", order.getOrderNo());
     }
 
+    /**
+     * 查询当前用户的订单详情（含订单项快照与状态文案），校验订单归属
+     *
+     * @param orderId 订单ID，必填
+     * @return 订单详情 VO（含 items 订单项列表）
+     * @throws BusinessException 订单不存在、无权查看该订单（非本人订单）
+     */
     @Override
     public OrderVO getDetail(Long orderId) {
         OrderDO order = orderMapper.selectById(orderId);
@@ -376,6 +472,14 @@ public class OrderServiceImpl implements OrderService {
         return convertToVO(order);
     }
 
+    /**
+     * 查询当前用户订单分页列表（按创建时间倒序），可按订单状态筛选
+     *
+     * @param page     页码，为空或非法时由 PaginationHelper 归一化
+     * @param pageSize 每页条数，为空或非法时归一化
+     * @param status   订单状态筛选，可为空表示全部
+     * @return 当前用户订单分页结果 {@code PageResult<OrderVO>}
+     */
     @Override
     public PageResult<OrderVO> myOrders(Integer page, Integer pageSize, Integer status) {
         int[] pn = PaginationHelper.normalize(page, pageSize);
@@ -395,8 +499,64 @@ public class OrderServiceImpl implements OrderService {
         return PageResult.of(iPage, voList);
     }
 
+    /**
+     * 按指定 userId 查询订单列表（AI 客服工具调用用）
+     * 与 myOrders 的区别：userId 显式传入，不依赖 StpUtil 的 ThreadLocal 登录态
+     *
+     * @param userId 用户ID
+     * @param status 订单状态（null=全部）
+     * @param limit  返回条数上限
+     * @return 订单列表 VO（含商品快照与状态文案）
+     */
+    @Override
+    public List<OrderVO> myOrdersByUserId(Long userId, Integer status, int limit) {
+        LambdaQueryWrapper<OrderDO> wrapper = new LambdaQueryWrapper<OrderDO>()
+                .eq(OrderDO::getUserId, userId)
+                .orderByDesc(OrderDO::getCreateTime);
+        if (status != null) {
+            wrapper.eq(OrderDO::getStatus, status);
+        }
+        wrapper.last("LIMIT " + limit);
+        return orderMapper.selectList(wrapper).stream()
+                .map(this::convertToVO)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * 按指定 userId 查询订单详情（AI 客服工具调用用，内置归属校验）
+     *
+     * @param orderId 订单ID
+     * @param userId  用户ID
+     * @return 订单详情 VO
+     * @throws BusinessException 订单不存在或非本人订单时抛出
+     */
+    @Override
+    public OrderVO getOrderDetailByUserId(Long orderId, Long userId) {
+        OrderDO order = orderMapper.selectById(orderId);
+        if (order == null) {
+            throw new BusinessException("订单不存在");
+        }
+        if (!order.getUserId().equals(userId)) {
+            throw new BusinessException("无权查看该订单");
+        }
+        return convertToVO(order);
+    }
+
     // ==================== 管理员端 ====================
 
+    /**
+     * 管理员端订单分页查询：按创建时间倒序，支持状态、商家、时间范围、关键字（订单号/收件人姓名/电话）多条件筛选
+     *
+     * @param page      页码，从 1 开始
+     * @param pageSize  每页条数
+     * @param status    订单状态筛选，可为空
+     * @param shopId    商家ID筛选，可为空
+     * @param startTime 开始日期（yyyy-MM-dd，含当天 00:00:00），可为空
+     * @param endTime   结束日期（yyyy-MM-dd，含当天 23:59:59），可为空
+     * @param keyword   关键字（订单号/收件人姓名/电话模糊匹配），可为空
+     * @return 订单分页结果 {@code PageResult<OrderVO>}
+     * @throws BusinessException 开始/结束时间格式错误，需为 yyyy-MM-dd
+     */
     @Override
     public PageResult<OrderVO> adminPageOrders(int page, int pageSize, Integer status,
                                                Long shopId, String startTime, String endTime, String keyword) {
@@ -435,6 +595,13 @@ public class OrderServiceImpl implements OrderService {
         return PageResult.of(iPage, voList);
     }
 
+    /**
+     * 管理员端查看任意订单详情（全平台，不做归属校验）
+     *
+     * @param orderId 订单ID，必填
+     * @return 订单详情 VO
+     * @throws BusinessException 订单不存在
+     */
     @Override
     public OrderVO adminGetDetail(Long orderId) {
         OrderDO order = orderMapper.selectById(orderId);
@@ -446,6 +613,14 @@ public class OrderServiceImpl implements OrderService {
 
     // ==================== 商家端 ====================
 
+    /**
+     * 商家端订单分页查询：shop_id 取自当前登录商家并强制作为查询条件，数据隔离，仅返回本店订单
+     *
+     * @param page     页码，从 1 开始
+     * @param pageSize 每页条数
+     * @param status   订单状态筛选，可为空
+     * @return 本店订单分页结果 {@code PageResult<OrderVO>}
+     */
     @Override
     public PageResult<OrderVO> merchantPageOrders(int page, int pageSize, Integer status) {
         Long shopId = StpUtil.getLoginIdAsLong();
@@ -461,6 +636,13 @@ public class OrderServiceImpl implements OrderService {
         return PageResult.of(iPage, voList);
     }
 
+    /**
+     * 商家端查看本店订单详情，校验订单归属（shop_id 匹配，非本店订单禁止查看）
+     *
+     * @param orderId 订单ID，必填
+     * @return 订单详情 VO
+     * @throws BusinessException 订单不存在、无权查看该订单（非本店订单）
+     */
     @Override
     public OrderVO merchantGetDetail(Long orderId) {
         Long shopId = StpUtil.getLoginIdAsLong();
@@ -474,6 +656,13 @@ public class OrderServiceImpl implements OrderService {
         return convertToVO(order);
     }
 
+    /**
+     * 商家发货：校验订单归属与已支付状态后置为已发货，记录发货时间与物流单号
+     *
+     * @param orderId     订单ID，必填
+     * @param logisticsNo 物流单号，必填
+     * @throws BusinessException 订单不存在、无权操作该订单（非本店订单）、当前订单状态不允许发货（仅已支付可发货）
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void merchantDeliver(Long orderId, String logisticsNo) {

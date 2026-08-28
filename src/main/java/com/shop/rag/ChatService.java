@@ -7,13 +7,17 @@ import com.shop.mapper.ProductMapper;
 import com.shop.model.entity.CategoryDO;
 import com.shop.model.entity.ChatMessageDO;
 import com.shop.model.entity.ProductDO;
+import com.shop.service.OrderService;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.memory.chat.TokenWindowChatMemory;
 import dev.langchain4j.model.chat.response.ChatResponse;
-import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
+import dev.langchain4j.model.chat.response.PartialToolCall;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiTokenCountEstimator;
+import dev.langchain4j.service.AiServices;
+import dev.langchain4j.service.TokenStream;
+import dev.langchain4j.service.tool.ToolExecution;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -23,7 +27,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -31,6 +34,8 @@ import java.util.concurrent.Executors;
  * 智能客服服务
  * 基于 RAG（检索增强生成）+ 流式 SSE 输出
  * 对话记录持久化到 MySQL
+ *
+ * @author shop
  */
 @Slf4j
 @Service
@@ -45,9 +50,7 @@ public class ChatService {
     private final CategoryMapper categoryMapper;
     private final ProductMapper productMapper;
     private final MySqlChatMemoryStore mySqlChatMemoryStore;
-
-    /** 会话记忆池：conversationId → ChatMemory（保留最近 10 轮） */
-    private final Map<String, TokenWindowChatMemory> chatMemoryMap = new ConcurrentHashMap<>();
+    private final OrderService orderService;
 
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
@@ -78,6 +81,11 @@ public class ChatService {
             %s
             =========================
 
+            ## 工具调用规则
+            - 用户查询/操作订单（查订单、取消订单等）时，必须先调用对应工具拿到真实结果后再回答
+            - 不要提前承诺"已取消/已完成"；工具未调用前不要声称操作成功
+            - 不要凭记忆编造订单信息，订单号不存在时如实告知
+
             记住：你是小星，不是机器人。说话要像真人导购。
             """;
 
@@ -95,15 +103,16 @@ public class ChatService {
                 // 1. 确保会话存在（MySQL持久化）
                 chatHistoryService.getOrCreateConversation(Long.valueOf(conversationId), userId);
 
-                // 2. 获取或创建会话记忆（提前获取，为 Query 改写提供对话上下文）
-                TokenWindowChatMemory chatMemory = chatMemoryMap.computeIfAbsent(
-                        conversationId,
-                        k -> TokenWindowChatMemory.builder()
-                                .id(conversationId)
-                                .maxTokens(TOKEN_BUDGET, new OpenAiTokenCountEstimator("gpt-4o"))
-                                .chatMemoryStore(mySqlChatMemoryStore)
-                                .build()
-                );
+                // 1.5 清理 agent loop 缓存：本轮从 DB 恢复干净历史，避免工具往返消息跨轮污染
+                mySqlChatMemoryStore.deleteMessages(conversationId);
+
+                // 2. 每轮重建会话记忆（从 MySqlChatMemoryStore 读最近消息；不缓存内存对象，
+                //    避免工具调用中间消息残留下轮窗口，且保证重启恢复行为不变）
+                TokenWindowChatMemory chatMemory = TokenWindowChatMemory.builder()
+                        .id(conversationId)
+                        .maxTokens(TOKEN_BUDGET, new OpenAiTokenCountEstimator("gpt-4o"))
+                        .chatMemoryStore(mySqlChatMemoryStore)
+                        .build();
 
                 // 3. Query 改写：利用 LLM 补全指代、优化搜索关键词
                 String searchQuery = queryRewriter.rewrite(userMessage, chatMemory.messages());
@@ -132,50 +141,64 @@ public class ChatService {
                 userMsgDO.setRagContext(buildRagContextJson(hits));
                 chatHistoryService.saveMessage(userMsgDO);
 
-                // 8. 构建消息列表：SystemMessage 每轮单条最新（不落库不累积），对话历史取窗口最近 N 条
+                // 8. 构建 system prompt（每轮单条最新）并加入本轮 memory；同步写入 store 缓存，
+                //    确保 AiServices 第一轮从 store.getMessages 能读到含 system 的完整窗口
                 String systemPrompt = String.format(SYSTEM_PROMPT_TEMPLATE, productContext);
-                List<ChatMessage> llmMessages = new ArrayList<>();
-                llmMessages.add(new SystemMessage(systemPrompt));
-                llmMessages.addAll(chatMemory.messages());
+                chatMemory.add(new SystemMessage(systemPrompt));
+                mySqlChatMemoryStore.updateMessages(conversationId, chatMemory.messages());
 
-                // 8. 流式调用大模型
-                StringBuilder fullResponse = new StringBuilder();
-                streamingChatModel.chat(llmMessages, new StreamingChatResponseHandler() {
-                    @Override
-                    public void onPartialResponse(String token) {
-                        fullResponse.append(token);
-                        sendEvent(emitter, "token", token);
-                    }
+                // 9. 组装 AiServices（每请求构建）：绑定会话记忆 + 当前用户订单工具。
+                //    agent loop 由框架处理：LLM 决策是否调工具 → 反序列化参数 → 执行工具 → 结果回填 → 流式生成最终文本
+                AiAssistant assistant = AiServices.builder(AiAssistant.class)
+                        .streamingChatModel(streamingChatModel)
+                        .chatMemory(chatMemory)
+                        .tools(new OrderTool(userId, orderService))
+                        .maxToolCallingRoundTrips(5)
+                        .compensateOnToolErrors(true)
+                        .build();
 
-                    @Override
-                    public void onCompleteResponse(ChatResponse response) {
-                        String reply = "";
-                        if (response != null && response.aiMessage() != null) {
-                            reply = response.aiMessage().text();
-                        }
-                        // 保存 AI 回复到 MySQL
-                        ChatMessageDO aiMsgDO = new ChatMessageDO();
-                        aiMsgDO.setConversationId(Long.valueOf(conversationId));
-                        aiMsgDO.setRole("assistant");
-                        aiMsgDO.setContent(reply);
-                        chatHistoryService.saveMessage(aiMsgDO);
+                // 10. 流式调用（Agent Loop）
+                assistant.chat(userMessage)
+                        .onPartialResponse(token -> {
+                            if (token == null || token.isBlank()) {
+                                return; // 工具决策阶段的空 token 不推送
+                            }
+                            sendEvent(emitter, "token", token);
+                        })
+                        .onPartialToolCall(toolCall ->
+                                log.debug("工具调用意图: {} args={}", toolCall.name(), toolCall.partialArguments()))
+                        .onToolExecuted(toolExecuted -> {
+                            // 安全：日志只记录工具名与耗时，不记录参数/结果（含订单号等 PII）
+                            if (toolExecuted.hasFailed()) {
+                                log.warn("工具执行失败: {}", toolExecuted.request().name());
+                            } else {
+                                long cost = toolExecuted.duration() != null ? toolExecuted.duration().toMillis() : -1;
+                                log.info("工具执行成功: {} 耗时{}ms", toolExecuted.request().name(), cost);
+                            }
+                        })
+                        .onCompleteResponse(response -> {
+                            String reply = response != null && response.aiMessage() != null
+                                    ? response.aiMessage().text() : "";
+                            // 保存 AI 回复到 MySQL
+                            ChatMessageDO aiMsgDO = new ChatMessageDO();
+                            aiMsgDO.setConversationId(Long.valueOf(conversationId));
+                            aiMsgDO.setRole("assistant");
+                            aiMsgDO.setContent(reply);
+                            chatHistoryService.saveMessage(aiMsgDO);
 
-                        // 首次对话时自动生成标题
-                        boolean isFirstMessage = chatHistoryService.listMessages(Long.valueOf(conversationId)).size() <= 2;
-                        if (isFirstMessage) {
-                            chatHistoryService.updateConversationTitle(Long.valueOf(conversationId));
-                        }
-
-                        completeSse(emitter, reply);
-                    }
-
-                    @Override
-                    public void onError(Throwable error) {
-                        log.error("大模型流式调用失败", error);
-                        sendEvent(emitter, "error", "AI 回复生成失败，请稍后重试");
-                        completeSse(emitter, "");
-                    }
-                });
+                            // 首次对话时自动生成标题
+                            boolean isFirstMessage = chatHistoryService.listMessages(Long.valueOf(conversationId)).size() <= 2;
+                            if (isFirstMessage) {
+                                chatHistoryService.updateConversationTitle(Long.valueOf(conversationId));
+                            }
+                            completeSse(emitter, reply);
+                        })
+                        .onError(error -> {
+                            log.error("大模型流式调用失败", error);
+                            sendEvent(emitter, "error", "AI 回复生成失败，请稍后重试");
+                            completeSse(emitter, "");
+                        })
+                        .start();
 
             } catch (Exception e) {
                 log.error("ChatService 处理异常", e);
@@ -187,11 +210,18 @@ public class ChatService {
 
     /**
      * 清理会话（对话结束或超时后调用）
+     * V1 无内存记忆缓存（每轮从 MySQL store 重建窗口），清空会话历史留待 V2
      */
     public void clearConversation(String conversationId) {
-        chatMemoryMap.remove(conversationId);
+        // 保留方法签名兼容 ChatController 调用，V1 无内存态可清
     }
 
+    /**
+     * 将 RAG 命中商品列表格式化为给大模型的商品上下文文本（名称/价格区间/摘要）
+     *
+     * @param hits RAG 检索命中结果（可为 null 或空，此时返回占位提示文本）
+     * @return 拼接后的商品上下文文本
+     */
     private String buildProductContext(List<RagHitVO> hits) {
         if (hits == null || hits.isEmpty()) {
             return "（未找到相关商品信息）";
@@ -286,6 +316,15 @@ public class ChatService {
         }
     }
 
+    /**
+     * 向 SSE 连接发送一条事件（type/content 序列化为 JSON，事件名固定为 message）
+     * <p>
+     * 发送失败（连接已关闭等）仅记录警告日志，不向外抛出，避免打断流式链路。
+     *
+     * @param emitter SSE 发射器
+     * @param type    事件类型（token/end/error）
+     * @param content 事件内容（token 片段或结束/错误提示文案）
+     */
     private void sendEvent(SseEmitter emitter, String type, String content) {
         try {
             String json = objectMapper.writeValueAsString(Map.of("type", type, "content", content));

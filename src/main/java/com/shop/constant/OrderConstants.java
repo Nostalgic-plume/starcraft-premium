@@ -3,6 +3,8 @@ package com.shop.constant;
 /**
  * 订单模块常量
  * 集中管理订单状态、支付方式、缓存 Key 等魔数，避免散落在业务代码中
+ *
+ * @author shop
  */
 public interface OrderConstants {
 

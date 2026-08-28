@@ -105,5 +105,7 @@ rag:
     dimension: 1536
   llm:
     api-key: ${DASHSCOPE_API_KEY}
-    chat-model: qwen-plus
+    # 对话模型 key：优先 DEEPSEEK_API_KEY，未配回退 rag.llm.api-key（保证测试/未配置环境上下文可加载）
+    chat-api-key: ${DEEPSEEK_API_KEY:${rag.llm.api-key}}
+    chat-model: deepseek-chat
     embedding-model: text-embedding-v1

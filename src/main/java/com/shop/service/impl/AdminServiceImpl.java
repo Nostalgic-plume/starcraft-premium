@@ -38,6 +38,13 @@ public class AdminServiceImpl implements AdminService {
     private final UserMapper userMapper;
     private final UserStatusLogMapper userStatusLogMapper;
 
+    /**
+     * 管理员登录：校验管理员账号存在性、BCrypt 密码与账号状态后，以 Sa-Token「admin」设备类型建立登录会话
+     *
+     * @param dto 登录请求参数（username 管理员用户名、password 明文密码，均必填）
+     * @return 登录成功后返回 token、adminId、nickname 组成的 Map
+     * @throws BusinessException 管理员账号不存在、密码错误、管理员账号已被停用
+     */
     @Override
     public Map<String, Object> login(AdminLoginDTO dto) {
         AdminDO admin = adminMapper.selectOne(
@@ -59,6 +66,12 @@ public class AdminServiceImpl implements AdminService {
                 "nickname", admin.getNickname());
     }
 
+    /**
+     * 获取当前登录管理员信息
+     *
+     * @return 当前管理员实体 AdminDO
+     * @throws BusinessException 管理员不存在（会话对应的 adminId 在 admin 表查无记录）
+     */
     @Override
     public AdminDO getCurrentAdmin() {
         Long adminId = StpUtil.getLoginIdAsLong();
@@ -69,6 +82,15 @@ public class AdminServiceImpl implements AdminService {
         return admin;
     }
 
+    /**
+     * 管理员端用户分页查询，支持关键字（用户名/昵称/手机号模糊）与账号状态筛选，按创建时间倒序
+     *
+     * @param page     页码，从 1 开始
+     * @param pageSize 每页条数
+     * @param keyword  搜索关键字，可为空；非空时对 username、nickname、phone 做 OR 模糊匹配
+     * @param status   账号状态筛选：0=正常 1=停用 2=注销中 3=封禁中，可为空表示不过滤
+     * @return 用户分页结果 {@code PageResult<UserDO>}
+     */
     @Override
     public PageResult<UserDO> pageUsers(int page, int pageSize, String keyword, Integer status) {
         LambdaQueryWrapper<UserDO> wrapper = new LambdaQueryWrapper<UserDO>()
@@ -88,6 +110,15 @@ public class AdminServiceImpl implements AdminService {
         return PageResult.of(p);
     }
 
+    /**
+     * 修改单个用户账号状态（事务内）：校验操作人权限（adminLevel 1/2 可操作普通用户）后更新 user.status，
+     * 记录 user_status_log 操作日志；新状态非 0 时按 device="user" 精准踢下线该用户已登录会话
+     *
+     * @param targetUserId 目标用户ID，必填
+     * @param newStatus    新状态：0=正常 1=停用 2=注销中 3=封禁中
+     * @param reason       状态变更原因，必填并写入日志
+     * @throws BusinessException 操作人不存在、目标用户不存在、权限不足无法操作该用户
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateUserStatus(Long targetUserId, Integer newStatus, String reason) {
@@ -140,6 +171,14 @@ public class AdminServiceImpl implements AdminService {
                 AccountStatusEnum.labelOf(newStatus), reason, operatorId);
     }
 
+    /**
+     * 批量修改用户状态（事务内）：循环调用 updateUserStatus 逐用户处理并统一记录日志
+     *
+     * @param targetUserIds 目标用户ID列表，必填
+     * @param newStatus     新状态：0=正常 1=停用 2=注销中 3=封禁中
+     * @param reason        状态变更原因
+     * @throws BusinessException 任一用户处理失败时抛出（同 updateUserStatus 的异常场景）
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void batchUpdateUserStatus(List<Long> targetUserIds, Integer newStatus, String reason) {

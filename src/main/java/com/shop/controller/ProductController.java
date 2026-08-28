@@ -17,6 +17,8 @@ import org.springframework.web.bind.annotation.*;
 /**
  * 商品接口
  * 浏览类接口无需登录；新增/编辑/上下架需要对应权限
+ *
+ * @author 陈
  */
 @Tag(name = "商品模块")
 @RestController
@@ -26,18 +28,38 @@ public class ProductController {
 
     private final ProductService productService;
 
+    /**
+     * 商品分页列表（公开接口）
+     * 支持分类/关键词/价格等多条件筛选，由 @Valid 校验分页参数
+     *
+     * @param query 分页查询参数（含 page/pageSize/categoryId/keyword 等），page 从 1 开始
+     * @return 商品分页结果
+     */
     @GetMapping("/page")
     @Operation(summary = "商品分页列表")
     public Result<PageResult<ProductVO>> page(@Valid ProductPageQuery query) {
         return Result.success(productService.page(query));
     }
 
+    /**
+     * 商品详情（公开接口）
+     * 走逻辑过期缓存 + 布隆过滤器防穿透/击穿，返回商品及规格信息
+     *
+     * @param id 商品ID（不存在的 ID 由布隆过滤器拦截）
+     * @return 商品详情
+     */
     @GetMapping("/detail/{id}")
     @Operation(summary = "商品详情")
     public Result<ProductVO> detail(@PathVariable Long id) {
         return Result.success(productService.getDetail(id));
     }
 
+    /**
+     * 新增商品（需 product:add 权限，商家/管理员可用）
+     *
+     * @param dto 商品信息请求体（含名称、价格、SKU 等），由 @Valid 校验
+     * @return 新增成功的商品ID
+     */
     @SaCheckPermission(PermissionConstants.PRODUCT_ADD)
     @PostMapping("/add")
     @Operation(summary = "新增商品（商家/管理员）")
@@ -45,6 +67,13 @@ public class ProductController {
         return Result.success("新增成功", productService.addProduct(dto));
     }
 
+    /**
+     * 更新商品状态（需 product:status 权限，商家/管理员可用）
+     *
+     * @param id     商品ID
+     * @param status 目标状态：0=待审核 1=上架 2=下架
+     * @return 操作成功提示
+     */
     @SaCheckPermission(PermissionConstants.PRODUCT_STATUS)
     @PutMapping("/status/{id}")
     @Operation(summary = "更新商品状态（上架/下架，商家/管理员）")

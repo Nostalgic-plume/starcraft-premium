@@ -71,6 +71,19 @@ public class ShopDataIsolationInterceptor implements InnerInterceptor {
 
     // ======================== InnerInterceptor 接口 ========================
 
+    /**
+     * SELECT 查询前置拦截：商家会话下，若查询目标表属于隔离列表且 SQL 未含 shop_id 条件，
+     * 则在 BoundSql 上追加 {@code AND `shop_id` = ?} 实现行级数据隔离。
+     * <p>非 SELECT 或非商家会话直接放行，不参与过滤。</p>
+     *
+     * @param executor      MyBatis 执行器（本实现未使用）
+     * @param ms            映射语句对象，用于获取 SQL 类型与 Mapper 方法 ID（白名单判断）
+     * @param parameter     查询参数对象（本实现未使用）
+     * @param rowBounds     分页边界（本实现未使用，分页由 PaginationInnerInterceptor 处理）
+     * @param resultHandler 结果处理器（本实现未使用）
+     * @param boundSql      绑定 SQL 对象，被改写后的 SQL 及 shop_id 参数映射写回于此
+     * @throws SQLException 改写或参数绑定过程中可能抛出 SQL 异常
+     */
     @Override
     public void beforeQuery(Executor executor, MappedStatement ms, Object parameter,
                             RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql)
@@ -81,6 +94,15 @@ public class ShopDataIsolationInterceptor implements InnerInterceptor {
         doFilter(ms, boundSql);
     }
 
+    /**
+     * UPDATE / DELETE 前置拦截：商家会话下，若目标表属于隔离列表且 SQL 未含 shop_id 条件，
+     * 则追加 {@code AND `shop_id` = ?} 防止商家跨店修改/删除其他商家的数据。
+     * <p>非 UPDATE/DELETE 或非商家会话直接放行。</p>
+     *
+     * @param sh                  StatementHandler 对象，通过反射获取 MappedStatement 与 BoundSql
+     * @param connection          数据库连接（本实现未使用）
+     * @param transactionTimeout  事务超时秒数，可能为 null（本实现未使用）
+     */
     @Override
     public void beforePrepare(StatementHandler sh, Connection connection, Integer transactionTimeout) {
         MappedStatement ms = getMappedStatement(sh);

@@ -13,10 +13,17 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * 这里手动注册拦截器，使注解鉴权真正生效。
  *
  * <p>isAnnotation=true（默认）：仅对标注 @SaCheckXxx 的方法生效，公开接口直接放行。
+ *
+ * @author shop
  */
 @Configuration
 public class SaTokenConfig implements WebMvcConfigurer {
 
+    /**
+     * 注册 Sa-Token 注解鉴权拦截器，使 @SaCheckLogin / @SaCheckPermission / @SaCheckRole 生效
+     *
+     * @param registry 拦截器注册表，用于向 Spring MVC 注册拦截器及匹配路径
+     */
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new SaInterceptor()).addPathPatterns("/**");

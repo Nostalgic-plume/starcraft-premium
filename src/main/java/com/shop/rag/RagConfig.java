@@ -84,6 +84,32 @@ public class RagConfig {
     }
 
     /**
+     * 注册备用流式对话模型 Bean（DashScope qwen-plus，降级专用）
+     * <p>
+     * 主模型 DeepSeek 熔断时降级到此模型，仅做【纯 RAG 问答】（不带工具）——
+     * 工具调用主用 DeepSeek（实测稳定），qwen 不参与工具调用，规避 qwen 工具调用未实测风险（Phase 5 C1）。
+     * embedding 仍用 DashScope text-embedding-v1（DeepSeek 无 embedding API）。
+     *
+     * @param apiKey    DashScope API Key（${rag.llm.api-key}）
+     * @param modelName 备用对话模型名，默认 qwen-plus
+     * @return DashScope qwen-plus 流式模型实例
+     */
+    @Bean
+    public OpenAiStreamingChatModel openAiStreamingChatModelBackup(
+            @Value("${rag.llm.api-key}") String apiKey,
+            @Value("${rag.llm.backup-model:qwen-plus}") String modelName) {
+        return OpenAiStreamingChatModel.builder()
+                .baseUrl("https://dashscope.aliyuncs.com/compatible-mode/v1")
+                .apiKey(apiKey)
+                .modelName(modelName)
+                .temperature(0.7)
+                .timeout(Duration.ofMinutes(3))
+                // 与主模型一致的流式 tool-call 行为（保持默认累积，误设 false 会把 id 覆盖成空）
+                .accumulateToolCallId(true)
+                .build();
+    }
+
+    /**
      * 注册 Qdrant 向量存储 Bean（gRPC 连接）
      *
      * @return 指向 rag.qdrant 配置（host/port/collectionName）的向量存储实例

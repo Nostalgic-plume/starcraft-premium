@@ -16,6 +16,11 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableScheduling
 public class ShopApplication {
 
+    /**
+     * 应用启动入口，负责初始化 Spring 容器并启动内嵌 Web 服务器
+     *
+     * @param args 启动参数（命令行传入，通常为空；可包含 Spring Boot 配置项，如 --server.port=8080）
+     */
     public static void main(String[] args) {
         SpringApplication.run(ShopApplication.class, args);
     }

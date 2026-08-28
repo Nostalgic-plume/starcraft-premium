@@ -9,6 +9,8 @@ import org.springframework.context.annotation.Configuration;
 /**
  * MyBatis-Plus 配置
  * 注册分页插件 + 商家数据隔离拦截器
+ *
+ * @author shop
  */
 @Configuration
 public class MyBatisPlusConfig {

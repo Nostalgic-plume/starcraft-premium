@@ -25,6 +25,8 @@ import org.springframework.transaction.annotation.Transactional;
  * 接收 OrderProducer 投递的延迟消息（30 分钟后），检查订单是否已支付。
  * 若仍未支付则取消订单并回滚库存，作为 ScheduledTasks 的主取消机制。
  * </p>
+ *
+ * @author shop
  */
 @Slf4j
 @Component
@@ -41,6 +43,14 @@ public class OrderDelayCancelConsumer implements RocketMQListener<String> {
     private final RedisTemplate<String, String> redisTemplate;
     private final StockCacheService stockCacheService;
 
+    /**
+     * 消费延迟取消消息（来自 OrderProducer 投递的 order-delay-cancel-topic，默认 30 分钟后到达）
+     * <p>
+     * 条件更新（仅待支付订单可取消）保证重复投递不会重复处理；
+     * 取消成功后逐项回滚 SKU 库存（MySQL + Redis 缓存）并淘汰商品详情缓存。
+     *
+     * @param orderIdStr 订单ID字符串（Snowflake 雪花ID，Long 表示）
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void onMessage(String orderIdStr) {

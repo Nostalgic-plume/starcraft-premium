@@ -8,6 +8,8 @@ import java.util.List;
 /**
  * 购物车服务
  * 管理用户购物车的增删改查，包含库存校验
+ *
+ * @author shop
  */
 public interface CartService {
 
@@ -33,6 +35,7 @@ public interface CartService {
      * 从购物车中删除某 SKU
      *
      * @param skuId SKU ID
+     * @throws BusinessException 购物车中未找到该商品时抛出
      */
     void removeItem(Long skuId);
 
@@ -41,6 +44,7 @@ public interface CartService {
      *
      * @param skuId  SKU ID
      * @param checked true 选中 / false 取消
+     * @throws BusinessException 购物车中未找到该商品时抛出
      */
     void checkItem(Long skuId, Boolean checked);
 

@@ -24,6 +24,8 @@ import java.util.concurrent.TimeUnit;
  * 例如：
  * - 用户： 「有什么手机推荐？」 → 下一轮「红色的」→ 改写为「红色手机」
  * - 用户： 「便宜的手机」 → 改写为「低价手机 性价比」
+ *
+ * @author shop
  */
 @Slf4j
 @Service

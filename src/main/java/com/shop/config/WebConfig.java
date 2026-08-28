@@ -24,6 +24,12 @@ import java.time.format.DateTimeFormatter;
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
 
+    /**
+     * 配置静态资源映射：仅保留 Swagger UI 所需的 WebJars 资源路径
+     * <p>前端静态资源由 Nginx 托管，后端不再映射其他静态目录。</p>
+     *
+     * @param registry 资源处理器注册表，用于注册 URL 路径到 classpath 资源的映射
+     */
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
         // Swagger UI 资源（来自 springdoc-openapi 的 WebJars）
@@ -32,6 +38,11 @@ public class WebConfig implements WebMvcConfigurer {
                 .resourceChain(false);
     }
 
+    /**
+     * 配置视图跳转：访问后端根路径或 favicon 时重定向到 Swagger 文档页
+     *
+     * @param registry 视图控制器注册表，用于注册无 Controller 的路径重定向
+     */
     @Override
     public void addViewControllers(ViewControllerRegistry registry) {
         // 直接访问后端根路径时跳转到 Swagger 文档页

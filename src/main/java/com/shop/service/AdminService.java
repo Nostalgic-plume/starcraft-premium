@@ -20,6 +20,7 @@ public interface AdminService {
      *
      * @param dto 登录参数（用户名、密码）
      * @return token、adminId、nickname
+     * @throws BusinessException 账号不存在、密码错误或账号已被停用时抛出
      */
     Map<String, Object> login(AdminLoginDTO dto);
 
@@ -27,6 +28,7 @@ public interface AdminService {
      * 获取当前管理员信息
      *
      * @return 当前管理员实体
+     * @throws BusinessException 管理员不存在时抛出
      */
     AdminDO getCurrentAdmin();
 
@@ -46,8 +48,9 @@ public interface AdminService {
      * 权限校验：超级管理员可操作所有人，普通管理员不可操作超级管理员
      *
      * @param targetUserId 目标用户ID
-     * @param newStatus    新状态
+     * @param newStatus    新状态（0=正常 1=停用 2=注销中 3=封禁中）
      * @param reason       变更原因
+     * @throws BusinessException 操作人/目标用户不存在或无权限操作该用户时抛出
      */
     void updateUserStatus(Long targetUserId, Integer newStatus, String reason);
 
@@ -55,8 +58,9 @@ public interface AdminService {
      * 批量修改用户状态
      *
      * @param targetUserIds 目标用户ID列表
-     * @param newStatus     新状态
+     * @param newStatus     新状态（0=正常 1=停用 2=注销中 3=封禁中）
      * @param reason        变更原因
+     * @throws BusinessException 操作人/目标用户不存在或无权限操作该用户时抛出
      */
     void batchUpdateUserStatus(java.util.List<Long> targetUserIds, Integer newStatus, String reason);
 }

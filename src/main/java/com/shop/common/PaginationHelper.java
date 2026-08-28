@@ -3,6 +3,8 @@ package com.shop.common;
 /**
  * 分页参数标准化辅助类
  * 统一处理 page / pageSize 的 null 值和越界，消除各 Service 中重复的 if 校验
+ *
+ * @author shop
  */
 public class PaginationHelper {
 

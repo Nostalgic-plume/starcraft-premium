@@ -8,6 +8,8 @@ import org.apache.ibatis.annotations.Update;
 /**
  * SKU Mapper
  * 除了基础 CRUD，提供行锁扣库存和回滚库存操作（用于并发控制）
+ *
+ * @author shop
  */
 public interface SkuMapper extends BaseMapper<SkuDO> {
 

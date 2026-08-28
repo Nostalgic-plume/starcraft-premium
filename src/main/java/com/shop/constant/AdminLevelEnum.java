@@ -10,8 +10,11 @@ import lombok.Getter;
 @Getter
 public enum AdminLevelEnum {
 
+    /** 非管理员：普通用户，无任何后台管理权限 */
     NONE(0, "非管理员"),
+    /** 普通管理员：可管理一般数据，但不可操作超级管理员 */
     NORMAL(1, "普通管理员"),
+    /** 超级管理员：拥有全部权限，可操作任何账号 */
     SUPER(2, "超级管理员");
 
     private final int value;
@@ -22,6 +25,12 @@ public enum AdminLevelEnum {
         this.label = label;
     }
 
+    /**
+     * 根据级别编码查找对应枚举
+     *
+     * @param value 管理员级别编码，取值范围 0~2（超出范围视为无效编码）
+     * @return 匹配的枚举常量；未匹配到时安全回退为 {@link #NONE}（不抛异常）
+     */
     public static AdminLevelEnum of(int value) {
         for (AdminLevelEnum l : values()) {
             if (l.value == value) return l;

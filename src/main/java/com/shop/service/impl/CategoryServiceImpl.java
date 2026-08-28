@@ -17,6 +17,8 @@ import java.util.function.Supplier;
 
 /**
  * 分类服务实现
+ *
+ * @author shop
  */
 @Service
 @RequiredArgsConstructor
@@ -25,6 +27,11 @@ public class CategoryServiceImpl implements CategoryService {
     private final CategoryMapper categoryMapper;
     private final RedisTemplate<String, String> redisTemplate;
 
+    /**
+     * 查询启用状态的一级分类列表（按 sort 升序），走缓存穿透防护（查缓存→回源 DB→写缓存）
+     *
+     * @return 启用分类列表 {@code List<CategoryDO>}
+     */
     @Override
     public List<CategoryDO> list() {
         return cacheThrough("all", () -> categoryMapper.selectList(
@@ -33,6 +40,12 @@ public class CategoryServiceImpl implements CategoryService {
                         .orderByAsc(CategoryDO::getSort)));
     }
 
+    /**
+     * 按父级分类ID查询其下的启用子分类列表（按 sort 升序），走缓存穿透防护
+     *
+     * @param parentId 父分类ID，必填（查询二级分类时传一级分类ID）
+     * @return 子分类列表 {@code List<CategoryDO>}
+     */
     @Override
     public List<CategoryDO> getChildren(Long parentId) {
         return cacheThrough("children:" + parentId, () -> categoryMapper.selectList(

@@ -31,6 +31,8 @@ import java.util.Map;
  * <p>
  * 降级策略：向量路异常时自动降级为纯 MySQL FULLTEXT 关键词路（RRF 合并天然退化为纯关键词），
  * 并输出可观测日志标记降级态。
+ *
+ * @author shop
  */
 @Slf4j
 @Service
@@ -191,6 +193,13 @@ public class RagSearchService {
         return v == null ? null : String.valueOf(v);
     }
 
+    /**
+     * 从元数据 Map 中安全取 Long 值（兼容 Long / Number / 数字字符串，解析失败返回 null）
+     *
+     * @param meta 商品元数据 Map（来自 TextSegment.metadata）
+     * @param key  元数据键名
+     * @return 转换后的 Long；值为 null 或无法转换返回 null
+     */
     private static Long metaLong(Map<String, Object> meta, String key) {
         Object v = meta.get(key);
         if (v == null) return null;
@@ -205,6 +214,13 @@ public class RagSearchService {
         return null;
     }
 
+    /**
+     * 从元数据 Map 中安全取 BigDecimal 值（兼容 BigDecimal / Number / 数字字符串，解析失败返回 null）
+     *
+     * @param meta 商品元数据 Map（来自 TextSegment.metadata）
+     * @param key  元数据键名
+     * @return 转换后的 BigDecimal；值为 null 或无法转换返回 null
+     */
     private static BigDecimal metaBigDecimal(Map<String, Object> meta, String key) {
         Object v = meta.get(key);
         if (v == null) return null;

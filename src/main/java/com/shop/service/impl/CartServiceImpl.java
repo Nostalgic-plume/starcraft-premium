@@ -25,6 +25,8 @@ import java.util.stream.Collectors;
 /**
  * 购物车服务实现
  * 操作粒度为 SKU 级别，自动回填商品信息快照
+ *
+ * @author shop
  */
 @Slf4j
 @Service
@@ -35,6 +37,12 @@ public class CartServiceImpl implements CartService {
     private final ProductMapper productMapper;
     private final SkuMapper skuMapper;
 
+    /**
+     * 加入购物车：校验 SKU 存在性后，同一用户同一 SKU 已存在则累加数量（含库存校验），否则新增购物车记录
+     *
+     * @param dto 购物车操作参数（skuId、quantity，均必填）
+     * @throws BusinessException 商品不存在、库存不足（当前库存 X）
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void addItem(CartDTO dto) {
@@ -72,6 +80,13 @@ public class CartServiceImpl implements CartService {
         log.info("购物车添加成功, userId: {}, skuId: {}, quantity: {}", userId, dto.getSkuId(), dto.getQuantity());
     }
 
+    /**
+     * 修改购物车中某 SKU 的购买数量，变更前校验 SKU 存在与库存充足
+     *
+     * @param skuId    SKU ID，必填
+     * @param quantity 新数量，必填且不能超过库存
+     * @throws BusinessException 购物车中未找到该商品、商品不存在或已下架、库存不足
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateQuantity(Long skuId, Integer quantity) {
@@ -87,6 +102,11 @@ public class CartServiceImpl implements CartService {
         cartMapper.updateById(cart);
     }
 
+    /**
+     * 从当前用户购物车删除指定 SKU 的购物车记录（MyBatis-Plus 逻辑删除）
+     *
+     * @param skuId SKU ID，必填
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void removeItem(Long skuId) {
@@ -97,6 +117,13 @@ public class CartServiceImpl implements CartService {
                         .eq(CartDO::getSkuId, skuId));
     }
 
+    /**
+     * 勾选/取消勾选购物车中某 SKU 商品（checked 用于结算时是否选中）
+     *
+     * @param skuId   SKU ID，必填
+     * @param checked true=勾选 false=取消勾选
+     * @throws BusinessException 购物车中未找到该商品
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void checkItem(Long skuId, Boolean checked) {
@@ -106,6 +133,12 @@ public class CartServiceImpl implements CartService {
         cartMapper.updateById(cart);
     }
 
+    /**
+     * 查询当前用户购物车列表（仅未下单商品，按加入时间倒序），逐项回填 SKU 名称/价格/库存/小计与商品名称/主图，
+     * 并标记勾选状态与有效性（库存充足为 valid=true）
+     *
+     * @return 购物车列表 {@code List<CartVO>}；SKU 已删除或库存不足时对应项 valid=false
+     */
     @Override
     public List<CartVO> list() {
         long userId = StpUtil.getLoginIdAsLong();
@@ -143,6 +176,14 @@ public class CartServiceImpl implements CartService {
         }).collect(Collectors.toList());
     }
 
+    /**
+     * 按用户与 SKU 查询购物车记录
+     *
+     * @param userId 用户ID，必填
+     * @param skuId  SKU ID，必填
+     * @return 购物车实体 CartDO
+     * @throws BusinessException 购物车中未找到该商品
+     */
     private CartDO getCartItem(long userId, Long skuId) {
         CartDO cart = cartMapper.selectOne(
                 new LambdaQueryWrapper<CartDO>()

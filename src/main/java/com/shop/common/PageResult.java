@@ -13,6 +13,7 @@ import java.util.List;
  * 配合 MyBatis-Plus IPage 使用，通过 IPage 初始化
  *
  * @param <T> 列表数据类型
+ * @author shop
  */
 @Data
 @Schema(description = "分页返回结果")

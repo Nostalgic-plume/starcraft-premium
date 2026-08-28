@@ -32,6 +32,8 @@ import java.util.stream.Collectors;
 /**
  * 商品索引器
  * 启动时全量构建 Qdrant 向量索引，支持增量增删改
+ *
+ * @author shop
  */
 @Slf4j
 @Component
@@ -91,6 +93,11 @@ public class ProductIndexer {
         qdrantCollectionHelper.recreateCollection();
     }
 
+    /**
+     * 应用启动就绪时自动触发全量重建（Qdrant 已有数据则跳过，避免重复构建）
+     * <p>
+     * 由 {@link ApplicationReadyEvent} 事件驱动，托管于 Spring 容器生命周期。
+     */
     @EventListener(ApplicationReadyEvent.class)
     public void rebuildAll() {
         // 检查 Qdrant 是否已有数据，有则跳过全量重建
@@ -298,6 +305,13 @@ public class ProductIndexer {
                 Metadata.from(toMetadataMap(product, prices)));
     }
 
+    /**
+     * 构建商品元数据 Map（检索过滤与展示字段：productId/名称/一级分类/商家ID/主图/价格区间）
+     *
+     * @param product 上架商品
+     * @param prices  SKU 价格区间 [minPrice, maxPrice]（可为 null，此时不写价格字段）
+     * @return 商品元数据 Map
+     */
     private Map<String, Object> toMetadataMap(ProductDO product, BigDecimal[] prices) {
         Map<String, Object> meta = new HashMap<>();
         meta.put("productId", product.getId());

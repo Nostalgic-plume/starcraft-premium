@@ -10,6 +10,8 @@ import java.util.List;
 /**
  * 商品 Mapper
  * 提供商品表（product）的基础 CRUD + FULLTEXT 全文检索
+ *
+ * @author shop
  */
 public interface ProductMapper extends BaseMapper<ProductDO> {
 

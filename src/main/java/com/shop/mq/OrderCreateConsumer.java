@@ -19,6 +19,8 @@ import java.util.concurrent.TimeUnit;
  * 业务异常（库存不足等）→ 标记 FAILED，不触发 MQ 重试；
  * 系统异常 → 删除幂等键，抛出异常触发 MQ 重试。
  * </p>
+ *
+ * @author shop
  */
 @Slf4j
 @Component
@@ -45,6 +47,17 @@ public class OrderCreateConsumer implements RocketMQListener<OrderCreateMessage>
      */
     private static final String PROCESS_KEY_PREFIX = "order:process:";
 
+    /**
+     * 消费异步落单消息（来自 OrderProducer 投递的 order-create-topic）
+     * <p>
+     * 处理流程：
+     * ① SETNX 幂等键去重，重复消息直接跳过，保证至少一次投递下不重复落单；
+     * ② 事务内完成 Redis 预扣 + MySQL 行锁落单，成功后写轮询状态为订单ID并发送延迟取消消息；
+     * ③ 业务异常（库存不足等）→ 写 FAILED:原因，保留幂等键，不触发 MQ 重试；
+     * ④ 系统异常（DB 断开等）→ 删除幂等键与处理状态，重新抛出触发 MQ 重试。
+     *
+     * @param msg 异步落单消息体（orderToken 为幂等键，非空）
+     */
     @Override
     public void onMessage(OrderCreateMessage msg) {
         String orderToken = msg.getOrderToken();

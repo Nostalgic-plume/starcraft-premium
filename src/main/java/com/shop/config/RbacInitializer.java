@@ -18,6 +18,8 @@ import java.util.List;
  * - 权限按 code 判断存在性，缺则插入——后续新增权限可平滑同步到已有角色（如 stats:view）
  * - 角色-权限关联缺则插入（admin 全量、merchant 商品管理）
  * - 角色不存在（全新库）时，才为 user 表已有账号分配初始角色，避免每次启动重置手工调整的角色
+ *
+ * @author shop
  */
 @Slf4j
 @Component

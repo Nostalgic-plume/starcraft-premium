@@ -22,6 +22,8 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * 用户服务实现
  * 使用 Sa-Token 管理登录态，BCrypt 加密密码存储
+ *
+ * @author shop
  */
 @Slf4j
 @Service
@@ -32,6 +34,12 @@ public class UserServiceImpl implements UserService {
     private final RoleMapper roleMapper;
     private final UserRoleMapper userRoleMapper;
 
+    /**
+     * 用户注册：校验用户名唯一性，BCrypt 加密密码后入库，并自动赋予普通用户（user）角色
+     *
+     * @param dto 注册参数（username、password、phone，nickname 可选，缺省取用户名）
+     * @throws BusinessException 用户名已存在
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void register(UserRegisterDTO dto) {
@@ -64,6 +72,14 @@ public class UserServiceImpl implements UserService {
         log.info("用户注册成功, username: {}", dto.getUsername());
     }
 
+    /**
+     * 用户登录：校验用户名与 BCrypt 密码，账号状态非 0（1=停用 2=注销中 3=封禁中）禁止登录并提示对应文案，
+     * 通过后以 Sa-Token「user」设备类型建立登录会话（便于封禁时精准踢下线）
+     *
+     * @param dto 登录参数（username、password，均必填）
+     * @return 登录令牌 token
+     * @throws BusinessException 用户名或密码错误、账号被停用/注销中/封禁中（含对应提示文案）
+     */
     @Override
     public String login(UserLoginDTO dto) {
         UserDO user = userMapper.selectOne(
@@ -96,6 +112,13 @@ public class UserServiceImpl implements UserService {
         return StpUtil.getTokenValue();
     }
 
+    /**
+     * 按 ID 查询用户
+     *
+     * @param id 用户ID，必填
+     * @return 用户实体 UserDO
+     * @throws BusinessException 用户不存在
+     */
     @Override
     public UserDO getById(Long id) {
         UserDO user = userMapper.selectById(id);
@@ -105,12 +128,23 @@ public class UserServiceImpl implements UserService {
         return user;
     }
 
+    /**
+     * 获取当前登录用户信息
+     *
+     * @return 当前用户实体 UserDO
+     * @throws BusinessException 用户不存在（登录态对应的 userId 查无记录）
+     */
     @Override
     public UserDO getCurrentUser() {
         long userId = StpUtil.getLoginIdAsLong();
         return getById(userId);
     }
 
+    /**
+     * 查询全部用户列表（供需要遍历用户数据的场景使用）
+     *
+     * @return 用户列表 {@code List<UserDO>}
+     */
     @Override
     public List<UserDO> listAll() {
         return userMapper.selectList(null);

@@ -12,6 +12,8 @@ import org.springframework.stereotype.Component;
  * 负责发送异步落单消息和延迟取消消息。
  * 消息发送失败由调用方处理补偿（回滚 Redis 库存等）。
  * </p>
+ *
+ * @author shop
  */
 @Slf4j
 @Component

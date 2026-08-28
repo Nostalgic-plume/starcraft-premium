@@ -6,6 +6,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * RAG 配置属性 - Qdrant + DashScope
+ *
+ * @author shop
  */
 @Data
 @Component

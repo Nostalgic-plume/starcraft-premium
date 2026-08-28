@@ -10,6 +10,8 @@ import java.net.URI;
 /**
  * Qdrant 集合管理工具
  * 统一使用 REST API（端口 6333），避免 gRPC 兼容性问题，确保集合参数（维度、距离）来源一致
+ *
+ * @author shop
  */
 @Slf4j
 @Component
@@ -59,6 +61,12 @@ public class QdrantCollectionHelper {
 
     // ========== 内部方法 ==========
 
+    /**
+     * 检查 Qdrant 集合是否存在（REST GET，3 秒超时）
+     *
+     * @param name 集合名称
+     * @return 集合存在（HTTP 200）返回 true；不存在或网络/解析异常返回 false
+     */
     private boolean exists(String name) {
         try {
             URI uri = URI.create(QDRANT_REST_URL + name);
@@ -74,6 +82,13 @@ public class QdrantCollectionHelper {
         }
     }
 
+    /**
+     * 创建 Qdrant 集合（REST PUT，向量维度取自配置，距离算法 Cosine）
+     * <p>
+     * 创建失败仅记录警告日志，不抛出异常，由上层容错处理。
+     *
+     * @param name 集合名称
+     */
     private void createCollection(String name) {
         int dimension = ragProperties.getDimension();
         try {

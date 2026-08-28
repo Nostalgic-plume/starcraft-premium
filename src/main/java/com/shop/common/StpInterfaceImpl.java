@@ -23,6 +23,8 @@ import java.util.List;
  *
  * 注意：Sa-Token 回调本接口时拿到的 loginType 恒为 "login"（本项目统一走 StpUtil），
  * 无法用它区分三类身份，故改为读取当前登录设备类型（登录时 StpUtil.login(id, device) 的第二参）。
+ *
+ * @author shop
  */
 @Component
 @RequiredArgsConstructor
@@ -38,6 +40,14 @@ public class StpInterfaceImpl implements cn.dev33.satoken.stp.StpInterface {
     /** admin 角色在 role 表中的固定 ID */
     private static final Long ADMIN_ROLE_ID = 100L;
 
+    /**
+     * 返回登录主体的角色编码列表（Sa-Token 鉴权时自动调用）
+     * 按当前登录设备类型路由：admin → [admin]；shop → [merchant]；普通用户 → 查 user_role 表
+     *
+     * @param loginId   登录主体 ID（admin/shop 表 id 或 user 表 id）
+     * @param loginType 登录类型（本项目恒为 "login"，不使用该参数）
+     * @return 角色编码列表，无角色时返回空列表
+     */
     @Override
     public List<String> getRoleList(Object loginId, String loginType) {
         Long id = Long.valueOf(loginId.toString());
@@ -54,6 +64,15 @@ public class StpInterfaceImpl implements cn.dev33.satoken.stp.StpInterface {
         return userRoleMapper.selectRoleCodesByUserId(id);
     }
 
+    /**
+     * 返回登录主体的权限编码列表（Sa-Token 鉴权时自动调用）
+     * 按当前登录设备类型路由：admin → 查固定 admin 角色权限；shop → 查固定 merchant 角色权限；
+     * 普通用户 → 按用户 ID 联表查询其所有角色权限
+     *
+     * @param loginId   登录主体 ID（admin/shop 表 id 或 user 表 id）
+     * @param loginType 登录类型（本项目恒为 "login"，不使用该参数）
+     * @return 权限编码列表，无权限时返回空列表
+     */
     @Override
     public List<String> getPermissionList(Object loginId, String loginType) {
         Long id = Long.valueOf(loginId.toString());

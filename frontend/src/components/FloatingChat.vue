@@ -111,6 +111,28 @@
               <div v-else class="message-content" v-html="renderContent(msg.content)"></div>
             </div>
           </div>
+
+          <!-- Phase 3：推荐商品卡片（跟随最后回复，点击新标签打开详情） -->
+          <div v-if="recommendProducts.length" class="product-cards">
+            <div
+              v-for="p in recommendProducts"
+              :key="p.productId"
+              class="product-card"
+              @click="openProduct(p.productId)"
+            >
+              <img
+                class="product-card-img"
+                :src="p.image || placeholderImg"
+                :alt="p.name"
+                @error="onImgError"
+              />
+              <div class="product-card-info">
+                <div class="product-card-name">{{ p.name }}</div>
+                <div class="product-card-price">{{ formatPrice(p.minPrice, p.maxPrice) }}</div>
+                <div v-if="p.excerpt" class="product-card-excerpt">{{ p.excerpt }}</div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- 输入区 -->
@@ -142,7 +164,7 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
-import { postAsk, clearConversation } from '@/api/chat'
+import { postAsk, clearConversation, type ProductCard } from '@/api/chat'
 
 /** 聊天消息 */
 interface ChatMessage {
@@ -165,6 +187,7 @@ const conversationId = sessionStorage.getItem('chat_conv_id') || (() => {
 
 const visible = ref(false)
 const messages = ref<ChatMessage[]>([])
+const recommendProducts = ref<ProductCard[]>([])  // Phase 3：本轮推荐的商品卡片
 const inputText = ref('')
 const loading = ref(false)
 const unreadCount = ref(0)
@@ -313,6 +336,9 @@ function sendMessage(text: string) {
   if (!text.trim() || loading.value) return
   inputText.value = ''
 
+  // Phase 3：每轮新消息清空上一轮商品卡片
+  recommendProducts.value = []
+
   // 添加用户消息
   addMessage('user', text)
 
@@ -353,6 +379,11 @@ function sendMessage(text: string) {
       }
       loading.value = false
       scrollToBottom()
+    },
+    // onProducts（Phase 3：接收推荐商品卡片）
+    (products) => {
+      recommendProducts.value = products
+      scrollToBottom()
     }
   )
 }
@@ -360,6 +391,31 @@ function sendMessage(text: string) {
 function sendCurrentMessage() {
   if (!inputText.value.trim() || loading.value) return
   sendMessage(inputText.value.trim())
+}
+
+// ====== Phase 3：商品卡片 ======
+
+/** 商品图缺失时的占位图 */
+const placeholderImg = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="#f0f0f0"/><text x="40" y="46" text-anchor="middle" font-size="12" fill="#999">暂无图片</text></svg>'
+)
+
+/** 图片加载失败 → 替换为占位图 */
+function onImgError(e: Event) {
+  const el = e.target as HTMLImageElement
+  el.src = placeholderImg
+}
+
+/** 价格格式化：null → 询价；区间相等 → 单值；否则 min ~ max（C8） */
+function formatPrice(min?: number | null, max?: number | null): string {
+  if (min == null && max == null) return '询价'
+  if (max == null || min === max) return `¥${min ?? max}`
+  return `¥${min} ~ ¥${max}`
+}
+
+/** 点击卡片：新标签打开商品详情页（C14，保留当前对话，AI 客服可继续使用） */
+function openProduct(productId: string) {
+  window.open(`/product/${productId}`, '_blank')
 }
 
 function clearChat() {
@@ -603,6 +659,70 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
   font-size: 14px;
   line-height: 1.65;
   word-break: break-word;
+}
+
+/* ====== Phase 3：推荐商品卡片 ====== */
+.product-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 0;
+}
+
+.product-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 16px; /* 设计系统圆角 */
+  box-shadow: 0 2px 8px rgba(26, 26, 46, 0.08); /* 品牌暖阴影 */
+  cursor: pointer;
+  transition: box-shadow 0.2s, transform 0.2s;
+}
+.product-card:hover {
+  box-shadow: 0 4px 14px rgba(233, 69, 96, 0.18); /* 珊瑚红 hover 强调 */
+  transform: translateY(-1px);
+}
+
+.product-card-img {
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: #f5f3ef; /* 暖灰背景 */
+}
+
+.product-card-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.product-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a1a2e; /* 品牌深墨蓝 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.product-card-price {
+  margin-top: 3px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #e94560; /* 珊瑚红价格 */
+}
+
+.product-card-excerpt {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #888;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .message-user .message-bubble {
   background: var(--ds-primary, #2d7ff9);

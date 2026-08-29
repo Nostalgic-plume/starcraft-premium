@@ -30,6 +30,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -156,6 +157,12 @@ public class ChatService {
                 String systemPrompt = String.format(SYSTEM_PROMPT_TEMPLATE, productContext);
                 chatMemory.add(new SystemMessage(systemPrompt));
                 mySqlChatMemoryStore.updateMessages(conversationId, chatMemory.messages());
+
+                // 8.5 Phase 3：RAG 命中时推送商品卡片事件（在首个 token 前，前端渲染商品卡片；
+                //      无命中不推送，前端不留空白卡片）
+                if (hits != null && !hits.isEmpty()) {
+                    sendEvent(emitter, "products", buildProductsJson(hits));
+                }
 
                 // 9. 生成层降级链（Phase 5 T5）：
                 //    DeepSeek(带工具) → 熔断 → qwen 纯 RAG 问答(不带工具) → 模板拼检索结果 → 提示不可用
@@ -351,6 +358,37 @@ public class ChatService {
             log.warn("构建RAG上下文JSON失败: {}", e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Phase 3：构建商品卡片事件 JSON（前端渲染卡片）。
+     * 字段仅 productId/name/image/minPrice/maxPrice/excerpt（摘要 ≤40 字），不含 score（C3/C4）。
+     */
+    private String buildProductsJson(List<RagHitVO> hits) {
+        if (hits == null || hits.isEmpty()) return "[]";
+        try {
+            List<Map<String, Object>> items = new ArrayList<>();
+            for (RagHitVO hit : hits) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("productId", hit.getProductId());
+                item.put("name", hit.getName());
+                item.put("image", hit.getImage());
+                item.put("minPrice", hit.getMinPrice());
+                item.put("maxPrice", hit.getMaxPrice());
+                item.put("excerpt", truncateText(hit.getExcerpt(), 40));
+                items.add(item);
+            }
+            return objectMapper.writeValueAsString(items);
+        } catch (Exception e) {
+            log.warn("构建商品卡片事件失败: {}", e.getMessage());
+            return "[]";
+        }
+    }
+
+    /** 文本截断（含省略号），卡片摘要用 */
+    private static String truncateText(String text, int maxLen) {
+        if (text == null) return "";
+        return text.length() <= maxLen ? text : text.substring(0, maxLen) + "...";
     }
 
     /**

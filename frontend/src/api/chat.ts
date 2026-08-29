@@ -1,15 +1,26 @@
 import { post } from './request'
 import type { Result } from './types'
 
+/** 商品卡片（Phase 3：客服推荐商品卡片，点击新标签打开详情） */
+export interface ProductCard {
+  productId: string
+  name: string
+  image?: string | null
+  minPrice?: number | null
+  maxPrice?: number | null
+  excerpt?: string | null
+}
+
 /** SSE 流式数据帧（后端 /api/chat/ask） */
 export interface ChatStreamFrame {
-  type: 'token' | 'end' | 'error'
-  content?: string
+  type: 'token' | 'products' | 'end' | 'error'
+  content?: string | ProductCard[]
 }
 
 /** 流式回调 */
 export interface ChatCallbacks {
   onToken?: (content: string) => void
+  onProducts?: (products: ProductCard[]) => void
   onEnd?: () => void
   onError?: (msg: string) => void
 }
@@ -23,7 +34,8 @@ export function postAsk(
   conversationId: string,
   onToken?: (content: string) => void,
   onEnd?: () => void,
-  onError?: (msg: string) => void
+  onError?: (msg: string) => void,
+  onProducts?: (products: ProductCard[]) => void
 ): Promise<void> {
   const token = localStorage.getItem('token')
   const baseURL = import.meta.env.VITE_API_BASE || ''
@@ -73,9 +85,11 @@ export function postAsk(
               try {
                 const parsed = JSON.parse(data) as ChatStreamFrame
                 if (parsed.type === 'token') {
-                  onToken?.(parsed.content || '')
+                  onToken?.(typeof parsed.content === 'string' ? parsed.content : '')
+                } else if (parsed.type === 'products') {
+                  onProducts?.(Array.isArray(parsed.content) ? parsed.content : [])
                 } else if (parsed.type === 'error') {
-                  onError?.(parsed.content || '')
+                  onError?.(typeof parsed.content === 'string' ? parsed.content : '')
                 } else if (parsed.type === 'end') {
                   // end 已在 done 时触发
                 }

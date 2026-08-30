@@ -10,6 +10,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   /** 点击加购按钮（携带完整商品对象，父组件处理库存/登录校验） */
   (e: 'add-cart', product: ProductVO): void
+  /** Phase 4：点击商品卡片跳详情（父组件做行为反馈埋点） */
+  (e: 'detail-click', product: ProductVO): void
 }>()
 
 /** 价格展示：整数省略小数，否则保留两位 */
@@ -21,10 +23,15 @@ function formatPrice(val: number | undefined | null): string {
 function onAddCart() {
   emit('add-cart', props.product)
 }
+
+/** Phase 4：点击卡片跳详情（router-link 处理跳转，此处仅上报给父组件埋点） */
+function onDetailClick() {
+  emit('detail-click', props.product)
+}
 </script>
 
 <template>
-  <router-link :to="'/product/' + product.id" class="product-card">
+  <router-link :to="'/product/' + product.id" class="product-card" @click="onDetailClick">
     <!-- 图片区：有主图显示主图，否则 SVG 占位 -->
     <div class="card-media">
       <img

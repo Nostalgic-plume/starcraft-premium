@@ -262,6 +262,7 @@
                 :key="p.id"
                 :product="p"
                 @add-cart="addToCart"
+                @detail-click="traceClick"
               />
             </div>
           </n-spin>
@@ -568,6 +569,20 @@ async function addToCart(product: ProductVO) {
   } catch {
     // 错误提示由 axios 拦截器统一处理
   }
+}
+
+/** Phase 4：商品点击行为反馈埋点（异步上报，失败不影响跳转） */
+function traceClick(product: ProductVO) {
+  const token = localStorage.getItem('token')
+  const baseURL = import.meta.env.VITE_API_BASE || ''
+  fetch(baseURL + '/api/rag/trace', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { token: token } : {})
+    },
+    body: JSON.stringify({ query: keyword.value, productId: product.id, action: 'SEARCH_CLICK' })
+  }).catch(() => {})
 }
 
 /* ====== GSAP Hero 动画 ====== */

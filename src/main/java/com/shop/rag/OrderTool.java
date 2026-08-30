@@ -120,7 +120,7 @@ public class OrderTool {
      * @param orderId 订单编号（用户下单后收到的订单号）
      * @return 人话化的取消结果文本
      */
-    @Tool("取消当前登录用户自己的待支付订单。仅当用户明确要求取消某个订单（如\"取消订单\"\"把订单退了\"\"不要这个订单了\"）时调用，取消后库存自动回滚。")
+    @Tool("取消当前登录用户自己的待支付订单（写操作）。仅当用户明确要求取消，且已先用 getOrderStatus 确认订单存在并待支付、用户明确确认后才调用；取消后库存自动回滚。")
     public String cancelOrder(@P(name = "orderId", description = "待取消的订单编号，用户下单后收到的订单号") String orderId) {
         Long orderIdLong = parseOrderId(orderId);
         if (orderIdLong == null) {

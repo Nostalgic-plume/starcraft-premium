@@ -61,6 +61,7 @@ public class RagSearchService {
         if (query == null || query.isBlank()) {
             return Collections.emptyList();
         }
+        long startNanos = System.nanoTime();  // T4 可观测性埋点
 
         // 1. 生成查询向量
         Embedding queryEmbedding;
@@ -99,7 +100,13 @@ public class RagSearchService {
                 vectorHits.size(), keywordHits.size(), topK);
 
         // 4. RRF 合并
-        return RrfMerger.merge(vectorHits, keywordHits, topK);
+        List<RagHitVO> merged = RrfMerger.merge(vectorHits, keywordHits, topK);
+
+        // T4 可观测性埋点：query/耗时/命中数（轻量，不记录对话内容）
+        log.info("[RAG指标] query={} topK={} 耗时{}ms 向量命中{} 关键词命中{} 合并{}条",
+                query, topK, (System.nanoTime() - startNanos) / 1_000_000,
+                vectorHits.size(), keywordHits.size(), merged.size());
+        return merged;
     }
 
     /**

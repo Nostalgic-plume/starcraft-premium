@@ -115,11 +115,12 @@
           <!-- Phase 3：推荐商品卡片（跟随最后回复，点击新标签打开详情） -->
           <div v-if="recommendProducts.length" class="product-cards">
             <div
-              v-for="p in recommendProducts"
+              v-for="(p, idx) in recommendProducts"
               :key="p.productId"
               class="product-card"
               @click="openProduct(p.productId)"
             >
+              <span class="product-card-index">{{ idx + 1 }}</span>
               <img
                 class="product-card-img"
                 :src="p.image || placeholderImg"
@@ -670,6 +671,7 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
 }
 
 .product-card {
+  position: relative; /* 供编号角标定位 */
   display: flex;
   align-items: center;
   gap: 10px;
@@ -680,6 +682,23 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
   box-shadow: 0 2px 8px rgba(26, 26, 46, 0.08); /* 品牌暖阴影 */
   cursor: pointer;
   transition: box-shadow 0.2s, transform 0.2s;
+}
+
+.product-card-index {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #e94560; /* 珊瑚红编号 */
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
 }
 .product-card:hover {
   box-shadow: 0 4px 14px rgba(233, 69, 96, 0.18); /* 珊瑚红 hover 强调 */

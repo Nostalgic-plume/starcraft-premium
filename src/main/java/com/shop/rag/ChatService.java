@@ -80,6 +80,7 @@ public class ChatService {
             - 「这款【商品名】性价比很高，才XX元，很多用户反馈不错💪」
             - 「目前有这几款符合您的要求，我比较推荐第三款……」
             - 用表情符号（😊👍💪🔥）适当点缀，别刷屏
+            - 引用推荐商品时标注编号：[1][2][3] 对应下方"相关商品信息"中的商品 1/2/3（前端卡片按此顺序显示编号）
 
             ## 当没有商品信息时
             下面商品列表为空，说明目前没有匹配到具体商品，你需要：
@@ -96,6 +97,12 @@ public class ChatService {
             - 用户查询/操作订单（查订单、取消订单等）时，必须先调用对应工具拿到真实结果后再回答
             - 不要提前承诺"已取消/已完成"；工具未调用前不要声称操作成功
             - 不要凭记忆编造订单信息，订单号不存在时如实告知
+            - 取消订单是写操作：调用 cancelOrder 前，必须先用 getOrderStatus 确认订单存在且待支付，并向用户确认一次（如「确认取消订单 #123 吗？」），用户明确确认后才调用
+
+            ## 工具调用示例
+            - 用户说「我的订单到哪了」→ 调 getMyOrders
+            - 用户说「帮我查一下订单 123 的情况」→ 调 getOrderStatus(orderId=123)
+            - 用户说「我不想买了，退了吧」→ 先问订单号，调 getOrderStatus 确认待支付，向用户确认「确认取消订单 #123 吗？」；用户确认后调 cancelOrder
 
             记住：你是小星，不是机器人。说话要像真人导购。
             """;
@@ -229,6 +236,12 @@ public class ChatService {
                     circuitBreaker.onSuccess();
                     String reply = response != null && response.aiMessage() != null
                             ? response.aiMessage().text() : "";
+                    // T4 可观测性：LLM token 消耗
+                    if (response != null && response.tokenUsage() != null) {
+                        log.info("[LLM指标] 会话={} 输入token={} 输出token={}",
+                                conversationId, response.tokenUsage().inputTokenCount(),
+                                response.tokenUsage().outputTokenCount());
+                    }
                     saveAssistantMessage(conversationId, reply);
                     completeSse(emitter, reply);
                 })
@@ -262,6 +275,12 @@ public class ChatService {
                 public void onCompleteResponse(ChatResponse response) {
                     String reply = response != null && response.aiMessage() != null
                             ? response.aiMessage().text() : "";
+                    // T4 可观测性：qwen 备用模型 token 消耗
+                    if (response != null && response.tokenUsage() != null) {
+                        log.info("[LLM指标] 会话={} 降级模型 输入token={} 输出token={}",
+                                conversationId, response.tokenUsage().inputTokenCount(),
+                                response.tokenUsage().outputTokenCount());
+                    }
                     saveAssistantMessage(conversationId, reply);
                     completeSse(emitter, reply);
                 }

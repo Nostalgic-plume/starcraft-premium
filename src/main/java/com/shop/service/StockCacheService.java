@@ -99,4 +99,21 @@ public class StockCacheService {
         Long result = redisTemplate.opsForValue().increment(key, quantity);
         log.debug("SKU 库存已回滚: skuId={}, quantity={}, currentRedis={}", skuId, quantity, result);
     }
+
+    /**
+     * 主动失效库存缓存（Cache Aside 的「删缓存」动作）
+     * <p>
+     * 调用时机：任何「非下单/非取消」直接修改 DB 库存的地方（商家/后台改库存、数据修复脚本、压测准备）。
+     * 原理：删除缓存让下一次预扣/查询 miss，{@link #tryDeduct} 的 Lua 返回 -1 后自动从 DB 加载最新值，
+     * 避免旧缓存被继续扣减导致超卖或库存不准确。
+     * 为什么不直接 SET 新值：双写存在并发覆盖窗口，删缓存让「读」去重建，天然一致（Cache Aside 标准做法）。
+     * </p>
+     *
+     * @param skuId SKU ID
+     */
+    public void evictStock(Long skuId) {
+        String key = ProductConstants.CACHE_SKU_STOCK + skuId;
+        redisTemplate.delete(key);
+        log.info("SKU 库存缓存已失效（下次预扣/查询将重新从 DB 加载）: skuId={}", skuId);
+    }
 }

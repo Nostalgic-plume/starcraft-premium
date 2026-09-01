@@ -28,7 +28,7 @@ public class DashboardController {
      * 获取看板全量数据
      * 聚合 9 个数仓维度，返回统一 Result 包装
      */
-    @SaCheckLogin
+    @SaCheckLogin(type ="user")
     @GetMapping("/all")
     public Result<DashboardAllVO> all() {
         log.info("查询数据看板全量数据");

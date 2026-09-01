@@ -53,7 +53,7 @@ public class PaymentController {
      * @param payType 支付方式：1=微信 2=支付宝，默认 1
      * @return 支付成功提示
      */
-    @SaCheckLogin
+    @SaCheckLogin(type ="user")
     @PostMapping("/mock-pay")
     @Operation(summary = "模拟支付（测试用）")
     public Result<Void> mockPay(@RequestParam String orderNo,

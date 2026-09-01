@@ -60,7 +60,7 @@ public class ProductController {
      * @param dto 商品信息请求体（含名称、价格、SKU 等），由 @Valid 校验
      * @return 新增成功的商品ID
      */
-    @SaCheckPermission(PermissionConstants.PRODUCT_ADD)
+    @SaCheckPermission(value = {PermissionConstants.PRODUCT_ADD}, type ="admin")
     @PostMapping("/add")
     @Operation(summary = "新增商品（商家/管理员）")
     public Result<Long> add(@Valid @RequestBody ProductDTO dto) {
@@ -74,7 +74,7 @@ public class ProductController {
      * @param status 目标状态：0=待审核 1=上架 2=下架
      * @return 操作成功提示
      */
-    @SaCheckPermission(PermissionConstants.PRODUCT_STATUS)
+    @SaCheckPermission(value = {PermissionConstants.PRODUCT_STATUS}, type ="admin")
     @PutMapping("/status/{id}")
     @Operation(summary = "更新商品状态（上架/下架，商家/管理员）")
     public Result<Void> updateStatus(@PathVariable Long id, @RequestParam Integer status) {

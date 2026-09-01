@@ -34,7 +34,7 @@ public class AdminStatsController {
      *
      * @return 仪表盘汇总数据（用户数、订单数、销售额等）
      */
-    @SaCheckPermission(PermissionConstants.STATS_VIEW)
+    @SaCheckPermission(value = {PermissionConstants.STATS_VIEW}, type ="admin")
     @GetMapping("/dashboard")
     @Operation(summary = "控制台概览统计")
     public Result<DashboardStatsVO> dashboard() {
@@ -47,7 +47,7 @@ public class AdminStatsController {
      * @param days 统计天数，默认 7
      * @return 每日销售额趋势列表
      */
-    @SaCheckPermission(PermissionConstants.STATS_VIEW)
+    @SaCheckPermission(value = {PermissionConstants.STATS_VIEW}, type ="admin")
     @GetMapping("/sales-trend")
     @Operation(summary = "销售额趋势")
     public Result<List<SalesTrendVO>> salesTrend(@RequestParam(defaultValue = "7") int days) {
@@ -59,7 +59,7 @@ public class AdminStatsController {
      *
      * @return 按销量降序的商品销售数据列表
      */
-    @SaCheckPermission(PermissionConstants.STATS_VIEW)
+    @SaCheckPermission(value = {PermissionConstants.STATS_VIEW}, type ="admin")
     @GetMapping("/product-sales")
     @Operation(summary = "商品销量排行 TOP10")
     public Result<List<ProductSalesVO>> productSales() {
@@ -71,7 +71,7 @@ public class AdminStatsController {
      *
      * @return 每日新增/累计用户数据列表
      */
-    @SaCheckPermission(PermissionConstants.STATS_VIEW)
+    @SaCheckPermission(value = {PermissionConstants.STATS_VIEW}, type ="admin")
     @GetMapping("/user-growth")
     @Operation(summary = "用户增长趋势（近30天）")
     public Result<List<SalesTrendVO>> userGrowth() {
@@ -83,7 +83,7 @@ public class AdminStatsController {
      *
      * @return 各订单状态的数量及占比分布列表
      */
-    @SaCheckPermission(PermissionConstants.STATS_VIEW)
+    @SaCheckPermission(value = {PermissionConstants.STATS_VIEW}, type ="admin")
     @GetMapping("/order-distribution")
     @Operation(summary = "订单状态分布")
     public Result<List<Map<String, Object>>> orderDistribution() {

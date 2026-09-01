@@ -3,6 +3,7 @@ package com.shop.controller;
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.dev33.satoken.stp.StpUtil;
 import com.shop.common.Result;
+import com.shop.common.StpUserUtil;
 import com.shop.common.PageResult;
 import com.shop.model.dto.UserLoginDTO;
 import com.shop.model.dto.UserRegisterDTO;
@@ -67,7 +68,7 @@ public class UserController {
      *
      * @return 当前用户账号信息
      */
-    @SaCheckLogin
+    @SaCheckLogin(type ="user")
     @GetMapping("/info")
     @Operation(summary = "获取当前用户信息")
     public Result<UserDO> info() {
@@ -79,11 +80,11 @@ public class UserController {
      *
      * @return 操作成功提示
      */
-    @SaCheckLogin
+    @SaCheckLogin(type ="user")
     @PostMapping("/logout")
     @Operation(summary = "退出登录")
     public Result<Void> logout() {
-        StpUtil.logout();
+        StpUserUtil.INSTANCE.logout();
         return Result.success();
     }
 
@@ -92,11 +93,11 @@ public class UserController {
      *
      * @return 角色编码列表（如 user/merchant/admin），未分配角色时为空列表
      */
-    @SaCheckLogin
+    @SaCheckLogin(type ="user")
     @GetMapping("/role")
     @Operation(summary = "获取当前用户角色编码列表")
     public Result<List<String>> getRoles() {
-        return Result.success(StpUtil.getRoleList());
+        return Result.success(StpUserUtil.INSTANCE.getRoleList());
     }
 
     /**
@@ -108,7 +109,7 @@ public class UserController {
      * @param status   用户状态：0=正常 1=停用 2=注销中 3=封禁中，可空表示全部
      * @return 用户分页结果
      */
-    @SaCheckPermission(PermissionConstants.USER_MANAGE)
+    @SaCheckPermission(value = {PermissionConstants.USER_MANAGE}, type ="admin")
     @GetMapping("/list")
     @Operation(summary = "用户列表（管理后台，分页）")
     public Result<PageResult<UserDO>> list(

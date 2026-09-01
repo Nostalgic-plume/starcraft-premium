@@ -36,7 +36,7 @@ public class IndexAdminController {
      * @return 触发成功提示（实际重建进度需通过状态接口查询）
      */
     @PostMapping("/rebuild")
-    @SaCheckPermission("product:edit")
+    @SaCheckPermission(value = {"product:edit"}, type ="admin")
     @Operation(summary = "触发全量重建索引（Qdrant 向量 + MySQL FULLTEXT）")
     public Result<Map<String, Object>> rebuild() {
         // 异步强重建（不清除已有 Qdrant 数据，而是全量重写）
@@ -56,7 +56,7 @@ public class IndexAdminController {
      * @return 索引状态 Map（indexedCount/lastRebuildTime/fulltextIndex）
      */
     @GetMapping("/status")
-    @SaCheckPermission("product:edit")
+    @SaCheckPermission(value = {"product:edit"}, type ="admin")
     @Operation(summary = "查看索引状态（Qdrant + FULLTEXT）")
     public Result<Map<String, Object>> status() {
         Map<String, Object> data = new HashMap<>();

@@ -1,6 +1,7 @@
 package com.shop.config;
 
 import cn.dev33.satoken.stp.StpUtil;
+import com.shop.common.StpShopUtil;
 import org.apache.ibatis.reflection.SystemMetaObject;
 import com.baomidou.mybatisplus.extension.plugins.inner.InnerInterceptor;
 import lombok.extern.slf4j.Slf4j;
@@ -257,21 +258,19 @@ public class ShopDataIsolationInterceptor implements InnerInterceptor {
     /**
      * 判断当前会话是否为商家
      *
-     * 商家登录时通过 {@code StpUtil.login(shopId, "shop")} 将设备类型（deviceType）标记为 "shop"，
-     * 这里直接读设备类型判断：判断动作完全在 Sa-Token 的 token 存储（Redis）中完成，不触发任何数据库查询。
+     * 商家登录走独立 loginType="shop"（StpShopUtil），这里直接判断 shop 会话即可，
+     * 判断动作完全在 Sa-Token 的 token 存储（Redis）中完成，不触发任何数据库查询。
      *
      * 为什么要这样判断（历史教训）：
      * 早期实现用 {@code StpUtil.hasRole("merchant")}，它会回调 {@code StpInterfaceImpl.getRoleList()}
      * 查询 user_role 表；而这条 SQL 又会被本 MybatisPlusInterceptor 拦截 → 再次进入 isMerchantSession
-     * → 无限递归 StackOverflowError。改用 deviceType 判断后彻底切断这条回路。
-     *
-     * 另注意：Sa-Token 的 {@code StpUtil.login(id, "shop")} 第二个参数是"设备类型"而非 loginType，
-     * 故 StpInterfaceImpl 中按 loginType 的 "shop" 分支实际不会被命中。
+     * → 无限递归 StackOverflowError。改用独立 loginType 判断后彻底切断这条回路。
      */
     private boolean isMerchantSession() {
         try {
-            return StpUtil.isLogin() && "shop".equals(StpUtil.getLoginDeviceType());
+            return StpShopUtil.INSTANCE.isLogin();
         } catch (Exception e) {
+            // 启动阶段 Sa-Token 上下文未初始化 / 非 Web 线程（如布隆过滤器预热、RocketMQ 消费）兜底返回 false，不阻断
             return false;
         }
     }
@@ -280,7 +279,7 @@ public class ShopDataIsolationInterceptor implements InnerInterceptor {
      * 获取当前商家的 shop_id（即 Sa-Token loginId）
      */
     private long getCurrentShopId() {
-        return StpUtil.getLoginIdAsLong();
+        return StpShopUtil.INSTANCE.getLoginIdAsLong();
     }
 
     /**

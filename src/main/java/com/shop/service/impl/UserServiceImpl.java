@@ -4,6 +4,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.crypto.digest.DigestUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.shop.common.BusinessException;
+import com.shop.common.StpUserUtil;
 import com.shop.mapper.RoleMapper;
 import com.shop.mapper.UserMapper;
 import com.shop.mapper.UserRoleMapper;
@@ -106,10 +107,10 @@ public class UserServiceImpl implements UserService {
 
         // 双参登录指定设备类型 device="user"：后续封号/停用可精准踢下线该用户会话，
         // 避免与同 id 的管理员（device="admin"）/商家（device="shop"）会话误伤
-        StpUtil.login(user.getId(), "user");
+        StpUserUtil.INSTANCE.login(user.getId());
 
         log.info("用户登录成功, userId: {}", user.getId());
-        return StpUtil.getTokenValue();
+        return StpUserUtil.INSTANCE.getTokenValue();
     }
 
     /**
@@ -136,7 +137,7 @@ public class UserServiceImpl implements UserService {
      */
     @Override
     public UserDO getCurrentUser() {
-        long userId = StpUtil.getLoginIdAsLong();
+        long userId = StpUserUtil.INSTANCE.getLoginIdAsLong();
         return getById(userId);
     }
 

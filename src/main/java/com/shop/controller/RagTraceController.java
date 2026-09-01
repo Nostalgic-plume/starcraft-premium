@@ -2,6 +2,7 @@ package com.shop.controller;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.shop.common.Result;
+import com.shop.common.StpUserUtil;
 import com.shop.mapper.RagTraceMapper;
 import com.shop.model.entity.RagTraceDO;
 import io.swagger.v3.oas.annotations.Operation;
@@ -33,7 +34,7 @@ public class RagTraceController {
         try {
             Long userId = null;
             try {
-                userId = StpUtil.getLoginIdAsLong();
+                userId = StpUserUtil.INSTANCE.getLoginIdAsLong();
             } catch (Exception ignored) {
                 // 未登录也允许上报（user_id 为 null）
             }

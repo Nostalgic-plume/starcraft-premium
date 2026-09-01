@@ -74,7 +74,7 @@ public class AdminController {
      * @param status   用户状态：0=正常 1=停用 2=注销中 3=封禁中，可空表示全部
      * @return 用户分页结果
      */
-    @SaCheckPermission(PermissionConstants.USER_MANAGE)
+    @SaCheckPermission(value = {PermissionConstants.USER_MANAGE}, type ="admin")
     @GetMapping("/users")
     @Operation(summary = "用户分页列表（支持关键词搜索和状态筛选）")
     public Result<PageResult<UserDO>> pageUsers(
@@ -92,7 +92,7 @@ public class AdminController {
      * @param body 请求体：status 为目标状态（0=正常 1=停用 2=注销中 3=封禁中），reason 为变更原因（可空，默认空串）
      * @return 操作成功提示
      */
-    @SaCheckPermission(PermissionConstants.USER_MANAGE)
+    @SaCheckPermission(value = {PermissionConstants.USER_MANAGE}, type ="admin")
     @PutMapping("/user/{id}/status")
     @Operation(summary = "修改用户状态")
     public Result<Void> updateUserStatus(
@@ -110,7 +110,7 @@ public class AdminController {
      * @param body 请求体：ids 为用户ID列表（非空），status 为目标状态（0=正常 1=停用 2=注销中 3=封禁中），reason 为变更原因（可空）
      * @return 操作成功提示
      */
-    @SaCheckPermission(PermissionConstants.USER_MANAGE)
+    @SaCheckPermission(value = {PermissionConstants.USER_MANAGE}, type ="admin")
     @PutMapping("/user/batch-status")
     @Operation(summary = "批量修改用户状态")
     public Result<Void> batchUpdateUserStatus(@RequestBody Map<String, Object> body) {
@@ -137,7 +137,7 @@ public class AdminController {
      * @param keyword   搜索关键词（订单号/用户名等），可空
      * @return 订单分页结果
      */
-    @SaCheckPermission(PermissionConstants.ORDER_ALL)
+    @SaCheckPermission(value = {PermissionConstants.ORDER_ALL}, type ="admin")
     @GetMapping("/order/page")
     @Operation(summary = "订单分页列表（多条件筛选，全平台数据）")
     public Result<PageResult<OrderVO>> orderPage(
@@ -157,7 +157,7 @@ public class AdminController {
      * @param orderId 订单ID
      * @return 订单详情
      */
-    @SaCheckPermission(PermissionConstants.ORDER_ALL)
+    @SaCheckPermission(value = {PermissionConstants.ORDER_ALL}, type ="admin")
     @GetMapping("/order/detail/{orderId}")
     @Operation(summary = "订单详情（管理员）")
     public Result<OrderVO> orderDetail(@PathVariable Long orderId) {

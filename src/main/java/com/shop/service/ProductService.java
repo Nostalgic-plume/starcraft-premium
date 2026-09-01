@@ -57,4 +57,14 @@ public interface ProductService {
      * @throws BusinessException 商品不存在时抛出
      */
     void updateStatus(Long id, Integer status);
+
+    /**
+     * 商家调整 SKU 库存（更新 MySQL 后按 Cache Aside 删除库存缓存与商品详情缓存，
+     * 下次预扣/查询自动加载新值，保证 Redis 与 DB 一致）
+     *
+     * @param skuId SKU ID
+     * @param stock 新库存（>=0）
+     * @throws BusinessException SKU 不存在、无权操作该商品、库存为负
+     */
+    void updateSkuStock(Long skuId, Integer stock);
 }

@@ -4,6 +4,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.crypto.digest.DigestUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.shop.common.BusinessException;
+import com.shop.common.StpShopUtil;
 import com.shop.mapper.ShopMapper;
 import com.shop.mapper.StatsMapper;
 import com.shop.model.dto.ShopLoginDTO;
@@ -50,10 +51,10 @@ public class ShopServiceImpl implements ShopService {
         if (shop.getStatus() != null && shop.getStatus() != 0) {
             throw new BusinessException("店铺账号已被停用");
         }
-        StpUtil.login(shop.getId(), "shop");
+        StpShopUtil.INSTANCE.login(shop.getId());
         log.info("商家登录成功, shopId: {}, shopName: {}", shop.getId(), shop.getShopName());
         return Map.of(
-                "token", StpUtil.getTokenValue(),
+                "token", StpShopUtil.INSTANCE.getTokenValue(),
                 "shopId", shop.getId(),
                 "shopName", shop.getShopName());
     }
@@ -77,7 +78,7 @@ public class ShopServiceImpl implements ShopService {
     @Override
     public Long getCurrentShopId() {
         try {
-            return StpUtil.getLoginIdAsLong();
+            return StpShopUtil.INSTANCE.getLoginIdAsLong();
         } catch (Exception e) {
             throw new BusinessException("未登录，请先登录");
         }

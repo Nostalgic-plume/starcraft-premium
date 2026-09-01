@@ -1,6 +1,7 @@
 package com.shop.service.impl;
 
 import cn.dev33.satoken.stp.StpUtil;
+import com.shop.common.StpUserUtil;
 import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.shop.common.BusinessException;
@@ -46,7 +47,7 @@ public class CartServiceImpl implements CartService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void addItem(CartDTO dto) {
-        long userId = StpUtil.getLoginIdAsLong();
+        long userId = StpUserUtil.INSTANCE.getLoginIdAsLong();
 
         // 校验 SKU
         SkuDO sku = skuMapper.selectById(dto.getSkuId());
@@ -90,7 +91,7 @@ public class CartServiceImpl implements CartService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateQuantity(Long skuId, Integer quantity) {
-        long userId = StpUtil.getLoginIdAsLong();
+        long userId = StpUserUtil.INSTANCE.getLoginIdAsLong();
         CartDO cart = getCartItem(userId, skuId);
         // 校验库存
         SkuDO sku = skuMapper.selectById(skuId);
@@ -110,7 +111,7 @@ public class CartServiceImpl implements CartService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void removeItem(Long skuId) {
-        long userId = StpUtil.getLoginIdAsLong();
+        long userId = StpUserUtil.INSTANCE.getLoginIdAsLong();
         cartMapper.delete(
                 new LambdaQueryWrapper<CartDO>()
                         .eq(CartDO::getUserId, userId)
@@ -127,7 +128,7 @@ public class CartServiceImpl implements CartService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void checkItem(Long skuId, Boolean checked) {
-        long userId = StpUtil.getLoginIdAsLong();
+        long userId = StpUserUtil.INSTANCE.getLoginIdAsLong();
         CartDO cart = getCartItem(userId, skuId);
         cart.setChecked(checked ? 1 : 0);
         cartMapper.updateById(cart);
@@ -141,7 +142,7 @@ public class CartServiceImpl implements CartService {
      */
     @Override
     public List<CartVO> list() {
-        long userId = StpUtil.getLoginIdAsLong();
+        long userId = StpUserUtil.INSTANCE.getLoginIdAsLong();
 
         List<CartDO> cartList = cartMapper.selectList(
                 new LambdaQueryWrapper<CartDO>()

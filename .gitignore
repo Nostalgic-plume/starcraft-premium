@@ -30,3 +30,6 @@ logs/
 src/.claude/
 code_review_findings.json
 kill8080.ps1
+
+# 开发计划/需求文档（个人阶段计划，不入库）
+docs/superpowers/

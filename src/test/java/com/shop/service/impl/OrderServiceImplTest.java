@@ -1,6 +1,7 @@
 package com.shop.service.impl;
 
 import cn.dev33.satoken.stp.StpUtil;
+import com.shop.common.SaTokenMockUtil;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
@@ -179,8 +180,7 @@ class OrderServiceImplTest {
         @Test
         @DisplayName("成功生成并缓存令牌")
         void getOrderToken_ShouldGenerateAndCache() {
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(redisTemplate.opsForValue()).thenReturn(valueOperations);
 
                 String token = orderService.getOrderToken();
@@ -215,6 +215,9 @@ class OrderServiceImplTest {
                 when(skuMapper.selectById(100L)).thenReturn(validSku);
                 when(productMapper.selectById(10L)).thenReturn(validProduct);
 
+                // Redis 原子预扣库存成功
+                when(stockCacheService.tryDeduct(100L, 2)).thenReturn(true);
+
                 // 缓存 PROCESSING 状态 & 异步发送 MQ
                 when(redisTemplate.opsForValue()).thenReturn(valueOperations);
                 doNothing().when(orderProducer).sendOrderCreate(any(OrderCreateMessage.class));
@@ -223,7 +226,9 @@ class OrderServiceImplTest {
 
                 assertNotNull(processingId);
                 assertEquals(32, processingId.length());
-                // 异步落单：DB 写入不在 createOrder 内
+                // 接口层完成预扣；DB 写入不在 createOrder 内
+                verify(stockCacheService).tryDeduct(100L, 2);
+                verify(stockCacheService, never()).restoreStock(anyLong(), anyInt());
                 verify(orderMapper, never()).insert(any(OrderDO.class));
                 verify(orderProducer).sendOrderCreate(any(OrderCreateMessage.class));
                 verify(valueOperations).set(
@@ -318,6 +323,46 @@ class OrderServiceImplTest {
                 BusinessException ex = assertThrows(BusinessException.class,
                         () -> orderService.createOrder(createDTO));
                 assertTrue(ex.getMessage().contains("库存不足"));
+            }
+        }
+
+        @Test
+        @DisplayName("创建失败：Redis 原子预扣库存不足（秒杀快速失败）")
+        void createOrder_ShouldThrow_WhenRedisDeductFails() {
+            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
+                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+                when(redisTemplate.delete("order:token:1")).thenReturn(true);
+                when(skuMapper.selectById(100L)).thenReturn(validSku);
+                when(productMapper.selectById(10L)).thenReturn(validProduct);
+                // Redis 原子预扣失败 → 库存不足，快速失败不投消息
+                when(stockCacheService.tryDeduct(100L, 2)).thenReturn(false);
+
+                BusinessException ex = assertThrows(BusinessException.class,
+                        () -> orderService.createOrder(createDTO));
+                assertTrue(ex.getMessage().contains("库存不足"));
+                verify(orderProducer, never()).sendOrderCreate(any(OrderCreateMessage.class));
+                verify(stockCacheService, never()).restoreStock(anyLong(), anyInt());
+            }
+        }
+
+        @Test
+        @DisplayName("创建失败：MQ 发送失败恢复已预扣库存")
+        void createOrder_ShouldRestoreDeduct_WhenSendFails() {
+            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
+                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+                when(redisTemplate.delete("order:token:1")).thenReturn(true);
+                when(skuMapper.selectById(100L)).thenReturn(validSku);
+                when(productMapper.selectById(10L)).thenReturn(validProduct);
+                when(stockCacheService.tryDeduct(100L, 2)).thenReturn(true);
+                when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+                // MQ 发送失败
+                doThrow(new RuntimeException("MQ down"))
+                        .when(orderProducer).sendOrderCreate(any(OrderCreateMessage.class));
+
+                BusinessException ex = assertThrows(BusinessException.class,
+                        () -> orderService.createOrder(createDTO));
+                assertEquals("系统繁忙，请稍后重试", ex.getMessage());
+                verify(stockCacheService).restoreStock(100L, 2); // 已预扣库存被恢复
             }
         }
 

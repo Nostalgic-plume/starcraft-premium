@@ -37,6 +37,12 @@ public interface OrderConstants {
     /* ==================== 缓存 Key 前缀 ==================== */
     /** 下单防重令牌 Redis Key 前缀 */
     String CACHE_ORDER_TOKEN = "order:token:";
+    /** 接口预扣库存记录 Key 前缀（order:deduct:{orderToken}，兜底任务据此恢复悬空预扣） */
+    String CACHE_ORDER_DEDUCT = "order:deduct:";
+
+    /* ==================== 预扣兜底配置 ==================== */
+    /** 预扣记录超时时间（分钟）：超过该时长仍未落单/未清理的预扣视为悬空，由定时任务恢复库存 */
+    int DEDUCT_TIMEOUT_MINUTES = 60;
 
     /* ==================== 状态文字映射 ==================== */
 

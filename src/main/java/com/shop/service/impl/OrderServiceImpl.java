@@ -44,6 +44,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -88,12 +89,14 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /**
-     * 创建订单（异步削峰）：先校验并消耗防重令牌，再对每个 SKU 做存在性/上架状态/库存初判，
-     * 组装 MQ 消息、设置 PROCESSING 轮询状态后投递 RocketMQ，立即返回处理标识供前端轮询
+     * 创建订单（异步削峰 + 接口预扣）：先校验并消耗防重令牌，再对每个 SKU 做存在性/上架状态/库存初判，
+     * 然后 Redis Lua 原子预扣库存（快速失败：库存不足在接口即拒绝，不投无效消息进队列）；
+     * 预扣成功写预扣记录、设置 PROCESSING 轮询状态后投递 RocketMQ，立即返回处理标识供前端轮询；
+     * 发送失败时恢复已预扣库存并清理预扣记录与轮询状态
      *
      * @param dto 下单参数（items 商品项列表、收件人姓名/电话/地址、备注，均必填）
      * @return 处理标识 orderToken（同时作为前端轮询的 processingId）
-     * @throws BusinessException 请勿重复提交订单、未选择商品、商品不存在、商品已下架、库存不足、MQ 发送失败（系统繁忙）
+     * @throws BusinessException 请勿重复提交订单、未选择商品、商品不存在、商品已下架、库存不足、Redis 异常或 MQ 发送失败（系统繁忙）
      */
     @Override
     public String createOrder(OrderCreateDTO dto) {
@@ -112,6 +115,7 @@ public class OrderServiceImpl implements OrderService {
         }
 
         List<OrderCreateMessage.ItemDTO> msgItems = new ArrayList<>();
+        Map<Long, String> skuNameMap = new HashMap<>();
         for (OrderCreateDTO.OrderItemDTO item : items) {
             SkuDO sku = skuMapper.selectById(item.getSkuId());
             if (sku == null) {
@@ -124,13 +128,41 @@ public class OrderServiceImpl implements OrderService {
             if (item.getQuantity() > sku.getStock()) {
                 throw new BusinessException("库存不足，" + sku.getName());
             }
+            skuNameMap.put(item.getSkuId(), sku.getName());
             OrderCreateMessage.ItemDTO msgItem = new OrderCreateMessage.ItemDTO();
             msgItem.setSkuId(item.getSkuId());
             msgItem.setQuantity(item.getQuantity());
             msgItems.add(msgItem);
         }
 
-        // ③ 构建消息体（orderToken 同时也是 processingId，供前端轮询）
+        // ③ Redis 原子预扣库存（快速失败：秒杀场景库存不足在接口即拒绝，不投无效消息进队列）
+        // 预扣成功后才发 MQ；库存不足/Redis 异常时回滚已预扣，消费端失败时的恢复见 processOrder 事务同步
+        List<Long> deductSkuIds = new ArrayList<>();
+        List<Integer> deductQtys = new ArrayList<>();
+        for (OrderCreateDTO.OrderItemDTO item : items) {
+            boolean ok;
+            try {
+                ok = stockCacheService.tryDeduct(item.getSkuId(), item.getQuantity());
+            } catch (Exception e) {
+                // Redis 异常：回滚已预扣，接口降级为失败（DB 尚未扣减，用户可重试）
+                for (int j = 0; j < deductSkuIds.size(); j++) {
+                    stockCacheService.restoreStock(deductSkuIds.get(j), deductQtys.get(j));
+                }
+                log.error("Redis 预扣库存异常: skuId={}", item.getSkuId(), e);
+                throw new BusinessException("系统繁忙，请稍后重试");
+            }
+            if (!ok) {
+                // 库存不足：回滚已预扣，快速失败返回
+                for (int j = 0; j < deductSkuIds.size(); j++) {
+                    stockCacheService.restoreStock(deductSkuIds.get(j), deductQtys.get(j));
+                }
+                throw new BusinessException("库存不足，" + skuNameMap.get(item.getSkuId()));
+            }
+            deductSkuIds.add(item.getSkuId());
+            deductQtys.add(item.getQuantity());
+        }
+
+        // ④ 构建消息体（orderToken 同时也是 processingId，供前端轮询）
         String orderToken = UUID.randomUUID().toString().replace("-", "");
         OrderCreateMessage msg = new OrderCreateMessage();
         msg.setOrderToken(orderToken);
@@ -141,18 +173,29 @@ public class OrderServiceImpl implements OrderService {
         msg.setReceiverAddress(dto.getReceiverAddress());
         msg.setRemark(dto.getRemark());
 
-        // ④ 设置 PROCESSING 状态（前端轮询用）
+        // ⑤ 写预扣记录（供兜底任务恢复悬空预扣）+ 设置 PROCESSING 状态（前端轮询用）
+        // 预扣记录格式：{毫秒时间戳},{skuId}:{qty},{skuId}:{qty}...，正常落单/业务失败时由消费端删除
+        String deductKey = OrderConstants.CACHE_ORDER_DEDUCT + orderToken;
+        StringBuilder deductDetail = new StringBuilder().append(System.currentTimeMillis());
+        for (int i = 0; i < deductSkuIds.size(); i++) {
+            deductDetail.append(',').append(deductSkuIds.get(i)).append(':').append(deductQtys.get(i));
+        }
+        redisTemplate.opsForValue().set(deductKey, deductDetail.toString());
         redisTemplate.opsForValue().set(
                 "order:process:" + orderToken,
                 "PROCESSING",
                 5, TimeUnit.MINUTES);
 
-        // ⑤ 发送 MQ（失败则清理轮询状态）
+        // ⑥ 发送 MQ（失败则恢复预扣库存并清理状态）
         try {
             orderProducer.sendOrderCreate(msg);
         } catch (Exception e) {
+            for (int i = 0; i < deductSkuIds.size(); i++) {
+                stockCacheService.restoreStock(deductSkuIds.get(i), deductQtys.get(i));
+            }
+            redisTemplate.delete(deductKey);
             redisTemplate.delete("order:process:" + orderToken);
-            log.error("MQ 发送失败: userId={}", userId, e);
+            log.error("MQ 发送失败，已恢复预扣库存: userId={}", userId, e);
             throw new BusinessException("系统繁忙，请稍后重试");
         }
 
@@ -161,9 +204,10 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /**
-     * 消费端异步落单（事务内）：重新查询 SKU/商品最新状态 → Redis Lua 预扣库存（前置校验）→ 注册事务回滚恢复
-     * → 校验单一商家 shop_id → MySQL 行锁扣库存（最终凭证）→ 创建订单与商品快照 → 标记购物车已下单 →
-     * 写订单缓存并淘汰商品缓存。任一步失败抛异常回滚整个事务（事务回滚时自动恢复 Redis 库存）
+     * 消费端异步落单（事务内）：库存已由接口层 Redis 预扣，此处重新查询 SKU/商品最新状态 → 校验单一商家 shop_id
+     * → MySQL 行锁扣库存（最终凭证）→ 创建订单与商品快照 → 标记购物车已下单 → 写订单缓存并淘汰商品缓存。
+     * 事务同步策略：落单成功删除接口预扣记录；业务失败（不重试）恢复接口预扣的 Redis 库存；系统异常（会重试）
+     * 保留预扣，保证重试成功后 Redis 缓存与 DB 一致
      *
      * @param msg RocketMQ 落单消息（userId、items、收件人信息等）
      * @return 新创建的订单ID
@@ -174,151 +218,147 @@ public class OrderServiceImpl implements OrderService {
     public Long processOrder(OrderCreateMessage msg) {
         long userId = msg.getUserId();
         List<OrderCreateMessage.ItemDTO> items = msg.getItems();
+        final String orderToken = msg.getOrderToken();
 
-        // ① 重新查询 SKU 和 Product（消息中的数据不一定是当前最新）
-        List<SkuDO> skuList = new ArrayList<>();
-        for (OrderCreateMessage.ItemDTO item : items) {
-            SkuDO sku = skuMapper.selectById(item.getSkuId());
-            if (sku == null) {
-                throw new BusinessException("商品不存在，skuId: " + item.getSkuId());
-            }
-            ProductDO product = productMapper.selectById(sku.getProductId());
-            if (product == null || !Integer.valueOf(1).equals(product.getStatus())) {
-                throw new BusinessException("商品已下架，" + sku.getName());
-            }
-            skuList.add(sku);
-        }
-
-        // ② Redis Lua 预扣库存（前置快速校验，减少 MySQL 行锁争用）
-        List<Long> deductSkuIds = new ArrayList<>();
-        List<Integer> deductQtys = new ArrayList<>();
-        for (int i = 0; i < items.size(); i++) {
-            OrderCreateMessage.ItemDTO item = items.get(i);
-            SkuDO sku = skuList.get(i);
-            boolean ok = stockCacheService.tryDeduct(item.getSkuId(), item.getQuantity());
-            if (!ok) {
-                for (int j = 0; j < deductSkuIds.size(); j++) {
-                    stockCacheService.restoreStock(deductSkuIds.get(j), deductQtys.get(j));
-                }
-                throw new BusinessException("库存不足，" + sku.getName());
-            }
-            deductSkuIds.add(item.getSkuId());
-            deductQtys.add(item.getQuantity());
-        }
-
-        // ③ 注册事务同步：回滚时自动恢复 Redis 库存
-        final List<Long> skuIds = deductSkuIds;
-        final List<Integer> qtys = deductQtys;
+        // ① 注册事务同步：提交删预扣记录；业务失败（不重试）恢复接口预扣库存；系统异常保留预扣等 MQ 重试
+        final boolean[] businessFailed = {false};
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             /**
-             * 事务结束后回调：事务回滚时（STATUS_ROLLED_BACK）恢复本次已预扣的 Redis 库存，保证缓存库存与 DB 一致
+             * 事务结束后回调：
+             * 提交 → 接口预扣的 Redis 库存已由 DB 行锁真实扣减，删除预扣记录；
+             * 业务失败回滚（不重试） → 恢复接口已预扣的 Redis 库存并删除预扣记录；
+             * 系统异常回滚（会重试） → 保留预扣与预扣记录，重试成功时缓存与 DB 保持一致
              *
              * @param status 事务完成状态（STATUS_ROLLED_BACK=回滚，STATUS_COMMITTED=已提交）
              */
             @Override
             public void afterCompletion(int status) {
-                if (status == STATUS_ROLLED_BACK) {
-                    for (int i = 0; i < skuIds.size(); i++) {
-                        stockCacheService.restoreStock(skuIds.get(i), qtys.get(i));
+                if (status == STATUS_COMMITTED) {
+                    redisTemplate.delete(OrderConstants.CACHE_ORDER_DEDUCT + orderToken);
+                } else if (status == STATUS_ROLLED_BACK && businessFailed[0]) {
+                    for (OrderCreateMessage.ItemDTO item : msg.getItems()) {
+                        stockCacheService.restoreStock(item.getSkuId(), item.getQuantity());
                     }
-                    log.info("异步落单回滚，Redis 库存已恢复: 涉及 {} 个 SKU", skuIds.size());
+                    redisTemplate.delete(OrderConstants.CACHE_ORDER_DEDUCT + orderToken);
+                    log.info("异步落单业务失败，已恢复接口预扣的 Redis 库存: orderToken={}", orderToken);
                 }
             }
         });
 
-        // ④ 确定 shop_id
-        Long shopId = null;
-        for (SkuDO sku : skuList) {
-            ProductDO p = productMapper.selectById(sku.getProductId());
-            if (p != null && p.getShopId() != null) {
-                if (shopId == null) {
-                    shopId = p.getShopId();
-                } else if (!shopId.equals(p.getShopId())) {
-                    throw new BusinessException("订单中包含多个商家的商品，请分开下单");
+        try {
+            // ② 重新查询 SKU 和 Product（消息中的数据不一定是当前最新）
+            List<SkuDO> skuList = new ArrayList<>();
+            for (OrderCreateMessage.ItemDTO item : items) {
+                SkuDO sku = skuMapper.selectById(item.getSkuId());
+                if (sku == null) {
+                    throw new BusinessException("商品不存在，skuId: " + item.getSkuId());
+                }
+                ProductDO product = productMapper.selectById(sku.getProductId());
+                if (product == null || !Integer.valueOf(1).equals(product.getStatus())) {
+                    throw new BusinessException("商品已下架，" + sku.getName());
+                }
+                skuList.add(sku);
+            }
+
+            // ③ 确定 shop_id
+            Long shopId = null;
+            for (SkuDO sku : skuList) {
+                ProductDO p = productMapper.selectById(sku.getProductId());
+                if (p != null && p.getShopId() != null) {
+                    if (shopId == null) {
+                        shopId = p.getShopId();
+                    } else if (!shopId.equals(p.getShopId())) {
+                        throw new BusinessException("订单中包含多个商家的商品，请分开下单");
+                    }
                 }
             }
-        }
-        if (shopId == null) {
-            throw new BusinessException("商品所属商家信息缺失");
-        }
-
-        // ⑤ MySQL 行锁扣库存（最终凭证）
-        BigDecimal totalAmount = BigDecimal.ZERO;
-        for (int i = 0; i < items.size(); i++) {
-            OrderCreateMessage.ItemDTO item = items.get(i);
-            SkuDO sku = skuList.get(i);
-            int affected = skuMapper.deductStock(item.getSkuId(), item.getQuantity());
-            if (affected == 0) {
-                throw new BusinessException("库存不足，" + sku.getName());
+            if (shopId == null) {
+                throw new BusinessException("商品所属商家信息缺失");
             }
-            totalAmount = totalAmount.add(sku.getPrice().multiply(BigDecimal.valueOf(item.getQuantity())));
-        }
 
-        // ⑥ 创建订单
-        String orderNo = String.valueOf(snowflake.nextId());
-        OrderDO order = new OrderDO();
-        order.setOrderNo(orderNo);
-        order.setUserId(userId);
-        order.setShopId(shopId);
-        order.setTotalAmount(totalAmount);
-        order.setActualAmount(totalAmount);
-        order.setDiscountAmount(BigDecimal.ZERO);
-        order.setFreight(BigDecimal.ZERO);
-        order.setStatus(OrderConstants.STATUS_PENDING_PAY);
-        order.setReceiverName(msg.getReceiverName());
-        order.setReceiverPhone(msg.getReceiverPhone());
-        order.setReceiverAddress(msg.getReceiverAddress());
-        order.setRemark(msg.getRemark());
-        orderMapper.insert(order);
-
-        // ⑦ 订单商品快照
-        for (int i = 0; i < items.size(); i++) {
-            OrderCreateMessage.ItemDTO item = items.get(i);
-            SkuDO sku = skuList.get(i);
-
-            OrderItemDO orderItem = new OrderItemDO();
-            orderItem.setOrderId(order.getId());
-            orderItem.setOrderNo(orderNo);
-            orderItem.setProductId(sku.getProductId());
-            orderItem.setSkuId(sku.getId());
-            orderItem.setSkuName(sku.getName());
-            orderItem.setPrice(sku.getPrice());
-            orderItem.setQuantity(item.getQuantity());
-            orderItem.setSubtotal(sku.getPrice().multiply(BigDecimal.valueOf(item.getQuantity())));
-
-            ProductDO product = productMapper.selectById(sku.getProductId());
-            if (product != null) {
-                orderItem.setProductName(product.getName());
-                orderItem.setProductMainImage(product.getMainImage());
+            // ④ MySQL 行锁扣库存（最终凭证；Redis 预扣已在接口层完成，此处仅做 DB 真实扣减）
+            BigDecimal totalAmount = BigDecimal.ZERO;
+            for (int i = 0; i < items.size(); i++) {
+                OrderCreateMessage.ItemDTO item = items.get(i);
+                SkuDO sku = skuList.get(i);
+                int affected = skuMapper.deductStock(item.getSkuId(), item.getQuantity());
+                if (affected == 0) {
+                    throw new BusinessException("库存不足，" + sku.getName());
+                }
+                totalAmount = totalAmount.add(sku.getPrice().multiply(BigDecimal.valueOf(item.getQuantity())));
             }
-            orderItemMapper.insert(orderItem);
-        }
 
-        // ⑧ 购物车标记已下单
-        for (OrderCreateMessage.ItemDTO item : items) {
-            CartDO cartItem = cartMapper.selectOne(
-                    new LambdaQueryWrapper<CartDO>()
-                            .eq(CartDO::getUserId, userId)
-                            .eq(CartDO::getSkuId, item.getSkuId())
-                            .eq(CartDO::getIsOrdered, 0));
-            if (cartItem != null) {
-                cartItem.setIsOrdered(1);
-                cartMapper.updateById(cartItem);
+            // ⑤ 创建订单
+            String orderNo = String.valueOf(snowflake.nextId());
+            OrderDO order = new OrderDO();
+            order.setOrderNo(orderNo);
+            order.setUserId(userId);
+            order.setShopId(shopId);
+            order.setTotalAmount(totalAmount);
+            order.setActualAmount(totalAmount);
+            order.setDiscountAmount(BigDecimal.ZERO);
+            order.setFreight(BigDecimal.ZERO);
+            order.setStatus(OrderConstants.STATUS_PENDING_PAY);
+            order.setReceiverName(msg.getReceiverName());
+            order.setReceiverPhone(msg.getReceiverPhone());
+            order.setReceiverAddress(msg.getReceiverAddress());
+            order.setRemark(msg.getRemark());
+            orderMapper.insert(order);
+
+            // ⑥ 订单商品快照
+            for (int i = 0; i < items.size(); i++) {
+                OrderCreateMessage.ItemDTO item = items.get(i);
+                SkuDO sku = skuList.get(i);
+
+                OrderItemDO orderItem = new OrderItemDO();
+                orderItem.setOrderId(order.getId());
+                orderItem.setOrderNo(orderNo);
+                orderItem.setProductId(sku.getProductId());
+                orderItem.setSkuId(sku.getId());
+                orderItem.setSkuName(sku.getName());
+                orderItem.setPrice(sku.getPrice());
+                orderItem.setQuantity(item.getQuantity());
+                orderItem.setSubtotal(sku.getPrice().multiply(BigDecimal.valueOf(item.getQuantity())));
+
+                ProductDO product = productMapper.selectById(sku.getProductId());
+                if (product != null) {
+                    orderItem.setProductName(product.getName());
+                    orderItem.setProductMainImage(product.getMainImage());
+                }
+                orderItemMapper.insert(orderItem);
             }
+
+            // ⑦ 购物车标记已下单
+            for (OrderCreateMessage.ItemDTO item : items) {
+                CartDO cartItem = cartMapper.selectOne(
+                        new LambdaQueryWrapper<CartDO>()
+                                .eq(CartDO::getUserId, userId)
+                                .eq(CartDO::getSkuId, item.getSkuId())
+                                .eq(CartDO::getIsOrdered, 0));
+                if (cartItem != null) {
+                    cartItem.setIsOrdered(1);
+                    cartMapper.updateById(cartItem);
+                }
+            }
+
+            // ⑧ 订单缓存
+            redisTemplate.opsForValue().set(
+                    "order:detail:" + order.getId(), orderNo,
+                    OrderConstants.PAY_TIMEOUT_MINUTES, TimeUnit.MINUTES);
+
+            // ⑨ 淘汰商品缓存
+            for (SkuDO sku : skuList) {
+                redisTemplate.delete(ProductConstants.CACHE_PRODUCT + sku.getProductId());
+            }
+
+            log.info("异步落单成功, orderNo: {}, userId: {}, shopId: {}, amount: {}", orderNo, userId, shopId, totalAmount);
+            return order.getId();
+
+        } catch (BusinessException e) {
+            // 业务异常（不重试）：标记业务失败，事务回滚后由事务同步恢复接口预扣的库存
+            businessFailed[0] = true;
+            throw e;
         }
-
-        // ⑨ 订单缓存
-        redisTemplate.opsForValue().set(
-                "order:detail:" + order.getId(), orderNo,
-                OrderConstants.PAY_TIMEOUT_MINUTES, TimeUnit.MINUTES);
-
-        // ⑩ 淘汰商品缓存
-        for (SkuDO sku : skuList) {
-            redisTemplate.delete(ProductConstants.CACHE_PRODUCT + sku.getProductId());
-        }
-
-        log.info("异步落单成功, orderNo: {}, userId: {}, shopId: {}, amount: {}", orderNo, userId, shopId, totalAmount);
-        return order.getId();
     }
 
     /**

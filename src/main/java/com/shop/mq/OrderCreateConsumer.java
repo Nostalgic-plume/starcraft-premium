@@ -14,10 +14,10 @@ import java.util.concurrent.TimeUnit;
 /**
  * 异步落单消费端
  * <p>
- * 接收 OrderProducer 投递的异步落单消息，在事务内完成 Redis 预扣 + MySQL 行锁落单。
+ * 接收 OrderProducer 投递的异步落单消息（库存已由接口层 Redis 预扣），在事务内完成 MySQL 行锁落单。
  * 消费端处理成功 → 更新轮询状态为订单ID + 发送延迟取消消息；
- * 业务异常（库存不足等）→ 标记 FAILED，不触发 MQ 重试；
- * 系统异常 → 删除幂等键，抛出异常触发 MQ 重试。
+ * 业务异常（库存不足等）→ 标记 FAILED，不触发 MQ 重试（事务同步已恢复接口预扣库存）；
+ * 系统异常 → 删除幂等键，抛出异常触发 MQ 重试（保留接口预扣，重试成功时缓存与 DB 一致）。
  * </p>
  *
  * @author shop
@@ -52,9 +52,9 @@ public class OrderCreateConsumer implements RocketMQListener<OrderCreateMessage>
      * <p>
      * 处理流程：
      * ① SETNX 幂等键去重，重复消息直接跳过，保证至少一次投递下不重复落单；
-     * ② 事务内完成 Redis 预扣 + MySQL 行锁落单，成功后写轮询状态为订单ID并发送延迟取消消息；
-     * ③ 业务异常（库存不足等）→ 写 FAILED:原因，保留幂等键，不触发 MQ 重试；
-     * ④ 系统异常（DB 断开等）→ 删除幂等键与处理状态，重新抛出触发 MQ 重试。
+     * ② 事务内完成 MySQL 行锁落单（Redis 预扣已在接口层完成），成功后写轮询状态为订单ID并发送延迟取消消息；
+     * ③ 业务异常（库存不足等）→ 写 FAILED:原因，保留幂等键，不触发 MQ 重试（事务同步已恢复接口预扣库存）；
+     * ④ 系统异常（DB 断开等）→ 删除幂等键与处理状态，重新抛出触发 MQ 重试（保留接口预扣，重试成功时缓存与 DB 一致）。
      *
      * @param msg 异步落单消息体（orderToken 为幂等键，非空）
      */
@@ -71,7 +71,7 @@ public class OrderCreateConsumer implements RocketMQListener<OrderCreateMessage>
         }
 
         try {
-            // ② 事务内落单（Redis 预扣 + MySQL 行锁 + 订单创建）
+            // ② 事务内落单（MySQL 行锁 + 订单创建；Redis 预扣已在接口层完成）
             Long orderId = orderService.processOrder(msg);
 
             // ③ 更新轮询状态为成功

@@ -33,7 +33,7 @@ B2C 电商系统，**Spring Boot 单体后端 + Vue 3 三端分离前端**，Ngi
 | 反向代理 | Nginx 1.20.2 |
 | JDK | OpenJDK 22 |
 | RAG 语义搜索 | LangChain4j 1.19.0 + Qdrant（1536维）+ DashScope（text-embedding-v1 嵌入） |
-| 智能客服 | SSE 流式 + DashScope qwen-plus（大模型）+ RAG 检索增强 + 分类名回退 |
+| 智能客服 | LangChain4j AiServices + DeepSeek（主）/ qwen-plus（备）+ Function Calling 工具链 + RAG 检索增强 |
 | 离线数仓 | Hive 3.x + Sqoop 1.4.x + Azkaban 3.x |
 
 ---
@@ -101,7 +101,7 @@ shop/
 | **管理后台** | 用户/订单/商品管理、ECharts 统计看板、全平台数据查询 |
 | **商家中心** | shop_id 自动隔离、本店商品/订单管理、发货、本店 ECharts 看板 |
 | **报表库看板** | 查询 shop_ads 报表库（离线数仓产出），ECharts 报表展示 |
-| **智能客服** | SSE 流式对话，RAG 检索 TOP-3 + 分类名回退，小星真人导购人设 |
+| **智能客服** | SSE 流式对话，RAG 检索 TOP-3 + 分类名回退；Function Calling 工具链（查/取消真实订单，写操作状态机 + 库存回滚）；引用溯源编号 + 商品卡片推送；小星真人导购人设 |
 | **RAG 搜索** | DashScope text-embedding-v1 向量化 → Qdrant 检索 → 元数据过滤（分类/价格） |
 
 ---
@@ -215,7 +215,7 @@ shop/
 | **商品快照** | order_item 记录下单时名称/价格/图片，不受后续变更影响 |
 | **购物车标记** | 下单后批量 `cart.is_ordered = 1`，列表过滤已结算 |
 | **RAG 搜索** | DashScope text-embedding-v1 向量化 → Qdrant 检索 → 元数据过滤 |
-| **智能客服** | SSE 流式输出 → RAG 检索 TOP-3（空结果走分类名回退）→ DashScope qwen-plus 生成回答，小星真人导购人设 |
+| **智能客服** | SSE 流式输出 → RAG 检索 TOP-3（空结果走分类名回退）→ DeepSeek 生成回答；主备降级链（熔断 → qwen 纯 RAG → 模板兜底）；Function Calling 工具链（AiServices 查/取消订单，userId 锁死 + 归属校验防越权）；引用溯源 [n] 编号 + 商品卡片推送 |
 | **统一返回** | `{ code, msg, data }`，全局异常处理器接管所有异常 |
 | **Long→String** | Jackson 全局配置，解决雪花 ID 前端 JS 精度丢失 |
 

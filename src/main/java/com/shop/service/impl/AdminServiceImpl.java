@@ -6,6 +6,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.shop.common.BusinessException;
 import com.shop.common.PageResult;
+import com.shop.common.StpAdminUtil;
+import com.shop.common.StpUserUtil;
 import com.shop.constant.AccountStatusEnum;
 import com.shop.constant.AdminLevelEnum;
 import com.shop.mapper.AdminMapper;
@@ -58,10 +60,10 @@ public class AdminServiceImpl implements AdminService {
         if (admin.getStatus() != null && admin.getStatus() != 0) {
             throw new BusinessException("管理员账号已被停用");
         }
-        StpUtil.login(admin.getId(), "admin");
+        StpAdminUtil.INSTANCE.login(admin.getId());
         log.info("管理员登录成功, adminId: {}, username: {}", admin.getId(), admin.getUsername());
         return Map.of(
-                "token", StpUtil.getTokenValue(),
+                "token", StpAdminUtil.INSTANCE.getTokenValue(),
                 "adminId", admin.getId(),
                 "nickname", admin.getNickname());
     }
@@ -74,7 +76,7 @@ public class AdminServiceImpl implements AdminService {
      */
     @Override
     public AdminDO getCurrentAdmin() {
-        Long adminId = StpUtil.getLoginIdAsLong();
+        Long adminId = StpAdminUtil.INSTANCE.getLoginIdAsLong();
         AdminDO admin = adminMapper.selectById(adminId);
         if (admin == null) {
             throw new BusinessException("管理员不存在");
@@ -122,7 +124,7 @@ public class AdminServiceImpl implements AdminService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateUserStatus(Long targetUserId, Integer newStatus, String reason) {
-        long operatorId = StpUtil.getLoginIdAsLong();
+        long operatorId = StpAdminUtil.INSTANCE.getLoginIdAsLong();
         AdminDO operator = adminMapper.selectById(operatorId);
         if (operator == null) {
             throw new BusinessException("操作人不存在");
@@ -162,7 +164,7 @@ public class AdminServiceImpl implements AdminService {
         // 同 id 的 user/admin/shop 共享同一 SaSession，故必须按 device 精准踢（普通用户登录 device="user"），
         // 避免 `kickout(id, null)` 误伤同 id 的管理员/商家会话
         if (newStatus != null && newStatus != 0) {
-            StpUtil.kickout(targetUserId, "user");
+            StpUserUtil.INSTANCE.kickout(targetUserId);
             log.info("用户强制下线: targetUserId={}, newStatus={}", targetUserId, newStatus);
         }
 

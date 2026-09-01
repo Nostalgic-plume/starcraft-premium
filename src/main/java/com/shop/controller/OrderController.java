@@ -34,7 +34,7 @@ public class OrderController {
      *
      * @return 防重令牌，data 为 {token: xxx}，创建订单时随请求体提交
      */
-    @SaCheckLogin
+    @SaCheckLogin(type ="user")
     @GetMapping("/token")
     @Operation(summary = "获取下单防重令牌")
     public Result<Map<String, String>> getToken() {
@@ -49,7 +49,7 @@ public class OrderController {
      * @param dto 下单请求体（含 token、商品项、地址等），由 @Valid 校验
      * @return 下单请求已提交的提示及 processingId（供轮询状态接口使用）
      */
-    @SaCheckLogin
+    @SaCheckLogin(type ="user")
     @PostMapping("/create")
     @Operation(summary = "创建订单（异步削峰，返回 processingId 供前端轮询）")
     public Result<String> createOrder(@Valid @RequestBody OrderCreateDTO dto) {
@@ -63,7 +63,7 @@ public class OrderController {
      * @param processingId 创建订单接口返回的落单处理ID
      * @return 落单状态及结果（成功后含订单ID）
      */
-    @SaCheckLogin
+    @SaCheckLogin(type ="user")
     @GetMapping("/status/{processingId}")
     @Operation(summary = "查询异步落单状态（轮询接口）")
     public Result<Map<String, Object>> processingStatus(@PathVariable String processingId) {
@@ -77,7 +77,7 @@ public class OrderController {
      * @param orderId 订单ID
      * @return 操作成功提示
      */
-    @SaCheckLogin
+    @SaCheckLogin(type ="user")
     @PostMapping("/cancel/{orderId}")
     @Operation(summary = "取消订单")
     public Result<Void> cancelOrder(@PathVariable Long orderId) {
@@ -92,7 +92,7 @@ public class OrderController {
      * @param orderId 订单ID
      * @return 操作成功提示
      */
-    @SaCheckLogin
+    @SaCheckLogin(type ="user")
     @PostMapping("/receive/{orderId}")
     @Operation(summary = "确认收货")
     public Result<Void> confirmReceive(@PathVariable Long orderId) {
@@ -106,7 +106,7 @@ public class OrderController {
      * @param orderId 订单ID
      * @return 订单详情（含商品快照信息）
      */
-    @SaCheckLogin
+    @SaCheckLogin(type ="user")
     @GetMapping("/detail/{orderId}")
     @Operation(summary = "订单详情")
     public Result<OrderVO> detail(@PathVariable Long orderId) {
@@ -121,7 +121,7 @@ public class OrderController {
      * @param status   订单状态：0=待支付 1=已支付 2=已发货 3=已收货 4=已完成 5=已取消 6=已退款，可空表示全部
      * @return 当前用户订单分页结果
      */
-    @SaCheckLogin
+    @SaCheckLogin(type ="user")
     @GetMapping("/my")
     @Operation(summary = "我的订单列表")
     public Result<PageResult<OrderVO>> myOrders(

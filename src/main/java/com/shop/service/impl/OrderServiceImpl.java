@@ -1,6 +1,8 @@
 package com.shop.service.impl;
 
 import cn.dev33.satoken.stp.StpUtil;
+import com.shop.common.StpShopUtil;
+import com.shop.common.StpUserUtil;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.lang.Snowflake;
@@ -77,7 +79,7 @@ public class OrderServiceImpl implements OrderService {
      */
     @Override
     public String getOrderToken() {
-        long userId = StpUtil.getLoginIdAsLong();
+        long userId = StpUserUtil.INSTANCE.getLoginIdAsLong();
         String token = UUID.randomUUID().toString().replace("-", "");
         redisTemplate.opsForValue().set(
                 OrderConstants.CACHE_ORDER_TOKEN + userId,
@@ -95,7 +97,7 @@ public class OrderServiceImpl implements OrderService {
      */
     @Override
     public String createOrder(OrderCreateDTO dto) {
-        long userId = StpUtil.getLoginIdAsLong();
+        long userId = StpUserUtil.INSTANCE.getLoginIdAsLong();
 
         // ① Token 防重校验
         Boolean deleted = redisTemplate.delete(OrderConstants.CACHE_ORDER_TOKEN + userId);
@@ -371,7 +373,7 @@ public class OrderServiceImpl implements OrderService {
         if (order == null) {
             throw new BusinessException("订单不存在");
         }
-        long userId = StpUtil.getLoginIdAsLong();
+        long userId = StpUserUtil.INSTANCE.getLoginIdAsLong();
         if (!order.getUserId().equals(userId)) {
             throw new BusinessException("无权操作该订单");
         }
@@ -439,7 +441,7 @@ public class OrderServiceImpl implements OrderService {
         if (order == null) {
             throw new BusinessException("订单不存在");
         }
-        long userId = StpUtil.getLoginIdAsLong();
+        long userId = StpUserUtil.INSTANCE.getLoginIdAsLong();
         if (!order.getUserId().equals(userId)) {
             throw new BusinessException("无权操作该订单");
         }
@@ -465,7 +467,7 @@ public class OrderServiceImpl implements OrderService {
         if (order == null) {
             throw new BusinessException("订单不存在");
         }
-        long userId = StpUtil.getLoginIdAsLong();
+        long userId = StpUserUtil.INSTANCE.getLoginIdAsLong();
         if (!order.getUserId().equals(userId)) {
             throw new BusinessException("无权查看该订单");
         }
@@ -486,7 +488,7 @@ public class OrderServiceImpl implements OrderService {
         page = pn[0];
         pageSize = pn[1];
 
-        long userId = StpUtil.getLoginIdAsLong();
+        long userId = StpUserUtil.INSTANCE.getLoginIdAsLong();
         Page<OrderDO> mpPage = new Page<>(page, pageSize);
         LambdaQueryWrapper<OrderDO> wrapper = new LambdaQueryWrapper<OrderDO>()
                 .eq(OrderDO::getUserId, userId)
@@ -623,7 +625,7 @@ public class OrderServiceImpl implements OrderService {
      */
     @Override
     public PageResult<OrderVO> merchantPageOrders(int page, int pageSize, Integer status) {
-        Long shopId = StpUtil.getLoginIdAsLong();
+        Long shopId = StpShopUtil.INSTANCE.getLoginIdAsLong();
         Page<OrderDO> mpPage = new Page<>(page, pageSize);
         LambdaQueryWrapper<OrderDO> wrapper = new LambdaQueryWrapper<OrderDO>()
                 .eq(OrderDO::getShopId, shopId)
@@ -645,7 +647,7 @@ public class OrderServiceImpl implements OrderService {
      */
     @Override
     public OrderVO merchantGetDetail(Long orderId) {
-        Long shopId = StpUtil.getLoginIdAsLong();
+        Long shopId = StpShopUtil.INSTANCE.getLoginIdAsLong();
         OrderDO order = orderMapper.selectById(orderId);
         if (order == null) {
             throw new BusinessException("订单不存在");
@@ -666,7 +668,7 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void merchantDeliver(Long orderId, String logisticsNo) {
-        Long shopId = StpUtil.getLoginIdAsLong();
+        Long shopId = StpShopUtil.INSTANCE.getLoginIdAsLong();
         OrderDO order = orderMapper.selectById(orderId);
         if (order == null) {
             throw new BusinessException("订单不存在");

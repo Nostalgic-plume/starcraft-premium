@@ -2,6 +2,7 @@ package com.shop.controller;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.shop.common.Result;
+import com.shop.common.StpUserUtil;
 import com.shop.model.entity.ChatConversationDO;
 import com.shop.model.entity.ChatMessageDO;
 import com.shop.rag.ChatFeedbackService;
@@ -65,7 +66,7 @@ public class ChatController {
         }
 
         // AI 客服为登录后功能：未登录抛 NotLoginException（GlobalExceptionHandler 统一返回 401）
-        long userId = StpUtil.getLoginIdAsLong();
+        long userId = StpUserUtil.INSTANCE.getLoginIdAsLong();
 
         SseEmitter emitter = new SseEmitter(300_000L);
         chatService.ask(conversationId, userId, message, emitter);
@@ -97,7 +98,7 @@ public class ChatController {
     @Operation(summary = "获取用户最近会话列表")
     public Result<List<ChatConversationDO>> listConversations(
             @RequestParam(defaultValue = "20") int limit) {
-        long userId = StpUtil.getLoginIdAsLong();
+        long userId = StpUserUtil.INSTANCE.getLoginIdAsLong();
         List<ChatConversationDO> list = chatHistoryService.listUserConversations(userId, limit);
         return Result.success(list);
     }
@@ -112,7 +113,7 @@ public class ChatController {
     @GetMapping("/conversations/{id}/messages")
     @Operation(summary = "获取会话消息列表")
     public Result<List<ChatMessageDO>> listMessages(@PathVariable Long id) {
-        long userId = StpUtil.getLoginIdAsLong();
+        long userId = StpUserUtil.INSTANCE.getLoginIdAsLong();
         ChatConversationDO conv = chatHistoryService.getConversation(id);
         if (conv == null || !conv.getUserId().equals(userId)) {
             return Result.error("无权访问该会话");
@@ -131,7 +132,7 @@ public class ChatController {
     @PostMapping("/feedback")
     @Operation(summary = "提交对话反馈")
     public Result<Void> submitFeedback(@RequestBody FeedbackRequest request) {
-        long userId = StpUtil.getLoginIdAsLong();
+        long userId = StpUserUtil.INSTANCE.getLoginIdAsLong();
         // 验证消息归属：消息所在的会话必须属于当前用户
         ChatMessageDO msg = chatHistoryService.getMessage(request.getMessageId());
         if (msg == null) {

@@ -34,7 +34,7 @@ public class CartController {
      *
      * @return 购物车商品项列表
      */
-    @SaCheckLogin
+    @SaCheckLogin(type ="user")
     @GetMapping("/list")
     @Operation(summary = "购物车列表")
     public Result<List<CartVO>> list() {
@@ -48,7 +48,7 @@ public class CartController {
      * @param dto 添加请求体（含 skuId、数量等）
      * @return 操作成功提示
      */
-    @SaCheckLogin
+    @SaCheckLogin(type ="user")
     @PostMapping("/add")
     @Operation(summary = "添加到购物车")
     public Result<Void> add(@Valid @RequestBody CartDTO dto) {
@@ -63,7 +63,7 @@ public class CartController {
      * @param quantity 新的数量，最小为 1（@Min 校验，小于 1 拒绝）
      * @return 操作成功提示
      */
-    @SaCheckLogin
+    @SaCheckLogin(type ="user")
     @PutMapping("/quantity/{skuId}")
     @Operation(summary = "修改数量")
     public Result<Void> updateQuantity(@PathVariable Long skuId, @RequestParam @Min(value = 1, message = "数量不能小于1") Integer quantity) {
@@ -77,7 +77,7 @@ public class CartController {
      * @param skuId SKU 商品ID
      * @return 操作成功提示
      */
-    @SaCheckLogin
+    @SaCheckLogin(type ="user")
     @DeleteMapping("/remove/{skuId}")
     @Operation(summary = "删除购物车商品")
     public Result<Void> remove(@PathVariable Long skuId) {
@@ -92,7 +92,7 @@ public class CartController {
      * @param checked 是否选中：true=选中，false=取消选中
      * @return 操作成功提示
      */
-    @SaCheckLogin
+    @SaCheckLogin(type ="user")
     @PutMapping("/check/{skuId}")
     @Operation(summary = "选中/取消选中")
     public Result<Void> check(@PathVariable Long skuId, @RequestParam Boolean checked) {

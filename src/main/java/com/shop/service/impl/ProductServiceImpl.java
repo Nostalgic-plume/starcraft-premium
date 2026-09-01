@@ -6,10 +6,13 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.shop.common.BusinessException;
 import com.shop.common.PageResult;
+import com.shop.common.StpAdminUtil;
+import com.shop.common.StpShopUtil;
 import com.shop.common.PaginationHelper;
 import com.shop.common.RedisCache;
 import com.shop.constant.ProductConstants;
@@ -38,6 +41,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -92,8 +96,19 @@ public class ProductServiceImpl implements ProductService {
 
         // 自动填充商家ID（商家登录主体就是 shop_id，直接取 loginId）
         try {
-            long loginId = StpUtil.getLoginIdAsLong();
-            List<String> roles = StpUtil.getRoleList();
+            // 兼容两端：商家（shop）自动绑定本店，管理员（admin）新增不绑店
+            long loginId;
+            List<String> roles;
+            if (StpShopUtil.INSTANCE.isLogin()) {
+                loginId = StpShopUtil.INSTANCE.getLoginIdAsLong();
+                roles = List.of("merchant");
+            } else if (StpAdminUtil.INSTANCE.isLogin()) {
+                loginId = StpAdminUtil.INSTANCE.getLoginIdAsLong();
+                roles = List.of("admin");
+            } else {
+                loginId = 0L;
+                roles = List.of();
+            }
             if (roles.contains("merchant")) {
                 ShopDO shop = shopMapper.selectById(loginId);
                 if (shop != null) {
@@ -243,6 +258,42 @@ public class ProductServiceImpl implements ProductService {
     }
 
     /**
+     * 商家调整 SKU 库存：更新 MySQL 库存后按 Cache Aside 删除库存缓存与商品详情缓存，
+     * 下次预扣（Lua miss 回源）自动加载新值，保证 Redis 与 DB 一致；归属校验 shop_id 隔离
+     *
+     * @param skuId SKU ID
+     * @param stock 新库存（>=0）
+     * @throws BusinessException SKU 不存在、无权操作该商品、库存为负
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateSkuStock(Long skuId, Integer stock) {
+        if (stock == null || stock < 0) {
+            throw new BusinessException("库存不能为负");
+        }
+        SkuDO sku = skuMapper.selectById(skuId);
+        if (sku == null) {
+            throw new BusinessException("SKU 不存在");
+        }
+        // 归属校验：当前登录商家只能调整自己商品的 SKU 库存（shop_id 数据隔离）
+        long shopId = StpShopUtil.INSTANCE.getLoginIdAsLong();
+        ProductDO product = productMapper.selectById(sku.getProductId());
+        if (product == null || !Objects.equals(product.getShopId(), shopId)) {
+            throw new BusinessException("无权操作该商品");
+        }
+        // 更新 MySQL 库存（最终凭证）
+        skuMapper.update(null, new LambdaUpdateWrapper<SkuDO>()
+                .eq(SkuDO::getId, skuId)
+                .set(SkuDO::getStock, stock));
+        log.info("商家调整 SKU 库存: skuId={}, stock={}, shopId={}", skuId, stock, shopId);
+
+        // Cache Aside：删除库存缓存，下次预扣 miss 自动从 DB 加载新值，避免旧缓存被继续扣减
+        stockCacheService.evictStock(skuId);
+        // 淘汰商品详情缓存（详情页含 SKU 库存，主动失效保证立即可见）
+        redisCache.delete(ProductConstants.CACHE_PRODUCT + product.getId());
+    }
+
+    /**
      * 商家端商品分页：shop_id 取自当前登录商家并注入查询条件后复用公共分页逻辑（数据隔离）
      *
      * @param query 分页与筛选参数（page/pageSize 等，shopId 由内部覆盖为当前商家）
@@ -250,7 +301,7 @@ public class ProductServiceImpl implements ProductService {
      */
     @Override
     public PageResult<ProductVO> merchantPage(ProductPageQuery query) {
-        query.setShopId(StpUtil.getLoginIdAsLong());
+        query.setShopId(StpShopUtil.INSTANCE.getLoginIdAsLong());
         return page(query);
     }
 

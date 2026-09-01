@@ -63,7 +63,7 @@ public class MerchantController {
      *
      * @return 店铺名称/Logo 等商家信息 Map
      */
-    @SaCheckLogin
+    @SaCheckLogin(type ="shop")
     @GetMapping("/info")
     @Operation(summary = "获取当前商家信息（店铺名称/Logo，供商家端头部展示）")
     public Result<Map<String, Object>> info() {
@@ -77,7 +77,7 @@ public class MerchantController {
      *
      * @return 本店仪表盘汇总数据（订单数、销售额等）
      */
-    @SaCheckLogin
+    @SaCheckLogin(type ="shop")
     @GetMapping("/stats/dashboard")
     @Operation(summary = "商家控制台概览（本店数据）")
     public Result<DashboardStatsVO> dashboard() {
@@ -94,7 +94,7 @@ public class MerchantController {
      * @param status   订单状态：0=待支付 1=已支付 2=已发货 3=已收货 4=已完成 5=已取消 6=已退款，可空表示全部
      * @return 本店订单分页结果
      */
-    @SaCheckLogin
+    @SaCheckLogin(type ="shop")
     @GetMapping("/order/page")
     @Operation(summary = "商家订单分页列表（仅本店订单）")
     public Result<PageResult<OrderVO>> orderPage(
@@ -111,7 +111,7 @@ public class MerchantController {
      * @param orderId 订单ID
      * @return 订单详情（仅本店订单可查）
      */
-    @SaCheckLogin
+    @SaCheckLogin(type ="shop")
     @GetMapping("/order/detail/{orderId}")
     @Operation(summary = "商家订单详情")
     public Result<OrderVO> orderDetail(@PathVariable Long orderId) {
@@ -125,7 +125,7 @@ public class MerchantController {
      * @param body 请求体：orderId 为本店订单ID（必填），logisticsNo 为物流单号（可空，默认空串）
      * @return 发货成功提示
      */
-    @SaCheckLogin
+    @SaCheckLogin(type ="shop")
     @PostMapping("/order/deliver")
     @Operation(summary = "商家发货")
     public Result<Void> deliver(@RequestBody Map<String, Object> body) {
@@ -145,7 +145,7 @@ public class MerchantController {
      * @param keyword  商品名称关键词搜索，可空
      * @return 本店商品分页结果
      */
-    @SaCheckLogin
+    @SaCheckLogin(type ="shop")
     @GetMapping("/product/page")
     @Operation(summary = "商家商品列表（仅本店商品）")
     public Result<PageResult<ProductVO>> productPage(
@@ -165,7 +165,7 @@ public class MerchantController {
      * @param dto 商品信息请求体（含名称、价格、分类等），由 @Valid 校验
      * @return 新增成功的商品ID
      */
-    @SaCheckPermission(PermissionConstants.PRODUCT_ADD)
+    @SaCheckPermission(value = {PermissionConstants.PRODUCT_ADD}, type ="shop")
     @PostMapping("/product/add")
     @Operation(summary = "商家新增商品（自动绑定本店）")
     public Result<Long> addProduct(@Valid @RequestBody ProductDTO dto) {
@@ -179,11 +179,28 @@ public class MerchantController {
      * @param status 目标状态：0=待审核 1=上架 2=下架
      * @return 操作成功提示
      */
-    @SaCheckPermission(PermissionConstants.PRODUCT_STATUS)
+    @SaCheckPermission(value = {PermissionConstants.PRODUCT_STATUS}, type ="shop")
     @PutMapping("/product/status/{id}")
     @Operation(summary = "商家更新商品状态")
     public Result<Void> updateStatus(@PathVariable Long id, @RequestParam Integer status) {
         productService.updateStatus(id, status);
+        return Result.success();
+    }
+
+    /**
+     * 商家调整本店商品 SKU 库存（需 product:edit 权限）
+     * 更新 MySQL 后按 Cache Aside 删除 Redis 库存缓存与商品详情缓存，
+     * 下次预扣/查询自动加载新值，保证缓存与 DB 一致
+     *
+     * @param skuId SKU ID
+     * @param stock 新库存（>=0）
+     * @return 操作成功提示
+     */
+    @SaCheckPermission(value = {PermissionConstants.PRODUCT_EDIT}, type ="shop")
+    @PutMapping("/product/stock/{skuId}")
+    @Operation(summary = "商家调整 SKU 库存（Cache Aside 同步 Redis）")
+    public Result<Void> updateSkuStock(@PathVariable Long skuId, @RequestParam Integer stock) {
+        productService.updateSkuStock(skuId, stock);
         return Result.success();
     }
 }

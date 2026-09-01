@@ -1,6 +1,5 @@
 package com.shop.common;
 
-import cn.dev33.satoken.stp.StpUtil;
 import com.shop.mapper.AdminMapper;
 import com.shop.mapper.PermissionMapper;
 import com.shop.mapper.ShopMapper;
@@ -16,13 +15,13 @@ import java.util.List;
  * Sa-Token 权限加载器
  * 实现 StpInterface，Sa-Token 在鉴权时自动调用此接口
  *
- * 三类登录主体（按登录设备类型区分）：
- * 1. device="shop"（商家独立登录） → merchant 角色 + merchant 权限
- * 2. device="admin"（管理员独立登录） → admin 角色 + 全部权限
- * 3. device="user"/default/null（普通用户） → 从 user_role 表读取
+ * 三类登录主体（按 loginType 区分，三端独立会话）：
+ * 1. loginType="shop"（商家，StpShopUtil） → merchant 角色 + merchant 权限
+ * 2. loginType="admin"（管理员，StpAdminUtil） → admin 角色 + 全部权限
+ * 3. loginType="user"（普通用户，StpUserUtil） → 从 user_role 表读取
  *
- * 注意：Sa-Token 回调本接口时拿到的 loginType 恒为 "login"（本项目统一走 StpUtil），
- * 无法用它区分三类身份，故改为读取当前登录设备类型（登录时 StpUtil.login(id, device) 的第二参）。
+ * Sa-Token 回调本接口时 loginType 参数即当前 StpLogic 的 loginType（user/shop/admin），
+ * 据此精准路由，不再依赖登录设备类型。
  *
  * @author shop
  */
@@ -52,15 +51,14 @@ public class StpInterfaceImpl implements cn.dev33.satoken.stp.StpInterface {
     public List<String> getRoleList(Object loginId, String loginType) {
         Long id = Long.valueOf(loginId.toString());
 
-        // 按登录设备类型精准路由（loginType 在本仓库恒为 "login"，无法区分身份）
-        String device = currentDeviceType();
-        if ("admin".equals(device)) {
-            return List.of("admin");
-        } else if ("shop".equals(device)) {
+        // 按 loginType 精准路由（三端独立会话）
+        if ("shop".equals(loginType)) {
             return List.of("merchant");
+        } else if ("admin".equals(loginType)) {
+            return List.of("admin");
         }
 
-        // 默认 device="user"/default/null = 普通用户，从 user_role 表读取
+        // 默认 loginType="user" = 普通用户，从 user_role 表读取
         return userRoleMapper.selectRoleCodesByUserId(id);
     }
 
@@ -77,29 +75,14 @@ public class StpInterfaceImpl implements cn.dev33.satoken.stp.StpInterface {
     public List<String> getPermissionList(Object loginId, String loginType) {
         Long id = Long.valueOf(loginId.toString());
 
-        // 按登录设备类型精准路由
-        String device = currentDeviceType();
-        if ("admin".equals(device)) {
-            return permissionMapper.selectCodesByRoleId(ADMIN_ROLE_ID);
-        } else if ("shop".equals(device)) {
+        // 按 loginType 精准路由（三端独立会话）
+        if ("shop".equals(loginType)) {
             return permissionMapper.selectCodesByRoleId(MERCHANT_ROLE_ID);
+        } else if ("admin".equals(loginType)) {
+            return permissionMapper.selectCodesByRoleId(ADMIN_ROLE_ID);
         }
 
-        // 默认 device="user"/default/null = 普通用户
+        // 默认 loginType="user" = 普通用户
         return permissionMapper.selectCodesByUserId(id);
-    }
-
-    /**
-     * 获取当前登录会话的设备类型（登录时 {@code StpUtil.login(id, device)} 的第二参）。
-     * Sa-Token 无设备信息时返回字符串 "null"，统一归一化为 null；
-     * 未登录/解析异常时 try-catch 兜底返回 null，不阻断鉴权流程（普通用户分支查无权限自然 403）。
-     */
-    private String currentDeviceType() {
-        try {
-            String device = StpUtil.getLoginDeviceType();
-            return "null".equals(device) ? null : device;
-        } catch (Exception e) {
-            return null;
-        }
     }
 }

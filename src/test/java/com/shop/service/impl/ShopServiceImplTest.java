@@ -3,6 +3,7 @@ package com.shop.service.impl;
 import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.crypto.digest.DigestUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.shop.common.SaTokenMockUtil;
 import com.shop.common.BusinessException;
 import com.shop.mapper.ShopMapper;
 import com.shop.mapper.StatsMapper;
@@ -69,18 +70,16 @@ class ShopServiceImplTest {
         void login_ShouldReturnToken_WhenCredentialsValid() {
             when(shopMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(shop);
             try (MockedStatic<DigestUtil> digestUtil = mockStatic(DigestUtil.class);
-                 MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
+                 var login = SaTokenMockUtil.userLogin(10L)) {
 
                 digestUtil.when(() -> DigestUtil.bcryptCheck(anyString(), anyString())).thenReturn(true);
-                stpUtil.when(StpUtil::getTokenValue).thenReturn("sa-token-shop-xxx");
 
                 Map<String, Object> result = shopService.login(loginDTO);
 
-                assertEquals("sa-token-shop-xxx", result.get("token"));
+                // 三端会话重构后登录走 StpShopUtil.INSTANCE.login/getTokenValue 实例方法，token 来自 mock 请求上下文
+                assertEquals("mock-token", result.get("token"));
                 assertEquals(10L, result.get("shopId"));
                 assertEquals("测试店铺", result.get("shopName"));
-                // 生产代码双参登录 StpUtil.login(shopId, "shop")，verify 参数必须与之完全一致
-                stpUtil.verify(() -> StpUtil.login(10L, "shop"));
             }
         }
 
@@ -119,8 +118,7 @@ class ShopServiceImplTest {
         void getDashboard_ShouldReturnStats() {
             DashboardStatsVO statsVO = new DashboardStatsVO();
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(10L);
+            try (var login = SaTokenMockUtil.userLogin(10L)) {
                 when(statsMapper.selectMerchantDashboard(10L)).thenReturn(statsVO);
 
                 DashboardStatsVO result = shopService.getDashboard();
@@ -139,8 +137,7 @@ class ShopServiceImplTest {
         @Test
         @DisplayName("成功获取当前登录商家 ID")
         void getCurrentShopId_ShouldReturnId_WhenLoggedIn() {
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(10L);
+            try (var login = SaTokenMockUtil.userLogin(10L)) {
 
                 Long result = shopService.getCurrentShopId();
 

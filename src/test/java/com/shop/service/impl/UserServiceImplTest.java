@@ -1,8 +1,8 @@
 package com.shop.service.impl;
 
-import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.crypto.digest.DigestUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.shop.common.SaTokenMockUtil;
 import com.shop.common.BusinessException;
 import com.shop.mapper.RoleMapper;
 import com.shop.mapper.UserMapper;
@@ -152,16 +152,15 @@ class UserServiceImplTest {
         void login_ShouldReturnToken_WhenCredentialsValid() {
             when(userMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(normalUser);
             try (MockedStatic<DigestUtil> digestUtil = mockStatic(DigestUtil.class);
-                 MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
+                 var login = SaTokenMockUtil.userLogin(1L)) {
 
                 digestUtil.when(() -> DigestUtil.bcryptCheck(anyString(), anyString())).thenReturn(true);
-                stpUtil.when(StpUtil::getTokenValue).thenReturn("sa-token-xxxxx");
 
                 String token = userService.login(loginDTO);
 
-                assertEquals("sa-token-xxxxx", token);
-                // 与生产一致：login(1L, "user") 双参登录，指定设备类型便于封号时精准踢下线
-                stpUtil.verify(() -> StpUtil.login(1L, "user"));
+                // 三端会话重构后登录走 StpUserUtil.INSTANCE.login/getTokenValue 实例方法，
+                // token 由 SaTokenMockUtil 的 mock 请求上下文提供
+                assertEquals("mock-token", token);
             }
         }
 
@@ -259,8 +258,7 @@ class UserServiceImplTest {
         @Test
         @DisplayName("获取当前用户：已登录")
         void getCurrentUser_ShouldReturnUser_WhenLoggedIn() {
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(userMapper.selectById(1L)).thenReturn(normalUser);
 
                 UserDO result = userService.getCurrentUser();
@@ -273,8 +271,7 @@ class UserServiceImplTest {
         @Test
         @DisplayName("获取当前用户：用户不存在")
         void getCurrentUser_ShouldThrow_WhenUserNotFound() {
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(99L);
+            try (var login = SaTokenMockUtil.userLogin(99L)) {
                 when(userMapper.selectById(99L)).thenReturn(null);
 
                 assertThrows(BusinessException.class, () -> userService.getCurrentUser());

@@ -1,6 +1,5 @@
 package com.shop.service.impl;
 
-import cn.dev33.satoken.stp.StpUtil;
 import com.shop.common.SaTokenMockUtil;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -205,8 +204,7 @@ class OrderServiceImplTest {
         @Test
         @DisplayName("成功提交下单：异步发送消息并返回 processingId")
         void createOrder_ShouldSucceed() {
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
 
                 // Token 校验
                 when(redisTemplate.delete("order:token:1")).thenReturn(true);
@@ -242,8 +240,7 @@ class OrderServiceImplTest {
         @Test
         @DisplayName("创建失败：Token 校验失败（重复提交）")
         void createOrder_ShouldThrow_WhenTokenInvalid() {
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(redisTemplate.delete("order:token:1")).thenReturn(false);
 
                 BusinessException ex = assertThrows(BusinessException.class,
@@ -256,8 +253,7 @@ class OrderServiceImplTest {
         @Test
         @DisplayName("创建失败：Token 删除返回 null")
         void createOrder_ShouldThrow_WhenTokenDeleteNull() {
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(redisTemplate.delete("order:token:1")).thenReturn(null);
 
                 BusinessException ex = assertThrows(BusinessException.class,
@@ -270,8 +266,7 @@ class OrderServiceImplTest {
         @DisplayName("创建失败：商品列表为空")
         void createOrder_ShouldThrow_WhenItemsEmpty() {
             createDTO.setItems(List.of());
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(redisTemplate.delete("order:token:1")).thenReturn(true);
 
                 BusinessException ex = assertThrows(BusinessException.class,
@@ -283,8 +278,7 @@ class OrderServiceImplTest {
         @Test
         @DisplayName("创建失败：SKU 不存在")
         void createOrder_ShouldThrow_WhenSkuNotFound() {
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(redisTemplate.delete("order:token:1")).thenReturn(true);
                 when(skuMapper.selectById(100L)).thenReturn(null);
 
@@ -298,8 +292,7 @@ class OrderServiceImplTest {
         @DisplayName("创建失败：商品已下架")
         void createOrder_ShouldThrow_WhenProductOffShelf() {
             validProduct.setStatus(0); // 下架
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(redisTemplate.delete("order:token:1")).thenReturn(true);
                 when(skuMapper.selectById(100L)).thenReturn(validSku);
                 when(productMapper.selectById(10L)).thenReturn(validProduct);
@@ -314,8 +307,7 @@ class OrderServiceImplTest {
         @DisplayName("创建失败：库存不足（校验阶段）")
         void createOrder_ShouldThrow_WhenStockInsufficient() {
             itemDTO.setQuantity(100); // 需求100 > 库存50
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(redisTemplate.delete("order:token:1")).thenReturn(true);
                 when(skuMapper.selectById(100L)).thenReturn(validSku);
                 when(productMapper.selectById(10L)).thenReturn(validProduct);
@@ -329,8 +321,7 @@ class OrderServiceImplTest {
         @Test
         @DisplayName("创建失败：Redis 原子预扣库存不足（秒杀快速失败）")
         void createOrder_ShouldThrow_WhenRedisDeductFails() {
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(redisTemplate.delete("order:token:1")).thenReturn(true);
                 when(skuMapper.selectById(100L)).thenReturn(validSku);
                 when(productMapper.selectById(10L)).thenReturn(validProduct);
@@ -348,8 +339,7 @@ class OrderServiceImplTest {
         @Test
         @DisplayName("创建失败：MQ 发送失败恢复已预扣库存")
         void createOrder_ShouldRestoreDeduct_WhenSendFails() {
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(redisTemplate.delete("order:token:1")).thenReturn(true);
                 when(skuMapper.selectById(100L)).thenReturn(validSku);
                 when(productMapper.selectById(10L)).thenReturn(validProduct);
@@ -423,8 +413,7 @@ class OrderServiceImplTest {
             when(orderMapper.selectById(1L)).thenReturn(pendingOrder);
             when(orderItemMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(orderItem));
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
 
                 orderService.cancelOrder(1L);
 
@@ -449,8 +438,7 @@ class OrderServiceImplTest {
         void cancelOrder_ShouldThrow_WhenNotOwner() {
             when(orderMapper.selectById(1L)).thenReturn(pendingOrder);
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(2L); // 不同用户
+            try (var login = SaTokenMockUtil.userLogin(2L)) { // 不同用户
 
                 BusinessException ex = assertThrows(BusinessException.class,
                         () -> orderService.cancelOrder(1L));
@@ -463,8 +451,7 @@ class OrderServiceImplTest {
         void cancelOrder_ShouldThrow_WhenStatusInvalid() {
             when(orderMapper.selectById(2L)).thenReturn(paidOrder);
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
 
                 BusinessException ex = assertThrows(BusinessException.class,
                         () -> orderService.cancelOrder(2L));
@@ -484,8 +471,7 @@ class OrderServiceImplTest {
         void confirmReceive_ShouldSucceed() {
             when(orderMapper.selectById(3L)).thenReturn(deliveredOrder);
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
 
                 orderService.confirmReceive(3L);
 
@@ -510,8 +496,7 @@ class OrderServiceImplTest {
         void confirmReceive_ShouldThrow_WhenNotOwner() {
             when(orderMapper.selectById(3L)).thenReturn(deliveredOrder);
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(2L);
+            try (var login = SaTokenMockUtil.userLogin(2L)) {
 
                 BusinessException ex = assertThrows(BusinessException.class,
                         () -> orderService.confirmReceive(3L));
@@ -524,8 +509,7 @@ class OrderServiceImplTest {
         void confirmReceive_ShouldThrow_WhenNotDelivered() {
             when(orderMapper.selectById(1L)).thenReturn(pendingOrder);
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
 
                 BusinessException ex = assertThrows(BusinessException.class,
                         () -> orderService.confirmReceive(1L));
@@ -546,8 +530,7 @@ class OrderServiceImplTest {
             when(orderMapper.selectById(1L)).thenReturn(pendingOrder);
             when(orderItemMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(orderItem));
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
 
                 OrderVO vo = orderService.getDetail(1L);
 
@@ -573,8 +556,7 @@ class OrderServiceImplTest {
         void getDetail_ShouldThrow_WhenNotOwner() {
             when(orderMapper.selectById(1L)).thenReturn(pendingOrder);
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(2L);
+            try (var login = SaTokenMockUtil.userLogin(2L)) {
 
                 BusinessException ex = assertThrows(BusinessException.class,
                         () -> orderService.getDetail(1L));
@@ -593,8 +575,7 @@ class OrderServiceImplTest {
                     .thenReturn(pageResult);
             when(orderItemMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(orderItem));
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
 
                 PageResult<OrderVO> result = orderService.myOrders(1, 10, null);
 
@@ -614,8 +595,7 @@ class OrderServiceImplTest {
             when(orderMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class)))
                     .thenReturn(pageResult);
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
 
                 PageResult<OrderVO> result = orderService.myOrders(1, 10, OrderConstants.STATUS_PAID);
 
@@ -679,8 +659,7 @@ class OrderServiceImplTest {
                     .thenReturn(pageResult);
             when(orderItemMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(orderItem));
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(10L);
+            try (var login = SaTokenMockUtil.userLogin(10L)) {
 
                 PageResult<OrderVO> result = orderService.merchantPageOrders(1, 10, null);
 
@@ -694,8 +673,7 @@ class OrderServiceImplTest {
             when(orderMapper.selectById(1L)).thenReturn(pendingOrder);
             when(orderItemMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(orderItem));
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(10L);
+            try (var login = SaTokenMockUtil.userLogin(10L)) {
 
                 OrderVO vo = orderService.merchantGetDetail(1L);
 
@@ -708,8 +686,7 @@ class OrderServiceImplTest {
         void merchantGetDetail_ShouldThrow_WhenNotOwnShop() {
             when(orderMapper.selectById(1L)).thenReturn(pendingOrder);
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(99L);
+            try (var login = SaTokenMockUtil.userLogin(99L)) {
 
                 BusinessException ex = assertThrows(BusinessException.class,
                         () -> orderService.merchantGetDetail(1L));
@@ -722,8 +699,7 @@ class OrderServiceImplTest {
         void merchantDeliver_ShouldSucceed() {
             when(orderMapper.selectById(2L)).thenReturn(paidOrder);
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(10L);
+            try (var login = SaTokenMockUtil.userLogin(10L)) {
 
                 orderService.merchantDeliver(2L, "SF123456789");
 
@@ -739,8 +715,7 @@ class OrderServiceImplTest {
         void merchantDeliver_ShouldThrow_WhenNotOwnShop() {
             when(orderMapper.selectById(2L)).thenReturn(paidOrder);
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(99L);
+            try (var login = SaTokenMockUtil.userLogin(99L)) {
 
                 BusinessException ex = assertThrows(BusinessException.class,
                         () -> orderService.merchantDeliver(2L, "SF123"));
@@ -753,8 +728,7 @@ class OrderServiceImplTest {
         void merchantDeliver_ShouldThrow_WhenNotPaid() {
             when(orderMapper.selectById(1L)).thenReturn(pendingOrder);
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(10L);
+            try (var login = SaTokenMockUtil.userLogin(10L)) {
 
                 BusinessException ex = assertThrows(BusinessException.class,
                         () -> orderService.merchantDeliver(1L, "SF123"));
@@ -767,8 +741,7 @@ class OrderServiceImplTest {
         void merchantDeliver_ShouldThrow_WhenOrderNotFound() {
             when(orderMapper.selectById(99L)).thenReturn(null);
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(10L);
+            try (var login = SaTokenMockUtil.userLogin(10L)) {
 
                 BusinessException ex = assertThrows(BusinessException.class,
                         () -> orderService.merchantDeliver(99L, "SF123"));

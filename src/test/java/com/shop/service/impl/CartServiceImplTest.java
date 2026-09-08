@@ -1,6 +1,6 @@
 package com.shop.service.impl;
 
-import cn.dev33.satoken.stp.StpUtil;
+import com.shop.common.SaTokenMockUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.shop.common.BusinessException;
 import com.shop.mapper.CartMapper;
@@ -88,8 +88,7 @@ class CartServiceImplTest {
         @Test
         @DisplayName("新增商品到购物车：SKU存在且库存充足")
         void addItem_ShouldInsert_WhenSkuValid() {
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(skuMapper.selectById(100L)).thenReturn(validSku);
                 when(cartMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(null);
 
@@ -102,8 +101,7 @@ class CartServiceImplTest {
         @Test
         @DisplayName("添加商品：SKU不存在时抛出异常")
         void addItem_ShouldThrow_WhenSkuNotFound() {
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(skuMapper.selectById(100L)).thenReturn(null);
 
                 BusinessException ex = assertThrows(BusinessException.class,
@@ -116,8 +114,7 @@ class CartServiceImplTest {
         @Test
         @DisplayName("添加商品：已存在则合并数量")
         void addItem_ShouldMergeQuantity_WhenAlreadyInCart() {
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(skuMapper.selectById(100L)).thenReturn(validSku);
                 when(cartMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(existingCart);
 
@@ -133,8 +130,7 @@ class CartServiceImplTest {
         @DisplayName("添加商品：合并后库存不足抛异常")
         void addItem_ShouldThrow_WhenMergeExceedsStock() {
             cartDTO.setQuantity(100); // 合并后 1+100=101 > 50
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(skuMapper.selectById(100L)).thenReturn(validSku);
                 when(cartMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(existingCart);
 
@@ -151,8 +147,7 @@ class CartServiceImplTest {
         void addItem_ShouldThrow_WhenNewExceedsStock() {
             validSku.setStock(1);
             cartDTO.setQuantity(5);
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(skuMapper.selectById(100L)).thenReturn(validSku);
                 when(cartMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(null);
 
@@ -171,8 +166,7 @@ class CartServiceImplTest {
         @Test
         @DisplayName("修改数量成功")
         void updateQuantity_ShouldSucceed() {
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(cartMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(existingCart);
                 when(skuMapper.selectById(100L)).thenReturn(validSku);
 
@@ -186,8 +180,7 @@ class CartServiceImplTest {
         @Test
         @DisplayName("修改数量：购物车中不存在该商品")
         void updateQuantity_ShouldThrow_WhenCartNotFound() {
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(cartMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(null);
 
                 BusinessException ex = assertThrows(BusinessException.class,
@@ -199,8 +192,7 @@ class CartServiceImplTest {
         @Test
         @DisplayName("修改数量：超出库存时抛异常")
         void updateQuantity_ShouldThrow_WhenExceedsStock() {
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(cartMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(existingCart);
                 when(skuMapper.selectById(100L)).thenReturn(validSku);
 
@@ -218,8 +210,7 @@ class CartServiceImplTest {
         @Test
         @DisplayName("从购物车删除指定SKU")
         void removeItem_ShouldDelete() {
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
 
                 cartService.removeItem(100L);
 
@@ -235,8 +226,7 @@ class CartServiceImplTest {
         @Test
         @DisplayName("选中商品")
         void checkItem_ShouldCheck() {
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(cartMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(existingCart);
 
                 cartService.checkItem(100L, true);
@@ -249,8 +239,7 @@ class CartServiceImplTest {
         @Test
         @DisplayName("取消选中")
         void checkItem_ShouldUncheck() {
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(cartMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(existingCart);
 
                 cartService.checkItem(100L, false);
@@ -263,8 +252,7 @@ class CartServiceImplTest {
         @Test
         @DisplayName("选中/取消选中：购物车中不存在该商品")
         void checkItem_ShouldThrow_WhenCartNotFound() {
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(cartMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(null);
 
                 BusinessException ex = assertThrows(BusinessException.class,
@@ -290,8 +278,7 @@ class CartServiceImplTest {
             cartItem.setChecked(1);
             cartItem.setIsOrdered(0);
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(cartMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(cartItem));
                 when(skuMapper.selectById(100L)).thenReturn(validSku);
                 when(productMapper.selectById(10L)).thenReturn(product);
@@ -319,8 +306,7 @@ class CartServiceImplTest {
             cartItem.setQuantity(2);
             cartItem.setChecked(1);
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(cartMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(cartItem));
                 when(skuMapper.selectById(999L)).thenReturn(null);
 
@@ -342,8 +328,7 @@ class CartServiceImplTest {
             cartItem.setQuantity(5);
             cartItem.setChecked(1);
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(cartMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(cartItem));
                 when(skuMapper.selectById(100L)).thenReturn(validSku);
 
@@ -357,8 +342,7 @@ class CartServiceImplTest {
         @Test
         @DisplayName("获取购物车列表：仅返回未下单的商品")
         void list_ShouldOnlyReturnNotOrdered() {
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
+            try (var login = SaTokenMockUtil.userLogin(1L)) {
                 when(cartMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
 
                 List<CartVO> result = cartService.list();

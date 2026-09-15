@@ -1,4 +1,4 @@
-import { post } from './request'
+import { get, post } from './request'
 import type { Result } from './types'
 
 /** 商品卡片（Phase 3：客服推荐商品卡片，点击新标签打开详情） */
@@ -13,7 +13,7 @@ export interface ProductCard {
 
 /** SSE 流式数据帧（后端 /api/chat/ask） */
 export interface ChatStreamFrame {
-  type: 'token' | 'products' | 'end' | 'error'
+  type: 'token' | 'products' | 'route' | 'end' | 'error'
   content?: string | ProductCard[]
 }
 
@@ -21,6 +21,7 @@ export interface ChatStreamFrame {
 export interface ChatCallbacks {
   onToken?: (content: string) => void
   onProducts?: (products: ProductCard[]) => void
+  onRoute?: (route: string) => void
   onEnd?: () => void
   onError?: (msg: string) => void
 }
@@ -35,7 +36,8 @@ export function postAsk(
   onToken?: (content: string) => void,
   onEnd?: () => void,
   onError?: (msg: string) => void,
-  onProducts?: (products: ProductCard[]) => void
+  onProducts?: (products: ProductCard[]) => void,
+  onRoute?: (route: string) => void
 ): Promise<void> {
   const token = localStorage.getItem('token')
   const baseURL = import.meta.env.VITE_API_BASE || ''
@@ -87,7 +89,10 @@ export function postAsk(
                 if (parsed.type === 'token') {
                   onToken?.(typeof parsed.content === 'string' ? parsed.content : '')
                 } else if (parsed.type === 'products') {
-                  onProducts?.(Array.isArray(parsed.content) ? parsed.content : [])
+                  // 后端 products content 是 JSON 数组字符串（如 "[{...}]"），需二次 parse 成数组
+                  onProducts?.(normalizeProducts(parsed.content))
+                } else if (parsed.type === 'route') {
+                  onRoute?.(typeof parsed.content === 'string' ? parsed.content : '')
                 } else if (parsed.type === 'error') {
                   onError?.(typeof parsed.content === 'string' ? parsed.content : '')
                 } else if (parsed.type === 'end') {
@@ -112,6 +117,34 @@ export function postAsk(
       reject(err)
     })
   })
+}
+
+/** 商品卡片 content 归一化：后端传 JSON 数组字符串，可能为数组或字符串，统一转 ProductCard[] */
+function normalizeProducts(content: string | ProductCard[] | undefined): ProductCard[] {
+  if (Array.isArray(content)) return content
+  if (typeof content === 'string' && content.trim()) {
+    try {
+      const arr = JSON.parse(content)
+      return Array.isArray(arr) ? (arr as ProductCard[]) : []
+    } catch {
+      return []
+    }
+  }
+  return []
+}
+
+/** 后端历史消息记录（chat_message 表） */
+export interface ChatHistoryMessage {
+  id?: string
+  role: 'user' | 'assistant'
+  content?: string | null
+  ragContext?: string | null
+  createTime?: string | null
+}
+
+/** 拉取会话历史消息（刷新后恢复对话用） */
+export function getConversationMessages(conversationId: string): Promise<Result<ChatHistoryMessage[]>> {
+  return get<ChatHistoryMessage[]>('/chat/conversations/' + conversationId + '/messages')
 }
 
 /** 清除对话历史 */

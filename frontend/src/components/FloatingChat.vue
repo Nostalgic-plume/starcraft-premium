@@ -57,6 +57,9 @@
           </div>
         </div>
 
+        <!-- 意图路由状态条（route 事件：显示当前意图流程） -->
+        <div v-if="routeText" class="chat-route-chip">{{ routeText }}</div>
+
         <!-- 消息列表 -->
         <div class="chat-messages" ref="messagesRef">
           <div v-if="messages.length === 0" class="chat-welcome">
@@ -102,38 +105,41 @@
               </svg>
             </div>
             <div class="message-bubble">
+              <!-- 生成中：三点占位（A 方案无逐字打字机，回复完成后一次性渲染图文穿插） -->
               <div v-if="msg.loading && !msg.content" class="message-loading">
                 <span class="dot-pulse"></span>
                 <span class="dot-pulse"></span>
                 <span class="dot-pulse"></span>
+                <span class="loading-hint">小星正在输入…</span>
               </div>
-              <div v-else-if="msg.loading && msg.content" class="message-content streaming" v-html="renderContent(msg.content)"></div>
+
+              <!-- 有推荐商品：回复完成 → 按 [n] 拆成 文字段↔商品图块 穿插渲染 -->
+              <template v-else-if="msg.products && msg.products.length">
+                <template v-for="(b, bi) in splitIntoBlocks(msg.content, msg.products)" :key="bi">
+                  <div v-if="b.t === 'text' && b.x" class="message-content" v-html="renderContent(b.x)"></div>
+                  <div v-else-if="b.t === 'img' && b.p" class="ai-product" @click="openProduct(b.p.productId)">
+                    <span class="ai-product-index">{{ b.i }}</span>
+                    <img
+                      class="ai-product-img"
+                      :src="b.p.image || placeholderImg"
+                      :alt="b.p.name"
+                      loading="lazy"
+                      @error="onImgError"
+                    />
+                    <div class="ai-product-info">
+                      <div class="ai-product-name">{{ b.p.name }}</div>
+                      <div class="ai-product-price">{{ formatPrice(b.p.minPrice, b.p.maxPrice) }}</div>
+                    </div>
+                    <span class="ai-product-go">查看 ›</span>
+                  </div>
+                </template>
+              </template>
+
+              <!-- 无商品推荐：普通文本 -->
               <div v-else class="message-content" v-html="renderContent(msg.content)"></div>
             </div>
           </div>
 
-          <!-- Phase 3：推荐商品卡片（跟随最后回复，点击新标签打开详情） -->
-          <div v-if="recommendProducts.length" class="product-cards">
-            <div
-              v-for="(p, idx) in recommendProducts"
-              :key="p.productId"
-              class="product-card"
-              @click="openProduct(p.productId)"
-            >
-              <span class="product-card-index">{{ idx + 1 }}</span>
-              <img
-                class="product-card-img"
-                :src="p.image || placeholderImg"
-                :alt="p.name"
-                @error="onImgError"
-              />
-              <div class="product-card-info">
-                <div class="product-card-name">{{ p.name }}</div>
-                <div class="product-card-price">{{ formatPrice(p.minPrice, p.maxPrice) }}</div>
-                <div v-if="p.excerpt" class="product-card-excerpt">{{ p.excerpt }}</div>
-              </div>
-            </div>
-          </div>
         </div>
 
         <!-- 输入区 -->
@@ -165,7 +171,7 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
-import { postAsk, clearConversation, type ProductCard } from '@/api/chat'
+import { postAsk, clearConversation, getConversationMessages, type ProductCard } from '@/api/chat'
 
 /** 聊天消息 */
 interface ChatMessage {
@@ -173,6 +179,7 @@ interface ChatMessage {
   content: string
   loading: boolean
   isRead: boolean
+  products?: ProductCard[]  // 本轮 AI 推荐商品卡（豆包式：随该条回复展示，编号对应文中 [n]）
 }
 
 // 生成会话ID（持久化到 SessionStorage）。
@@ -188,9 +195,9 @@ const conversationId = sessionStorage.getItem('chat_conv_id') || (() => {
 
 const visible = ref(false)
 const messages = ref<ChatMessage[]>([])
-const recommendProducts = ref<ProductCard[]>([])  // Phase 3：本轮推荐的商品卡片
 const inputText = ref('')
 const loading = ref(false)
+const routeText = ref('')  // 意图路由状态条（route 事件：order_cancel/order_query/product）
 const unreadCount = ref(0)
 const messagesRef = ref<HTMLElement | null>(null)
 const inputRef = ref<HTMLInputElement | null>(null)
@@ -251,10 +258,38 @@ function openChat() {
   }
   visible.value = true
   unreadCount.value = 0
+  loadHistoryIfNeeded()
   nextTick(() => {
     scrollToBottom()
     inputRef.value?.focus()
   })
+}
+
+// 会话历史是否已加载过（刷新后首次打开拉取一次；主动清空/正在对话不再拉，避免覆盖）
+let historyLoaded = false
+async function loadHistoryIfNeeded() {
+  if (historyLoaded || messages.value.length > 0) return
+  historyLoaded = true
+  try {
+    const res = await getConversationMessages(conversationId)
+    const list = res?.data
+    if (!Array.isArray(list) || list.length === 0) return
+    const restored: ChatMessage[] = []
+    for (const m of list) {
+      if ((m.role !== 'user' && m.role !== 'assistant') || m.content == null) continue
+      const base: ChatMessage = { role: m.role, content: m.content, loading: false, isRead: true }
+      // assistant 消息的 ragContext 存了本轮回推荐商品卡 JSON，刷新后据此恢复卡片
+      if (m.role === 'assistant' && m.ragContext) {
+        const prods = parseHistoryProducts(m.ragContext)
+        if (prods.length) base.products = prods
+      }
+      restored.push(base)
+    }
+    messages.value = restored
+    scrollToBottom()
+  } catch {
+    // 历史加载失败静默处理，不影响客服打开
+  }
 }
 
 function closeChat() {
@@ -338,7 +373,6 @@ function sendMessage(text: string) {
   inputText.value = ''
 
   // Phase 3：每轮新消息清空上一轮商品卡片
-  recommendProducts.value = []
 
   // 添加用户消息
   addMessage('user', text)
@@ -352,39 +386,49 @@ function sendMessage(text: string) {
   postAsk(
     text,
     conversationId,
-    // onToken
+    // onToken（A 方案：仅累积 token，不做逐字打字机；回复完成后一次性渲染图文穿插成品）
     (token) => {
       fullContent += token
-      const last = messages.value[messages.value.length - 1]
-      if (last && last.loading) {
-        last.content = fullContent
-        scrollToBottom()
-      }
     },
-    // onEnd
+    // onEnd：回复完成，一次性写入完整内容触发图文穿插渲染
     () => {
       const last = messages.value[messages.value.length - 1]
       if (last) {
+        last.content = fullContent
         last.loading = false
         last.isRead = false
       }
       loading.value = false
+      routeText.value = ''
       scrollToBottom()
     },
-    // onError
+    // onError：保留已生成部分，异常信息兜底
     (err) => {
       const last = messages.value[messages.value.length - 1]
-      if (last && last.loading) {
-        last.content = err || '抱歉，服务出错了，请稍后重试'
+      if (last) {
+        last.content = fullContent || err || '抱歉，服务出错了，请稍后重试'
         last.loading = false
       }
       loading.value = false
+      routeText.value = ''
       scrollToBottom()
     },
-    // onProducts（Phase 3：接收推荐商品卡片）
+    // onProducts（豆包式：卡片绑定到本轮最后一条 AI 回复，随消息展示）
     (products) => {
-      recommendProducts.value = products
+      const last = messages.value[messages.value.length - 1]
+      if (last && last.role === 'assistant') {
+        last.products = products
+      }
       scrollToBottom()
+    },
+    // onRoute（意图路由状态条：取消订单/查订单/找商品）
+    (route) => {
+      const label: Record<string, string> = {
+        order_cancel: '正在为您处理取消订单',
+        order_query: '正在为您查询订单',
+        product: '正在为您挑选商品'
+      }
+      routeText.value = label[route] || ''
     }
   )
 }
@@ -417,6 +461,48 @@ function formatPrice(min?: number | null, max?: number | null): string {
 /** 点击卡片：新标签打开商品详情页（C14，保留当前对话，AI 客服可继续使用） */
 function openProduct(productId: string) {
   window.open(`/product/${productId}`, '_blank')
+}
+
+/** 解析历史 assistant 消息 ragContext 中的商品卡 JSON（后端存的是 buildProductsJson 数组结构） */
+function parseHistoryProducts(rag: string): ProductCard[] {
+  try {
+    const arr = JSON.parse(rag)
+    return Array.isArray(arr) ? (arr as ProductCard[]) : []
+  } catch {
+    return []
+  }
+}
+
+/** A 方案：把 AI 回复按 [n] 引用拆成「文字段 ↔ 商品图块」穿插序列，实现图文一一对应 */
+function splitIntoBlocks(
+  text: string,
+  products: ProductCard[]
+): Array<{ t: 'text'; x: string } | { t: 'img'; i: number; p: ProductCard }> {
+  const blocks: Array<{ t: 'text'; x: string } | { t: 'img'; i: number; p: ProductCard }> = []
+  if (!text) return blocks
+  // 按 [1] [2] 标记切分：引用标记位置 → 之前文字成段，随后插该商品图块（编号只标在图上，文字里剔除）
+  const parts = text.split(/(\[\d+\])/)
+  let buf = ''
+  const seen = new Set<number>()
+  for (const part of parts) {
+    const m = /^\[\d+\]$/.exec(part.trim())
+    if (m) {
+      const idx = Number(part.trim().slice(1, -1))
+      const prod = products[idx - 1]
+      if (buf.trim()) {
+        blocks.push({ t: 'text', x: buf })
+        buf = ''
+      }
+      if (prod && !seen.has(idx)) {
+        seen.add(idx)
+        blocks.push({ t: 'img', i: idx, p: prod })
+      }
+      continue
+    }
+    buf += part
+  }
+  if (buf.trim()) blocks.push({ t: 'text', x: buf })
+  return blocks
 }
 
 function clearChat() {
@@ -570,6 +656,17 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
 }
 .header-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
 
+/* ====== 意图路由状态条 ====== */
+.chat-route-chip {
+  padding: 6px 16px;
+  font-size: 12px;
+  color: var(--ds-coral, #e94560);
+  background: rgba(233, 69, 96, 0.08);
+  border-bottom: 1px solid rgba(233, 69, 96, 0.12);
+  text-align: center;
+  flex-shrink: 0;
+}
+
 /* ====== 消息列表 ====== */
 .chat-messages {
   flex: 1;
@@ -662,7 +759,127 @@ watch(messages, () => { scrollToBottom() }, { deep: true })
   word-break: break-word;
 }
 
-/* ====== Phase 3：推荐商品卡片 ====== */
+/* ====== 豆包式：气泡内推荐商品卡（随 AI 回复，编号对应文中 [n]）====== */
+.bubble-products {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(26, 26, 46, 0.1);
+  overflow-x: auto;
+}
+.bubble-product {
+  position: relative;
+  flex: 0 0 auto;
+  width: 104px;
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: box-shadow 0.2s, transform 0.2s;
+}
+.bubble-product:hover {
+  box-shadow: 0 3px 10px rgba(26, 26, 46, 0.14);
+  transform: translateY(-1px);
+}
+.bubble-product-index {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 1;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: var(--ds-coral, #e94560);
+  color: #fff;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+}
+.bubble-product-img {
+  width: 100%;
+  height: 78px;
+  object-fit: cover;
+  background: #f0f0f0;
+}
+.bubble-product-name {
+  padding: 4px 6px 0;
+  font-size: 12px;
+  line-height: 1.3;
+  color: #333;
+  min-height: 31px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.bubble-product-price {
+  padding: 2px 6px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ds-coral, #e94560);
+}
+
+/* ====== A 方案：穿插在文字段之间的商品图块（单行大图条，图文一一对应）====== */
+.ai-product {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  cursor: pointer;
+  position: relative;
+  transition: box-shadow 0.2s;
+}
+.ai-product:hover { box-shadow: 0 2px 8px rgba(26, 26, 46, 0.12); }
+.ai-product-index {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 1;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: var(--ds-coral, #e94560);
+  color: #fff;
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+}
+.ai-product-img {
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #f0f0f0;
+  flex-shrink: 0;
+}
+.ai-product-info { flex: 1; min-width: 0; }
+.ai-product-name {
+  font-size: 13px;
+  color: #222;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ai-product-price {
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ds-coral, #e94560);
+}
+.ai-product-go { flex-shrink: 0; color: #999; font-size: 12px; }
+.loading-hint { margin-left: 8px; font-size: 12px; color: #aaa; }
+
+/* ====== 历史遗留：旧版底部卡片样式（无引用，保留避免回归）====== */
 .product-cards {
   display: flex;
   flex-direction: column;

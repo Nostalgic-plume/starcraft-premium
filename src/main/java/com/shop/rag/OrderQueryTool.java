@@ -12,26 +12,28 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 /**
- * AI 客服订单查询工具（Function Calling）
+ * 订单查询工具（只读，Function Calling）
  * <p>
- * 供 LangChain4j AiServices 注册的工具类。设计约束：
+ * 供通用对话 agent（AiServices）注册的<b>只读</b>工具，仅含查询能力，<b>不含任何写操作</b>。
+ * 写操作（取消订单）不暴露给任何 agent，只能进入受控的 {@code CancelOrderWorkflow} 确定性执行——
+ * 这是「防止 agent 乱操作」的架构落点：LLM 手里永远没有写工具，无法在普通对话里被诱导触发取消。
+ * </p>
  * <ul>
- *   <li><b>身份显式绑定</b>：userId 由构造器传入（每请求 new 一个实例），绝不接收 LLM 生成的 userId，
- *       归属校验在 {@link OrderService} 层强制（安全边界），本类只做「调用 Service + 组装人话」。</li>
- *   <li><b>返回人话化</b>：返回给 LLM 的是可直接引用的中文文本，不返回 DO/JSON（省 token、防截断）。</li>
+ *   <li><b>身份显式绑定</b>：userId 由构造器传入（每请求 new），绝不接收 LLM 生成的 userId；
+ *       归属校验在 {@link OrderService} 层强制（安全边界）。</li>
+ *   <li><b>返回人话化</b>：返回给 LLM 的是可直接引用的中文文本，不返回 DO/JSON。</li>
  *   <li><b>异常兜底</b>：任何异常 catch 后返回可读降级文案，不抛未捕获异常（避免断 SSE）。</li>
- *   <li><b>只读</b>：V1 仅查询，不做写操作。</li>
  * </ul>
  *
  * @author shop
  */
 @Slf4j
-public class OrderTool {
+public class OrderQueryTool {
 
     private final Long userId;
     private final OrderService orderService;
 
-    public OrderTool(Long userId, OrderService orderService) {
+    public OrderQueryTool(Long userId, OrderService orderService) {
         this.userId = userId;
         this.orderService = orderService;
     }
@@ -115,38 +117,8 @@ public class OrderTool {
     }
 
     /**
-     * 取消当前登录用户的待支付订单（写操作）
-     *
-     * @param orderId 订单编号（用户下单后收到的订单号）
-     * @return 人话化的取消结果文本
-     */
-    @Tool("取消当前登录用户自己的待支付订单（写操作）。仅当用户明确要求取消，且已先用 getOrderStatus 确认订单存在并待支付、用户明确确认后才调用；取消后库存自动回滚。")
-    public String cancelOrder(@P(name = "orderId", description = "待取消的订单编号，用户下单后收到的订单号") String orderId) {
-        Long orderIdLong = parseOrderId(orderId);
-        if (orderIdLong == null) {
-            return "订单编号无效，请确认后重试";
-        }
-        try {
-            orderService.cancelOrderByUserId(orderIdLong, userId);
-            return "订单 " + orderIdLong + " 已成功取消";
-        } catch (BusinessException e) {
-            String msg = e.getMessage();
-            // 归属/存在校验失败统一返回固定文案（写操作安全边界，防订单号枚举探测）
-            if ("订单不存在".equals(msg) || "无权操作该订单".equals(msg)) {
-                return "该订单不存在或不属于您";
-            }
-            // 状态不允许等 → 返回具体文案（幂等：重复取消友好提示）
-            return msg;
-        } catch (Exception e) {
-            log.warn("cancelOrder 工具执行异常, orderId={}, userId={}", orderId, userId, e);
-            return "订单服务暂时不可用，请稍后再试";
-        }
-    }
-
-    /**
-     * 订单号字符串 → Long；非法/超范围（如超出 Long.MAX_VALUE 的 9999999999999999999）返回 null
-     * 工具参数用 String（而非 Long）的原因：AiServices 的 DefaultToolExecutor 对超范围 Long 参数
-     * 在工具方法执行前抛 IllegalArgumentException（不走工具内 catch），会导致整轮对话 onError。
+     * 订单号字符串 → Long；非法/超范围返回 null（工具参数用 String 而非 Long，
+     * 规避 AiServices 对超范围 Long 参数在工具方法执行前抛异常导致整轮 onError）
      */
     private static Long parseOrderId(String orderId) {
         if (orderId == null || orderId.isBlank()) {

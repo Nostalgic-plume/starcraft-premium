@@ -62,6 +62,9 @@ public class ChatService {
     private final ProductMapper productMapper;
     private final MySqlChatMemoryStore mySqlChatMemoryStore;
     private final OrderService orderService;
+    private final ChatIntentResolver chatIntentResolver;
+    private final CancelOrderWorkflow cancelOrderWorkflow;
+    private final OrderQueryWorkflow orderQueryWorkflow;
 
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
@@ -93,16 +96,9 @@ public class ChatService {
             %s
             =========================
 
-            ## 工具调用规则
-            - 用户查询/操作订单（查订单、取消订单等）时，必须先调用对应工具拿到真实结果后再回答
-            - 不要提前承诺"已取消/已完成"；工具未调用前不要声称操作成功
-            - 不要凭记忆编造订单信息，订单号不存在时如实告知
-            - 取消订单是写操作：调用 cancelOrder 前，必须先用 getOrderStatus 确认订单存在且待支付，并向用户确认一次（如「确认取消订单 #123 吗？」），用户明确确认后才调用
-
-            ## 工具调用示例
-            - 用户说「我的订单到哪了」→ 调 getMyOrders
-            - 用户说「帮我查一下订单 123 的情况」→ 调 getOrderStatus(orderId=123)
-            - 用户说「我不想买了，退了吧」→ 先问订单号，调 getOrderStatus 确认待支付，向用户确认「确认取消订单 #123 吗？」；用户确认后调 cancelOrder
+            ## 订单相关能力
+            - 用户可以查询自己的订单（我的订单/到哪了/买了什么/待收货等）——查订单请基于真实数据回答，不要凭记忆编造订单信息
+            - 取消订单是受控流程（写操作，需用户确认），由系统统一处理：当用户要取消订单时，引导用户直接说出要取消的订单号即可，系统会完成订单校验与二次确认；你不需要、也不能直接取消订单
 
             记住：你是小星，不是机器人。说话要像真人导购。
             """;
@@ -131,6 +127,30 @@ public class ChatService {
                         .maxTokens(TOKEN_BUDGET, new OpenAiTokenCountEstimator("gpt-4o"))
                         .chatMemoryStore(mySqlChatMemoryStore)
                         .build();
+
+                // ===== 意图识别 + 路由（外部 workflow 内部 agent loop 的分层入口）=====
+                // 意图决定走受控 workflow 还是收窄工具后的默认链路；route 事件推给前端显示
+                Intent intent = chatIntentResolver.resolve(userMessage);
+                sendEvent(emitter, "route", intent.code());
+
+                if (intent == Intent.ORDER_CANCEL || intent == Intent.ORDER_QUERY) {
+                    // 订单域意图：进入受控 workflow（订单查询/取消都不走通用 agent 的自由工具池）
+                    WorkflowContext workflowCtx = WorkflowContext.builder()
+                            .conversationId(conversationId)
+                            .userId(userId)
+                            .userMessage(userMessage)
+                            .emitter(emitter)
+                            .objectMapper(objectMapper)
+                            .chatHistoryService(chatHistoryService)
+                            .build();
+                    boolean handled = intent == Intent.ORDER_CANCEL
+                            ? cancelOrderWorkflow.tryHandle(workflowCtx, intent)
+                            : orderQueryWorkflow.tryHandle(workflowCtx, intent);
+                    if (handled) {
+                        return; // workflow 已产出回复并收尾
+                    }
+                    // 未消费：取消=反悔/转话题清 pending；查询=模糊长句 → 落回默认链路（该链路对订单只暴露只读工具）
+                }
 
                 // 3. Query 改写：利用 LLM 补全指代、优化搜索关键词
                 String searchQuery = queryRewriter.rewrite(userMessage, chatMemory.messages());
@@ -166,19 +186,20 @@ public class ChatService {
                 mySqlChatMemoryStore.updateMessages(conversationId, chatMemory.messages());
 
                 // 8.5 Phase 3：RAG 命中时推送商品卡片事件（在首个 token 前，前端渲染商品卡片；
-                //      无命中不推送，前端不留空白卡片）
-                if (hits != null && !hits.isEmpty()) {
-                    sendEvent(emitter, "products", buildProductsJson(hits));
+                //      无命中不推送，前端不留空白卡片）；卡片数据随后随 assistant 消息落库，刷新可恢复
+                String productsJson = (hits != null && !hits.isEmpty()) ? buildProductsJson(hits) : null;
+                if (productsJson != null) {
+                    sendEvent(emitter, "products", productsJson);
                 }
 
                 // 9. 生成层降级链（Phase 5 T5）：
                 //    DeepSeek(带工具) → 熔断 → qwen 纯 RAG 问答(不带工具) → 模板拼检索结果 → 提示不可用
                 if (circuitBreaker.isOpen()) {
                     log.warn("DeepSeek 熔断中 → 降级到 qwen 纯 RAG 问答（不调用工具）");
-                    qwenRagFallback(systemPrompt, productContext, userMessage, conversationId, emitter);
+                    qwenRagFallback(systemPrompt, productContext, userMessage, conversationId, emitter, productsJson);
                 } else {
-                    deepSeekAgentLoop(userId, systemPrompt, productContext, chatMemory,
-                            userMessage, conversationId, emitter);
+                    deepSeekAgentLoop(intent, userId, systemPrompt, productContext, chatMemory,
+                            userMessage, conversationId, emitter, productsJson);
                 }
 
             } catch (Exception e) {
@@ -193,13 +214,18 @@ public class ChatService {
      * 主链路：DeepSeek + AiServices 工具链（agent loop）
      * 熔断挂载：onError → onFailure()（并当场降级 qwen）；onCompleteResponse → onSuccess()
      */
-    private void deepSeekAgentLoop(Long userId, String systemPrompt, String productContext,
+    private void deepSeekAgentLoop(Intent intent, Long userId, String systemPrompt, String productContext,
                                    TokenWindowChatMemory chatMemory, String userMessage,
-                                   String conversationId, SseEmitter emitter) {
+                                   String conversationId, SseEmitter emitter, String productsJson) {
+        // 工具按意图收窄（最小权限）：仅 ORDER_QUERY 暴露只读订单工具；PRODUCT/默认不暴露任何工具。
+        // 写操作（取消订单）已剥离出 agent，只存在于 CancelOrderWorkflow 确定性代码路径。
+        Object[] tools = (intent == Intent.ORDER_QUERY)
+                ? new Object[]{new OrderQueryTool(userId, orderService)}
+                : new Object[0];
         AiAssistant assistant = AiServices.builder(AiAssistant.class)
                 .streamingChatModel(streamingChatModel)
                 .chatMemory(chatMemory)
-                .tools(new OrderTool(userId, orderService))
+                .tools(tools)
                 .maxToolCallingRoundTrips(5)
                 .compensateOnToolErrors(true)
                 // 工具容错（Phase 5 T4）：
@@ -242,13 +268,13 @@ public class ChatService {
                                 conversationId, response.tokenUsage().inputTokenCount(),
                                 response.tokenUsage().outputTokenCount());
                     }
-                    saveAssistantMessage(conversationId, reply);
+                    saveAssistantMessage(conversationId, reply, productsJson);
                     completeSse(emitter, reply);
                 })
                 .onError(error -> {
                     circuitBreaker.onFailure();
                     log.error("DeepSeek 调用失败，当场降级到 qwen 纯 RAG 问答", error);
-                    qwenRagFallback(systemPrompt, productContext, userMessage, conversationId, emitter);
+                    qwenRagFallback(systemPrompt, productContext, userMessage, conversationId, emitter, productsJson);
                 })
                 .start();
     }
@@ -258,7 +284,8 @@ public class ChatService {
      * qwen 也失败 → templateFallback（无 LLM 模板拼检索结果）
      */
     private void qwenRagFallback(String systemPrompt, String productContext,
-                                 String userMessage, String conversationId, SseEmitter emitter) {
+                                 String userMessage, String conversationId, SseEmitter emitter,
+                                 String productsJson) {
         try {
             List<ChatMessage> messages = new ArrayList<>();
             messages.add(new SystemMessage(systemPrompt));
@@ -281,40 +308,43 @@ public class ChatService {
                                 conversationId, response.tokenUsage().inputTokenCount(),
                                 response.tokenUsage().outputTokenCount());
                     }
-                    saveAssistantMessage(conversationId, reply);
+                    saveAssistantMessage(conversationId, reply, productsJson);
                     completeSse(emitter, reply);
                 }
 
                 @Override
                 public void onError(Throwable error) {
                     log.warn("qwen 备用模型也失败，降级到模板拼检索结果", error);
-                    templateFallback(productContext, conversationId, emitter);
+                    templateFallback(productContext, conversationId, emitter, productsJson);
                 }
             });
         } catch (Exception e) {
             log.warn("qwen 备用模型异常，降级到模板拼检索结果", e);
-            templateFallback(productContext, conversationId, emitter);
+            templateFallback(productContext, conversationId, emitter, productsJson);
         }
     }
 
     /**
      * 最底层降级：无 LLM，把检索结果用模板拼成文本直接返回（AI 挂了客服不崩）
      */
-    private void templateFallback(String productContext, String conversationId, SseEmitter emitter) {
+    private void templateFallback(String productContext, String conversationId, SseEmitter emitter,
+                                  String productsJson) {
         String reply = (productContext != null && !productContext.isBlank())
                 ? "抱歉，AI 暂时不可用，以下相关商品供您参考：\n" + productContext
                 : "抱歉，AI 暂时不可用，请稍后再试";
-        saveAssistantMessage(conversationId, reply);
+        saveAssistantMessage(conversationId, reply, productsJson);
         sendEvent(emitter, "end", reply);
         completeSse(emitter, reply);
     }
 
     /** 保存 AI 回复到 MySQL + 首次对话自动生成标题（主链路与降级链路共用） */
-    private void saveAssistantMessage(String conversationId, String reply) {
+    private void saveAssistantMessage(String conversationId, String reply, String productsJson) {
         ChatMessageDO aiMsgDO = new ChatMessageDO();
         aiMsgDO.setConversationId(Long.valueOf(conversationId));
         aiMsgDO.setRole("assistant");
         aiMsgDO.setContent(reply);
+        // 商品卡数据随 assistant 消息落 ragContext，前端刷新后据此恢复卡片
+        aiMsgDO.setRagContext(productsJson);
         chatHistoryService.saveMessage(aiMsgDO);
 
         boolean isFirstMessage = chatHistoryService.listMessages(Long.valueOf(conversationId)).size() <= 2;

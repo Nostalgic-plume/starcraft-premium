@@ -283,10 +283,23 @@ INTERNAL_API_KEY=
 """
 
 import os
+import re
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 # 必须在导入 app.config 之前备好必填项 —— app.config 在模块级实例化 Settings(),
 # 缺 DB_PASSWORD 会直接抛 ValidationError,导致测试收集阶段就报错。
-os.environ.setdefault("DB_PASSWORD", "test-password")
+# ⚠️ 仅在环境变量与本仓 .env 都拿不到 DB_PASSWORD 时才兜底:环境变量优先级高于 .env,
+# 无条件写入占位符会把 .env 里的真实密码盖掉,连库测试会全部因认证失败而 skipped
+# —— 那种"全绿但全 skip"的假成功比失败更危险。
+_DOTENV = PROJECT_ROOT / ".env"
+_HAS_DOTENV_PASSWORD = bool(
+    _DOTENV.exists()
+    and re.search(r"^DB_PASSWORD=.+$", _DOTENV.read_text(encoding="utf-8"), re.M)
+)
+if not _HAS_DOTENV_PASSWORD:
+    os.environ.setdefault("DB_PASSWORD", "test-password")
 ```
 
 - [ ] **Step 7: 安装依赖并运行测试**
@@ -844,14 +857,21 @@ class ConversationOwnershipError(Exception):
 async def get_conversation(
     session: AsyncSession, conversation_id: int
 ) -> ChatConversation | None:
-    return await session.get(ChatConversation, conversation_id)
+    """按 id 取会话;逻辑删除的行视为不存在(对齐 Java 侧 @TableLogic 语义)。"""
+    result = await session.execute(
+        select(ChatConversation).where(
+            ChatConversation.id == conversation_id,
+            ChatConversation.deleted == 0,
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 async def get_or_create_conversation(
     session: AsyncSession, conversation_id: int, user_id: int
 ) -> ChatConversation:
     """取会话,不存在则创建。存在时强制校验归属。"""
-    conv = await session.get(ChatConversation, conversation_id)
+    conv = await get_conversation(session, conversation_id)
 
     if conv is not None:
         if conv.user_id != user_id:
@@ -894,7 +914,7 @@ async def update_conversation_title(
     if len(title) > TITLE_MAX_LENGTH:
         title = title[:TITLE_MAX_LENGTH] + "..."
 
-    conv = await session.get(ChatConversation, conversation_id)
+    conv = await get_conversation(session, conversation_id)
     if conv is not None:
         conv.title = title
         await session.flush()
@@ -920,7 +940,7 @@ async def list_user_conversations(
 async def touch_conversation(
     session: AsyncSession, conversation_id: int, at: datetime
 ) -> None:
-    conv = await session.get(ChatConversation, conversation_id)
+    conv = await get_conversation(session, conversation_id)
     if conv is not None:
         conv.update_time = at
         await session.flush()

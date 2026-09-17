@@ -3,7 +3,7 @@
 # Sqoop 增量导入 — MySQL shop → Hive ODS
 # 处理 5 张增量表，并行执行（MAX_PARALLEL=3）
 # =========================================================
-source "$(dirname "$0")/common.properties"
+source "$(dirname "$0")/load_common.sh"
 
 dt="${1:-$(date -d '-1 day' +%F)}"
 today=$(date -d "${dt} +1 day" +%F)

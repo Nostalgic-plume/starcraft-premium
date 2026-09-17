@@ -10,7 +10,7 @@
 # =========================================================
 
 set -e
-source "$(dirname "$0")/common.properties"
+source "$(dirname "$0")/load_common.sh"
 
 target_dt="${1:-$(date -d '-1 day' +%F)}"
 # 往前推 7 天作为起始日期

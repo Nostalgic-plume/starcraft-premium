@@ -1,0 +1,29 @@
+# =========================================================
+# 数仓 ETL 通用配置（模板）
+#
+# 使用方法：复制本文件为同目录下的 common.properties 并填写真实值。
+# common.properties 已加入 .gitignore，不会入库 —— 明文密码禁止提交。
+#
+# 上传 Azkaban 前请将 MYSQL_HOST / ADS_HOST 改为宿主机 IP（虚拟机可访问的地址）
+# 也可不改文件，改用环境变量注入：脚本优先读取已 export 的同名环境变量。
+# =========================================================
+
+# MySQL 业务库（shop）
+MYSQL_HOST=<宿主机IP>
+MYSQL_PORT=3306
+MYSQL_DB=shop
+MYSQL_USER=<数据库用户名>
+MYSQL_PASS=<数据库密码>
+
+# MySQL 数仓库（shop_ads）
+ADS_HOST=<宿主机IP>
+ADS_PORT=3306
+ADS_DB=shop_ads
+ADS_USER=<数据库用户名>
+ADS_PASS=<数据库密码>
+
+# Hive 数据库名
+HIVE_ODS=ods
+HIVE_DWD=dwd
+HIVE_DWS=dws
+HIVE_ADS=ads

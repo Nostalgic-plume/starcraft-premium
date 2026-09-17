@@ -23,10 +23,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
-import java.net.HttpURLConnection;
-import java.net.URI;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -47,43 +44,35 @@ public class ProductIndexer {
     private final QdrantEmbeddingStore embeddingStore;
     private final QdrantCollectionHelper qdrantCollectionHelper;
 
-    /** productId → Qdrant pointId 映射，用于删除时定位 */
-    private final ConcurrentHashMap<Long, String> pointIdMap = new ConcurrentHashMap<>();
-
-    /** 索引统计 */
-    private volatile int indexedCount = 0;
+    /** 最后一次全量重建时间（毫秒时间戳，0 表示未重建） */
     private volatile long lastRebuildTime = 0;
+
+    /**
+     * 计算商品的确定性 Qdrant point id
+     * <p>
+     * 直接以 productId 作为点 id：写入天然具备 upsert 语义（同 id 覆盖），删除不再依赖任何进程内状态。
+     * LangChain4j 的 QdrantEmbeddingStore.toPointId 会把纯数字字符串解析为 Qdrant 的 uint64 点 id。
+     *
+     * @param productId 商品 ID（不可为 null）
+     * @return Qdrant 点 id
+     */
+    private static String pointIdOf(Long productId) {
+        return String.valueOf(productId);
+    }
 
     /** 详情文本最大长度（embedding 单条 token 上限防护，超长截断） */
     private static final int MAX_DETAIL_LENGTH = 500;
 
     /**
-     * 检查 Qdrant 集合是否已有向量数据
+     * 统计 Qdrant 集合中已索引的商品数量
+     * <p>
+     * 统一委托 {@link QdrantCollectionHelper} 访问 Qdrant（集合名取自配置），避免在此硬编码集合名；
+     * 同时用于启动时判断是否需要全量重建。
+     *
+     * @return 集合内 point 数量；Qdrant 不可用时返回 0
      */
-    private boolean hasExistingData() {
-        try {
-            URI uri = URI.create("http://localhost:6333/collections/products");
-            HttpURLConnection conn = (HttpURLConnection) uri.toURL().openConnection();
-            conn.setRequestMethod("GET");
-            conn.setConnectTimeout(3000);
-            conn.setReadTimeout(3000);
-
-            int code = conn.getResponseCode();
-            if (code != 200) {
-                conn.disconnect();
-                return false;
-            }
-
-            // 解析 JSON 获取 points_count
-            byte[] bytes = conn.getInputStream().readAllBytes();
-            conn.disconnect();
-            String json = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
-            return json.contains("\"points_count\":")
-                    && !json.contains("\"points_count\":0");
-        } catch (Exception e) {
-            log.warn("检查 Qdrant 集合状态失败: {}", e.getMessage());
-            return false;
-        }
+    private int countIndexedPoints() {
+        return (int) qdrantCollectionHelper.countPoints();
     }
 
     /**
@@ -101,7 +90,7 @@ public class ProductIndexer {
     @EventListener(ApplicationReadyEvent.class)
     public void rebuildAll() {
         // 检查 Qdrant 是否已有数据，有则跳过全量重建
-        if (hasExistingData()) {
+        if (countIndexedPoints() > 0) {
             log.info("Qdrant 集合已有向量数据，跳过索引重建");
             return;
         }
@@ -122,7 +111,6 @@ public class ProductIndexer {
     private void doRebuild() {
         log.info("===== 开始全量重建商品向量索引 =====");
         long start = System.currentTimeMillis();
-        pointIdMap.clear();
 
         // 清理并重建 Qdrant 集合
         recreateCollection();
@@ -135,7 +123,6 @@ public class ProductIndexer {
 
         if (CollUtil.isEmpty(products)) {
             log.info("没有上架商品，跳过索引构建");
-            indexedCount = 0;
             lastRebuildTime = System.currentTimeMillis();
             return;
         }
@@ -162,11 +149,15 @@ public class ProductIndexer {
         }
 
         // 校验：跳过空向量（嵌入服务未就绪时可能返回 0 维向量）
+        // 注意：ids / embeddings / segments 必须严格一一对应，过滤后不可再回查 products 下标
+        List<String> validIds = new ArrayList<>();
         List<Embedding> validEmbeddings = new ArrayList<>();
         List<TextSegment> validSegments = new ArrayList<>();
         for (int i = 0; i < embeddings.size(); i++) {
-            if (embeddings.get(i).vector() != null && embeddings.get(i).vector().length > 0) {
-                validEmbeddings.add(embeddings.get(i));
+            Embedding embedding = embeddings.get(i);
+            if (embedding.vector() != null && embedding.vector().length > 0) {
+                validIds.add(pointIdOf(products.get(i).getId()));
+                validEmbeddings.add(embedding);
                 validSegments.add(segments.get(i));
             } else {
                 log.warn("商品 '{}' 向量化为空，跳过索引", products.get(i).getName());
@@ -175,21 +166,16 @@ public class ProductIndexer {
 
         if (validEmbeddings.isEmpty()) {
             log.warn("所有商品向量化结果均为空，请检查嵌入服务是否正常运行");
-            indexedCount = 0;
             lastRebuildTime = System.currentTimeMillis();
             return;
         }
 
-        // 批量存入 Qdrant，记录返回的 pointId
-        List<String> pointIds = embeddingStore.addAll(validEmbeddings, validSegments);
-        for (int i = 0; i < products.size() && i < pointIds.size(); i++) {
-            pointIdMap.put(products.get(i).getId(), pointIds.get(i));
-        }
+        // 批量写入 Qdrant：点 id = productId，同 id 重复写入即为覆盖，无需记录返回值
+        embeddingStore.addAll(validIds, validEmbeddings, validSegments);
 
-        indexedCount = products.size();
         lastRebuildTime = System.currentTimeMillis();
         long elapsed = System.currentTimeMillis() - start;
-        log.info("===== 商品向量索引完成: {} 条, 耗时 {}ms =====", indexedCount, elapsed);
+        log.info("===== 商品向量索引完成: {} 条, 耗时 {}ms =====", validIds.size(), elapsed);
 
         // 联动重建 MySQL FULLTEXT 索引
         rebuildFulltextIndex();
@@ -244,37 +230,36 @@ public class ProductIndexer {
         // 查询该商品 SKU 价格
         BigDecimal[] prices = loadProductPrice(product.getId());
 
-        // 移除旧索引
-        remove(product.getId());
-
-        // 构建 embedding 并存储
+        // 构建 embedding 并以确定性 point id 写入：同 id 覆盖，天然幂等，无需先删旧点
         TextSegment segment = buildTextSegment(product, prices);
         Embedding embedding = embeddingModel.embed(segment.text()).content();
         if (embedding.vector() == null || embedding.vector().length == 0) {
             log.warn("商品 '{}' 向量化为空，跳过索引更新", product.getName());
             return;
         }
-        String pointId = embeddingStore.add(embedding, segment);
-        pointIdMap.put(product.getId(), pointId);
-        indexedCount++;
+        embeddingStore.addAll(List.of(pointIdOf(product.getId())), List.of(embedding), List.of(segment));
         log.debug("商品索引更新完成, productId: {}", product.getId());
     }
 
     /**
      * 删除商品索引
+     * <p>
+     * 点 id 由 productId 决定，无需任何进程内映射，进程重启后依然能准确删除，
+     * 避免下架商品残留为可被检索到的幽灵索引。
+     *
+     * @param productId 商品 ID
      */
     public void remove(Long productId) {
-        String pointId = pointIdMap.remove(productId);
-        if (pointId != null) {
-            embeddingStore.removeAll(Collections.singletonList(pointId));
-            indexedCount = Math.max(0, indexedCount - 1);
-            log.debug("商品索引已删除, productId: {}", productId);
+        if (productId == null) {
+            return;
         }
+        embeddingStore.remove(pointIdOf(productId));
+        log.debug("商品索引已删除, productId: {}", productId);
     }
 
-    /** 索引条数 */
+    /** 索引条数（实时读取 Qdrant 集合内 point 数量，避免进程内计数在重启后漂移） */
     public int getIndexedCount() {
-        return indexedCount;
+        return countIndexedPoints();
     }
 
     /** 最后重建时间 */
@@ -308,22 +293,34 @@ public class ProductIndexer {
     /**
      * 构建商品元数据 Map（检索过滤与展示字段：productId/名称/一级分类/商家ID/主图/价格区间）
      *
+     * <p>
+     * 空值字段一律跳过：LangChain4j 的 Metadata 不接受 null，任一字段为 null 都会抛
+     * IllegalArgumentException —— 在增量更新时表现为该商品静默丢索引，在全量重建时表现为整批失败。
+     * 缺失字段不参与检索过滤（passMetadataFilter 对缺失键按「不过滤」处理），也不影响展示。
+     *
      * @param product 上架商品
      * @param prices  SKU 价格区间 [minPrice, maxPrice]（可为 null，此时不写价格字段）
      * @return 商品元数据 Map
      */
     private Map<String, Object> toMetadataMap(ProductDO product, BigDecimal[] prices) {
         Map<String, Object> meta = new HashMap<>();
-        meta.put("productId", product.getId());
-        meta.put("name", product.getName());
-        meta.put("firstCategoryId", product.getFirstCategoryId());
-        meta.put("shopId", product.getShopId());
-        meta.put("mainImage", product.getMainImage());
+        putIfNotNull(meta, "productId", product.getId());
+        putIfNotNull(meta, "name", product.getName());
+        putIfNotNull(meta, "firstCategoryId", product.getFirstCategoryId());
+        putIfNotNull(meta, "shopId", product.getShopId());
+        putIfNotNull(meta, "mainImage", product.getMainImage());
         if (prices != null && prices.length == 2) {
-            meta.put("minPrice", prices[0].doubleValue());
-            meta.put("maxPrice", prices[1].doubleValue());
+            putIfNotNull(meta, "minPrice", prices[0] == null ? null : prices[0].doubleValue());
+            putIfNotNull(meta, "maxPrice", prices[1] == null ? null : prices[1].doubleValue());
         }
         return meta;
+    }
+
+    /** 仅在值非空时写入元数据（LangChain4j Metadata 不接受 null 值） */
+    private static void putIfNotNull(Map<String, Object> meta, String key, Object value) {
+        if (value != null) {
+            meta.put(key, value);
+        }
     }
 
     /**

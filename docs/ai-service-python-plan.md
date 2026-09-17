@@ -69,6 +69,50 @@
 
 **协作方式变更**:自 Task 9 起,代码由项目所有者直接实现,AI 侧职责为——同步本文档、维护 ledger、对每个任务派独立评审、跑验收登记。
 
+### 评审待办(Open Items)
+
+由各任务独立评审提出、**尚未修复**的问题。最终全分支评审时逐条 triage。
+
+#### 待裁决(阻塞 Task 10/11 的正确性)
+
+| # | 来源 | 问题 | 备选 |
+|---|------|------|------|
+| 1 | Task 9 评审(Important) | `indexer.py` 的 payload **未写入 `description`**,而 Task 10 的 `_to_hit` 从 `payload.get("description", "")` 取摘要 → 向量路结果的 `excerpt` **恒为空串**,商品卡片摘要静默消失;两侧测试的 payload 工厂都没有该键,故测试抓不到。根因:Java 的摘要来自命中片段原文(`RagSearchService.java:154` 的 `truncate(segment.text(), 120)`),而 Python 侧未往 Qdrant 存文本。 | **A**(倾向):Task 9 `build_metadata` 加 `"description"` 键,一行<br>**C**:Task 9 把整个索引文本存进 payload(键 `text`),Task 10 截 120 字 —— 与 Java `segment.text()` 完全对齐,代价是 payload 每条增大约 500 字 |
+
+#### Minor 汇总(不阻塞,最终评审 triage)
+
+| 来源 | 问题 |
+|------|------|
+| Task 9 | `strip_html` 比 Java 少 `\s+ → " "` + `trim()` 两步,含空白/换行的富文本详情索引结果与 Java 不一致 |
+| Task 9 | 截断详情未追加 Java 那个 `"..."`(Java 详情段长 503,Python 500);且 brief 的测试把 500 写死,固化了该偏差 |
+| Task 9 | `rebuild_all` 的 `batch_size: int = 12` 是字面量,而 `config.embedding_batch_size` 已是同一语义的第二个真源,改配置不影响索引构建 |
+| Task 9 | `rebuild_all` 先 `recreate_collection()` 再查商品,查询失败或查空会留下**被清空且无标记**的集合(Java 同顺序,非新引入) |
+| Task 9 | 嵌入服务批次中途抛 `EmbeddingDimensionError` 时集合已删空,无回滚也无"部分完成"标记(Java 是跳过空向量继续) |
+| Task 9 | `qdrant_store.search` 返回注解为裸 `list`,消费方需自行知道是 `ScoredPoint` |
+| Task 9 | 全量商品 id 拼进单条 `IN :ids`,超大目录可能撞 `max_allowed_packet` |
+| Task 9 | 测试可证伪性:min/max 用例实际只断言空入参早返回(同义反复);有一条永不可能失败;有一条把生产 SQL 原样抄了一遍(故"过滤 deleted"这条硬约束实际未被交叉验证) |
+| Task 9 | payload 无条件写入 `None` 而 Java 用 `putIfNotNull` 显式跳过(实测影响有界,属格式保真缺口) |
+| Task 6 | `dimension=` 构造参数覆盖路径 0 覆盖;`MAX_LENGTH = 8192` 透传未被断言;`encode()` 恒传 `max_length=8192` 而 FlagEmbedding 默认 `passage_max_length` 仅 512,超长文本可能把 batch 显存拉到 8GB 边缘 |
+| Task 7 | `rrf.py` 用 `DEFAULT_K = 60`,未读 `settings.rrf_k`(该配置项目前是死配置);`merge` 就地改写传入的 `RagHit.score` |
+| Task 5 | 计数器断言经同一 session 读回,不独立证明 UPDATE 到达 DB;`id.asc()` 的承重理由未写在代码旁 |
+| Task 4 | `conftest.py` 的 `DB_PASSWORD` 守卫正则不容忍 `DB_PASSWORD = xxx` 等写法(命中则重新引入"占位符覆盖 .env");连库夹具对任何连接异常都 skip,MySQL 挂掉时套件仍绿 |
+| Task 3 | `next_id()` 时钟回拨睡眠后未复核是否追上;时间戳字段无位宽掩码 |
+| Task 2 | `database_url` 未对密码做 URL 编码;模块级 engine 无关闭钩子(待 `main.py` 落地时补) |
+
+**未覆盖项(须在 Task 11 闭合)**:真实 BGE-m3 模型全程未被加载 —— "能加载、返回 1024 维、显存足够"目前零证据,Task 11 的评估会首次真实加载。
+
+#### brief 自身的缺陷(执行时已处置,记录备查)
+
+| 来源 | 缺陷 | 处置 |
+|------|------|------|
+| Task 7 | `test_deduplicates_by_product_id` 与 brief 的"单路提前返回"实现冲突,brief 承诺的 "10 passed" 按原文不可达 | 保留提前返回并在其内补去重(Java `RrfMerger` 存在同样缺口) |
+| Task 8 | `assert scores == sorted(scores, reverse=True)` 是恒真断言(位置分天然降序),验证不了 MySQL 的相关性排序 | 新增用例直接比对 `MATCH AGAINST` 原始分数顺序,并改用相关性分数不并列的 query |
+| Task 3 | `test_sequence_overflow_waits_for_next_millisecond` 未真正覆盖自旋分支 | 加可注入时钟,先同步时间戳再强制序号耗尽 |
+| Task 1 | `conftest.py` 无条件 `setdefault("DB_PASSWORD", ...)` 覆盖 `.env` 真实密码 → 连库测试全 skip | 改为条件兜底 |
+| Task 4 | 四处 `session.get()` 未过滤 `deleted`,与同文件 `list_user_conversations` 自相矛盾 | 统一为带 `deleted == 0` 的 `get_conversation` |
+| Task 6 | `encode()` 未显式声明 Dense-only,依赖 `FlagEmbedding` 默认值而依赖声明是开放下界 | 显式传三个 `return_*` kwarg + 加约束注释 |
+| Task 9 | brief 的 `Interfaces` 段写 `build_index_text(row)` / `upsert(points)`,而示例代码与测试用 `build_index_text(row, category_name)` / `upsert(ids, vectors, payloads)` | 实现跟随示例代码,与测试契约自洽;后续任务勿照抄 `Interfaces` 段 |
+
 ---
 
 ## 文件结构

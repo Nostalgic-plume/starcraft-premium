@@ -2,6 +2,7 @@ package com.shop.rag;
 
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -13,16 +14,24 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 离线评估集（真实混合检索）：30 条人工标注 (query → 期望商品ID)，计算 Recall@K 与 MRR。
+ * 离线评估集（真实混合检索）：人工标注 (query → 期望商品ID)，计算 Recall@K 与 MRR。
  *
  * 依赖：Qdrant 运行 + 商品向量索引存在 + DashScope API Key 可用（真实混合检索链路）。
  * 环境缺失时自动跳过（assumeTrue），不污染 CI。答辩环境启动 Qdrant 后运行即可复现指标。
+ *
+ * 两个评估维度：
+ * 1) {@link #evaluateHybridSearch()}：30 条基础评估集，覆盖商品名/品牌/口语化/错别字；
+ * 2) {@link #evaluateSynonymExtension()}：同义词 case，做「关闭扩展(baseline) vs 开启扩展」对照，
+ *    量化坑②（同义词/黑话）修复带来的 Recall@5 / MRR 变化。
  */
 @SpringBootTest
 class RagEvaluationTest {
 
     @Autowired
     private RagSearchService ragSearchService;
+
+    @Autowired
+    private SynonymProperties synonymProperties;
 
     private record TestCase(String query, List<Long> expectedIds) {
     }
@@ -61,6 +70,20 @@ class RagEvaluationTest {
             new TestCase("剃须刀", List.of(34L))
     );
 
+    /**
+     * 同义词评估集：query 均为「用户口语说法」，商品名中不存在该字面（或仅部分存在），
+     * 期望值 = 同义词组覆盖的商品 ID（人工标注，基于当前 mock 数据）。
+     * <p>
+     * 字面路在关闭扩展时的预期表现：除「充电宝」可命中 id 255 外，其余基本漏召。
+     */
+    private static final List<TestCase> SYNONYM_CASES = List.of(
+            new TestCase("充电宝", List.of(124L, 216L, 255L)),
+            new TestCase("刮胡刀", List.of(34L, 56L, 60L)),
+            new TestCase("球鞋", List.of(20L, 145L, 161L, 205L, 236L, 258L)),
+            new TestCase("充电头", List.of(153L, 210L, 294L)),
+            new TestCase("笔记本电脑", List.of(136L, 137L, 186L))
+    );
+
     @BeforeAll
     static void requireQdrant() {
         Assumptions.assumeTrue(qdrantReachable(), "Qdrant 未运行，跳过真实评估");
@@ -68,8 +91,45 @@ class RagEvaluationTest {
 
     @Test
     void evaluateHybridSearch() {
+        double[] metrics = runEvaluation("基础评估集（真实混合检索）", CASES);
+        // 评估不设硬性通过线（指标供答辩/对比），仅断言链路能跑通且有命中
+        assertTrue(metrics[1] > 0, "评估集应至少命中部分期望商品");
+    }
+
+    @Test
+    @DisplayName("同义词扩展对照：关闭(baseline) vs 开启，输出 Recall@5 / MRR 变化")
+    void evaluateSynonymExtension() {
+        boolean originalEnabled = synonymProperties.isEnabled();
+        try {
+            synonymProperties.setEnabled(false);
+            double[] baseline = runEvaluation("baseline（同义词扩展关闭）", SYNONYM_CASES);
+
+            synonymProperties.setEnabled(true);
+            double[] expanded = runEvaluation("扩展（同义词扩展开启）", SYNONYM_CASES);
+
+            System.out.printf("%n========== 同义词扩展对照（%d 条）==========%n", SYNONYM_CASES.size());
+            System.out.printf("%-26s Recall@3=%.3f Recall@5=%.3f MRR=%.3f%n",
+                    "关闭扩展(baseline)", baseline[0], baseline[1], baseline[2]);
+            System.out.printf("%-26s Recall@3=%.3f Recall@5=%.3f MRR=%.3f%n",
+                    "开启扩展", expanded[0], expanded[1], expanded[2]);
+            System.out.printf("Recall@5 变化 = %+.3f, MRR 变化 = %+.3f%n",
+                    expanded[1] - baseline[1], expanded[2] - baseline[2]);
+        } finally {
+            synonymProperties.setEnabled(originalEnabled);
+        }
+    }
+
+    /**
+     * 跑一组 case 并输出逐条明细与汇总指标
+     *
+     * @param title 打印标题
+     * @param cases 评估用例
+     * @return [Recall@3, Recall@5, MRR]
+     */
+    private double[] runEvaluation(String title, List<TestCase> cases) {
         double recall3 = 0, recall5 = 0, mrr = 0;
-        for (TestCase tc : CASES) {
+        System.out.printf("%n---------- %s ----------%n", title);
+        for (TestCase tc : cases) {
             List<RagHitVO> hits = ragSearchService.search(tc.query(), 5, null, null, null);
             List<Long> retrieved = hits.stream().map(RagHitVO::getProductId).toList();
             double r3 = RagMetrics.recallAtK(tc.expectedIds(), retrieved, 3);
@@ -81,13 +141,11 @@ class RagEvaluationTest {
             System.out.printf("[评估] query=%-16s Recall@3=%.2f Recall@5=%.2f MRR=%.3f 命中=%s%n",
                     tc.query(), r3, r5, m, retrieved);
         }
-        recall3 /= CASES.size();
-        recall5 /= CASES.size();
-        mrr /= CASES.size();
-        System.out.printf("%n========== 评估结果（%d 条，真实混合检索）==========%n", CASES.size());
-        System.out.printf("Recall@3 = %.3f%nRecall@5 = %.3f%nMRR = %.3f%n", recall3, recall5, mrr);
-        // 评估不设硬性通过线（指标供答辩/对比），仅断言链路能跑通且有命中
-        assertTrue(recall5 > 0, "评估集应至少命中部分期望商品");
+        recall3 /= cases.size();
+        recall5 /= cases.size();
+        mrr /= cases.size();
+        System.out.printf("%s 汇总: Recall@3=%.3f Recall@5=%.3f MRR=%.3f%n", title, recall3, recall5, mrr);
+        return new double[]{recall3, recall5, mrr};
     }
 
     private static boolean qdrantReachable() {

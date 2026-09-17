@@ -110,3 +110,13 @@ rag:
     chat-model: deepseek-chat
     backup-model: qwen-plus
     embedding-model: text-embedding-v1
+  # 领域同义词表（组内词互为同义词）：仅用于关键词路扩展，提升口语化用词的召回
+  # enabled=false 可关闭扩展，用于评估 baseline 对比或线上回滚
+  synonym:
+    enabled: true
+    groups:
+      - ["充电宝", "移动电源", "充电电池"]
+      - ["刮胡刀", "剃须刀", "电动剃须刀"]
+      - ["球鞋", "运动鞋", "跑鞋", "跑步鞋"]
+      - ["充电头", "快充头", "充电器"]
+      - ["笔记本电脑", "游戏本", "轻薄本"]

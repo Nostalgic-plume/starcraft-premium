@@ -42,6 +42,7 @@ public class RagSearchService {
     private final OpenAiEmbeddingModel embeddingModel;
     private final QdrantEmbeddingStore embeddingStore;
     private final KeywordSearchService keywordSearchService;
+    private final SynonymExpander synonymExpander;
 
     private static final double MIN_RELEVANCE_SCORE = 0.3;
     private static final int EXPECTED_DIMENSION = 1536;
@@ -94,7 +95,12 @@ public class RagSearchService {
         List<RagHitVO> vectorHits = searchViaQdrant(queryEmbedding.vector(), queryLimit,
                 MIN_RELEVANCE_SCORE, categoryId, minPrice, maxPrice, topK);
 
-        List<RagHitVO> keywordHits = keywordSearchService.searchByKeyword(query, queryLimit);
+        // 关键词路使用同义词扩展后的 query（向量路保持原 query，避免扩展词稀释语义重心）
+        String keywordQuery = synonymExpander.expand(query);
+        if (!keywordQuery.equals(query)) {
+            log.debug("关键词路同义词扩展: '{}' → '{}'", query, keywordQuery);
+        }
+        List<RagHitVO> keywordHits = keywordSearchService.searchByKeyword(keywordQuery, queryLimit);
 
         log.debug("混合检索: 向量命中 {}, 关键词命中 {}, 合并取 Top-{}",
                 vectorHits.size(), keywordHits.size(), topK);

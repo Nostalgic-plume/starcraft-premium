@@ -33,3 +33,10 @@ kill8080.ps1
 
 # 开发计划/需求文档（个人阶段计划，不入库）
 docs/superpowers/
+
+# 数仓 ETL 真实配置（含明文数据库密码，仅本地 / 部署机保留）
+# 模板见同目录 common.properties.example
+azkaban/**/common.properties
+
+# AI 助手指导文件（含本机绝对路径与连接信息，不入库）
+AGENTS.md

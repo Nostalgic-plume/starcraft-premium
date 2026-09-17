@@ -3,7 +3,7 @@
 # Sqoop 全量导入 — MySQL shop → Hive ODS
 # 处理 10 张全量表，并行执行（MAX_PARALLEL=3）
 # =========================================================
-source "$(dirname "$0")/common.properties"
+source "$(dirname "$0")/load_common.sh"
 
 dt="${1:-$(date -d '-1 day' +%F)}"
 echo "===== 全量导入 dt=${dt} ====="

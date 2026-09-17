@@ -6,7 +6,7 @@
 #
 # 并行导出多张表（MAX_PARALLEL=3），大幅提升导出速度
 # =========================================================
-source "$(dirname "$0")/common.properties"
+source "$(dirname "$0")/load_common.sh"
 
 set -e
 

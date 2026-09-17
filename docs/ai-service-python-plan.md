@@ -44,12 +44,30 @@
 
 | 顶层子任务 | 完成日期 | 验收命令 | 实际输出摘要 | 结论 |
 |-----------|---------|---------|-------------|------|
-| 1 服务骨架与配置 | | | | |
-| 2 数据层 | | | | |
+| 1 服务骨架与配置 | 2026-09-15 | `pytest tests/test_config.py -v` | 5 passed | ✅ 通过 |
+| 2 数据层 | 2026-09-17 | `pytest tests/ -q` | 38 passed / 0 skipped(config 5 + models 6 + id_gen 6 + conversation 13 + message 5 + feedback 3);连库用例真实跑在 MySQL 上且无残留行 | ✅ 通过 |
 | 3 向量化 | | | | |
 | 4 检索组件 | | | | |
 | 5 索引构建 | | | | |
 | 6 混合检索与评估基线 | | | | |
+
+**阶段 ① 期中发现并修正的 plan 缺陷**(均已同步回上文对应任务):
+
+1. `tests/conftest.py` 的 `os.environ.setdefault("DB_PASSWORD", "test-password")` 无条件写入占位值,而环境变量优先级高于 `.env` → 真实密码被静默覆盖 → 全部连库测试 skip。已改为条件兜底(Task 1 Step 6)。
+2. 会话仓储四处 `session.get()` 未过滤 `deleted`,与同文件 `list_user_conversations` 的既有约定自相矛盾。已统一为带 `deleted == 0` 的 `get_conversation`(Task 4 Step 4)。
+
+### 实施中的偏离(由项目所有者直接实施,不属本计划原文)
+
+| 提交 | 内容 | 对后续执行的影响 |
+|------|------|-----------------|
+| `e4b5757` | Task 9:Qdrant 集合管理与商品索引构建 | 原计划 Task 9,由 owner 直接实现,已走独立评审 |
+| `bc2cad3` | `refactor(config)`:连接信息全部外置到环境变量 | ⚠️ **使上文 Task 1 的 `config.py` / `.env.example` / `test_config.py` 代码块过时** |
+
+`bc2cad3` 的具体变化:`db_host` / `db_port` / `db_name` / `db_user` 与 `qdrant_host` / `qdrant_rest_port` 由「带默认值」改为**必填、代码内不留任何明文默认值**,并同步更新了 `.env.example`、`tests/conftest.py`、`tests/test_config.py`。方向符合项目「禁止明文凭证」规范。
+
+**执行约束**:Task 10、Task 11 如需引用这些字段,以**仓库实际实现**为准,勿照抄本文件 Task 1 的代码块。
+
+**协作方式变更**:自 Task 9 起,代码由项目所有者直接实现,AI 侧职责为——同步本文档、维护 ledger、对每个任务派独立评审、跑验收登记。
 
 ---
 

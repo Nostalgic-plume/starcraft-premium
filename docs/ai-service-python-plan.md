@@ -73,11 +73,11 @@
 
 由各任务独立评审提出、**尚未修复**的问题。最终全分支评审时逐条 triage。
 
-#### 待裁决(阻塞 Task 10/11 的正确性)
+#### 已裁定
 
-| # | 来源 | 问题 | 备选 |
+| # | 来源 | 问题 | 裁定 |
 |---|------|------|------|
-| 1 | Task 9 评审(Important) | `indexer.py` 的 payload **未写入 `description`**,而 Task 10 的 `_to_hit` 从 `payload.get("description", "")` 取摘要 → 向量路结果的 `excerpt` **恒为空串**,商品卡片摘要静默消失;两侧测试的 payload 工厂都没有该键,故测试抓不到。根因:Java 的摘要来自命中片段原文(`RagSearchService.java:154` 的 `truncate(segment.text(), 120)`),而 Python 侧未往 Qdrant 存文本。 | **A**(倾向):Task 9 `build_metadata` 加 `"description"` 键,一行<br>**C**:Task 9 把整个索引文本存进 payload(键 `text`),Task 10 截 120 字 —— 与 Java `segment.text()` 完全对齐,代价是 payload 每条增大约 500 字 |
+| 1 | Task 9 评审(Important) | `indexer.py` 的 payload **未写入 `description`**,而 Task 10 的 `_to_hit` 从 `payload.get("description", "")` 取摘要 → 向量路结果的 `excerpt` **恒为空串**,商品卡片摘要静默消失;两侧测试的 payload 工厂都没有该键,故测试抓不到。根因:Java 的摘要来自命中片段原文(`RagSearchService.java:154` 的 `truncate(segment.text(), 120)`),而 Python 侧未往 Qdrant 存文本。 | **取方案 A**(2026-09-17):`indexer.py` 的 `build_metadata` 增补 `"description": row.get("description")`。理由:一行且语义正确(`description` 本就是商品描述,`excerpt` 是给前端卡片的摘要);方案 C 与 Java 完全对齐但会让 payload 每条增大约 500 字,收益不抵成本。**代价**:元数据键集超出 Java 侧,且 `excerpt` 内容与 Java(整段索引文本截断)不完全一致 —— 属展示层细节,不影响检索质量。 |
 
 #### Minor 汇总(不阻塞,最终评审 triage)
 

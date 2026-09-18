@@ -29,8 +29,13 @@ import java.util.Map;
  * （裁决测试 QdrantGrpcCompatibilityTest 通过），向量路改走官方
  * {@link QdrantEmbeddingStore#search}，原手写 Qdrant REST 绕道（searchViaQdrantRest）已删除。
  * <p>
- * 降级策略：向量路异常时自动降级为纯 MySQL FULLTEXT 关键词路（RRF 合并天然退化为纯关键词），
- * 并输出可观测日志标记降级态。
+ * 降级策略（两级，任一环节故障都不返回空结果，仅当两路皆空时才为空）：
+ * <ol>
+ *   <li>嵌入模型不可用（网络异常/鉴权失败/空响应/维度不符）→ 跳过向量路，退化为纯 MySQL FULLTEXT 关键词检索；</li>
+ *   <li>Qdrant 不可用 → {@link #searchViaQdrant} 返回空列表，同样退化为纯关键词检索。</li>
+ * </ol>
+ * 两条路径均借助 RRF 合并天然退化实现（{@link RrfMerger#merge} 对单路为空有专门分支），
+ * 并输出 WARN 日志标记降级态与降级原因，便于线上排查定位。
  *
  * @author shop
  */
@@ -64,36 +69,16 @@ public class RagSearchService {
         }
         long startNanos = System.nanoTime();  // T4 可观测性埋点
 
-        // 1. 生成查询向量
-        Embedding queryEmbedding;
-        try {
-            List<Embedding> embeddings = embeddingModel.embedAll(List.of(TextSegment.from(query))).content();
-            if (embeddings == null || embeddings.isEmpty()) {
-                log.warn("嵌入模型返回空列表");
-                return Collections.emptyList();
-            }
-            queryEmbedding = embeddings.get(0);
-        } catch (Exception e) {
-            log.warn("嵌入模型调用失败: {}", e.getMessage());
-            return Collections.emptyList();
-        }
+        // 1. 生成查询向量：任何失败都不中断主流程，退化为纯关键词路（见类注释「降级策略」）
+        float[] queryVector = embedQueryOrNull(query);
 
-        // 2. 校验向量
-        if (queryEmbedding == null || queryEmbedding.vector() == null || queryEmbedding.vector().length == 0) {
-            log.warn("嵌入模型返回空向量，跳过 RAG 检索");
-            return Collections.emptyList();
-        }
-        if (queryEmbedding.vector().length != EXPECTED_DIMENSION) {
-            log.warn("向量维度不匹配：期望 {}，实际 {}，跳过 RAG 检索",
-                    EXPECTED_DIMENSION, queryEmbedding.vector().length);
-            return Collections.emptyList();
-        }
-
-        // 3. 双路并行检索：向量 + 关键词
+        // 2. 双路并行检索：向量 + 关键词（向量路已降级时为空列表，RRF 合并天然退化为纯关键词）
         int queryLimit = Math.max(topK * 5, 50);
 
-        List<RagHitVO> vectorHits = searchViaQdrant(queryEmbedding.vector(), queryLimit,
-                MIN_RELEVANCE_SCORE, categoryId, minPrice, maxPrice, topK);
+        List<RagHitVO> vectorHits = queryVector == null
+                ? Collections.emptyList()
+                : searchViaQdrant(queryVector, queryLimit, MIN_RELEVANCE_SCORE,
+                        categoryId, minPrice, maxPrice, topK);
 
         // 关键词路使用同义词扩展后的 query（向量路保持原 query，避免扩展词稀释语义重心）
         String keywordQuery = synonymExpander.expand(query);
@@ -108,11 +93,46 @@ public class RagSearchService {
         // 4. RRF 合并
         List<RagHitVO> merged = RrfMerger.merge(vectorHits, keywordHits, topK);
 
-        // T4 可观测性埋点：query/耗时/命中数（轻量，不记录对话内容）
-        log.info("[RAG指标] query={} topK={} 耗时{}ms 向量命中{} 关键词命中{} 合并{}条",
+        // T4 可观测性埋点：query/耗时/命中数/向量路状态（轻量，不记录对话内容）
+        log.info("[RAG指标] query={} topK={} 耗时{}ms 向量命中{} 关键词命中{} 合并{}条 向量路={}",
                 query, topK, (System.nanoTime() - startNanos) / 1_000_000,
-                vectorHits.size(), keywordHits.size(), merged.size());
+                vectorHits.size(), keywordHits.size(), merged.size(),
+                queryVector == null ? "已降级(纯关键词)" : "正常");
         return merged;
+    }
+
+    /**
+     * 生成 query 向量，任一环节失败一律返回 {@code null}（不抛异常），由调用方降级为纯关键词检索。
+     * <p>
+     * 覆盖四类失败：调用异常（网络/鉴权）、返回空列表、返回空向量、维度不符。
+     * 与对话链路的降级思路一致（DeepSeek → qwen-plus → 模板兜底），
+     * 保证检索侧不因单一外部依赖故障而整体不可用。
+     *
+     * @param query 用户查询
+     * @return 1536 维查询向量；任一环节失败返回 null
+     */
+    private float[] embedQueryOrNull(String query) {
+        try {
+            List<Embedding> embeddings = embeddingModel.embedAll(List.of(TextSegment.from(query))).content();
+            if (embeddings == null || embeddings.isEmpty()) {
+                log.warn("[RAG降级] 嵌入模型返回空列表，跳过向量路，退化为纯关键词检索");
+                return null;
+            }
+            Embedding embedding = embeddings.get(0);
+            if (embedding == null || embedding.vector() == null || embedding.vector().length == 0) {
+                log.warn("[RAG降级] 嵌入模型返回空向量，跳过向量路，退化为纯关键词检索");
+                return null;
+            }
+            if (embedding.vector().length != EXPECTED_DIMENSION) {
+                log.warn("[RAG降级] 向量维度不匹配：期望 {}，实际 {}，跳过向量路，退化为纯关键词检索",
+                        EXPECTED_DIMENSION, embedding.vector().length);
+                return null;
+            }
+            return embedding.vector();
+        } catch (Exception e) {
+            log.warn("[RAG降级] 嵌入模型调用失败，跳过向量路，退化为纯关键词检索: {}", e.getMessage());
+            return null;
+        }
     }
 
     /**

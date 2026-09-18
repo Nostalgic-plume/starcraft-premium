@@ -27,7 +27,8 @@ deploy/nginx.exe
 deploy/mime.types
 deploy/logs/
 logs/
-src/.claude/
+# 编辑器/助手本地配置（含本机绝对路径与用户名，不入库）
+.claude/
 code_review_findings.json
 kill8080.ps1
 

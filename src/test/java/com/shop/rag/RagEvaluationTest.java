@@ -33,6 +33,9 @@ class RagEvaluationTest {
     @Autowired
     private SynonymProperties synonymProperties;
 
+    @Autowired
+    private RrfProperties rrfProperties;
+
     private record TestCase(String query, List<Long> expectedIds) {
     }
 
@@ -116,6 +119,44 @@ class RagEvaluationTest {
                     expanded[1] - baseline[1], expanded[2] - baseline[2]);
         } finally {
             synonymProperties.setEnabled(originalEnabled);
+        }
+    }
+
+    /**
+     * 加权 RRF 对照：在同一评估集上依次跑三档权重，输出可对比的表格。
+     * <p>
+     * 权重通过直接改写 {@link RrfProperties} 生效（无需重启上下文），结束后还原。
+     * 读数字的前提：先看 1.0/1.0 这一档（候选池对齐后的新基线），再与加权档位比较；
+     * 不要与 docs/rag-evaluation-report.md §5 的历史数字直接比——旧数字是在向量路候选
+     * 被 topK 截断的条件下测出的（见该报告 §8）。
+     */
+    @Test
+    @DisplayName("加权 RRF 对照：1.0/1.0(新基线) vs 1.0/1.5 vs 1.0/2.0")
+    void evaluateWeightedRrf() {
+        double originalVectorWeight = rrfProperties.getWeightVector();
+        double originalKeywordWeight = rrfProperties.getWeightKeyword();
+        double[][] weightPairs = {{1.0, 1.0}, {1.0, 1.5}, {1.0, 2.0}};
+
+        System.out.printf("%n========== 加权 RRF 对照（基础集 %d 条 / 同义词集 %d 条）==========%n",
+                CASES.size(), SYNONYM_CASES.size());
+        try {
+            for (double[] pair : weightPairs) {
+                rrfProperties.setWeightVector(pair[0]);
+                rrfProperties.setWeightKeyword(pair[1]);
+
+                double[] basic = runEvaluation(
+                        String.format("基础集 wv=%.1f wk=%.1f", pair[0], pair[1]), CASES);
+                double[] synonym = runEvaluation(
+                        String.format("同义词集 wv=%.1f wk=%.1f", pair[0], pair[1]), SYNONYM_CASES);
+
+                System.out.printf("[加权对照] 权重 %-10s | 基础集 Recall@3/@5/MRR = %.3f / %.3f / %.3f"
+                                + " | 同义词集 Recall@3/@5/MRR = %.3f / %.3f / %.3f%n",
+                        String.format("%.1f/%.1f", pair[0], pair[1]),
+                        basic[0], basic[1], basic[2], synonym[0], synonym[1], synonym[2]);
+            }
+        } finally {
+            rrfProperties.setWeightVector(originalVectorWeight);
+            rrfProperties.setWeightKeyword(originalKeywordWeight);
         }
     }
 

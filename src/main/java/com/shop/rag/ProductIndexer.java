@@ -5,10 +5,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.shop.constant.ProductConstants;
 import com.shop.mapper.CategoryMapper;
 import com.shop.mapper.ProductMapper;
-import com.shop.mapper.SkuMapper;
 import com.shop.model.entity.CategoryDO;
 import com.shop.model.entity.ProductDO;
-import com.shop.model.entity.SkuDO;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.segment.TextSegment;
@@ -39,7 +37,7 @@ public class ProductIndexer {
 
     private final ProductMapper productMapper;
     private final CategoryMapper categoryMapper;
-    private final SkuMapper skuMapper;
+    private final SkuPriceResolver skuPriceResolver;
     private final OpenAiEmbeddingModel embeddingModel;
     private final QdrantEmbeddingStore embeddingStore;
     private final QdrantCollectionHelper qdrantCollectionHelper;
@@ -325,46 +323,25 @@ public class ProductIndexer {
 
     /**
      * 批量查询商品 SKU 价格，返回 productId → [minPrice, maxPrice]
+     * <p>
+     * 聚合逻辑已提取到 {@link SkuPriceResolver}（关键词路过滤同样需要），此处只做实体 → id 的适配。
      */
     private Map<Long, BigDecimal[]> loadPriceMap(List<ProductDO> products) {
-        Map<Long, BigDecimal[]> priceMap = new HashMap<>();
         if (CollUtil.isEmpty(products)) {
-            return priceMap;
+            return Map.of();
         }
-
-        List<Long> productIds = products.stream().map(ProductDO::getId).collect(Collectors.toList());
-        List<SkuDO> skus = skuMapper.selectList(
-                new LambdaQueryWrapper<SkuDO>()
-                        .in(SkuDO::getProductId, productIds)
-                        .select(SkuDO::getProductId, SkuDO::getPrice));
-
-        if (CollUtil.isNotEmpty(skus)) {
-            Map<Long, List<SkuDO>> grouped = skus.stream()
-                    .collect(Collectors.groupingBy(SkuDO::getProductId));
-            for (Map.Entry<Long, List<SkuDO>> entry : grouped.entrySet()) {
-                BigDecimal min = entry.getValue().stream()
-                        .map(SkuDO::getPrice)
-                        .filter(Objects::nonNull)
-                        .min(BigDecimal::compareTo)
-                        .orElse(BigDecimal.ZERO);
-                BigDecimal max = entry.getValue().stream()
-                        .map(SkuDO::getPrice)
-                        .filter(Objects::nonNull)
-                        .max(BigDecimal::compareTo)
-                        .orElse(BigDecimal.ZERO);
-                priceMap.put(entry.getKey(), new BigDecimal[]{min, max});
-            }
-        }
-        return priceMap;
+        List<Long> productIds = products.stream()
+                .map(ProductDO::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+        return skuPriceResolver.resolve(productIds);
     }
 
     /**
      * 查询单个商品 SKU 价格范围（委托批量查询）
      */
     private BigDecimal[] loadProductPrice(Long productId) {
-        ProductDO stub = new ProductDO();
-        stub.setId(productId);
-        return loadPriceMap(List.of(stub)).get(productId);
+        return skuPriceResolver.resolveOne(productId);
     }
 
     private static String safe(String s) {
@@ -387,3 +364,4 @@ public class ProductIndexer {
         return text.substring(0, MAX_DETAIL_LENGTH) + "...";
     }
 }
+

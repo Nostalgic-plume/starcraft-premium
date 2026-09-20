@@ -91,4 +91,24 @@ class ChatIntentResolverTest {
             return null;
         }).when(streamingChatModel).chat(anyList(), any());
     }
+
+    @Test
+    @DisplayName("规则命中：闲聊强信号 → CHITCHAT（不触发 LLM）")
+    void rule_ChitchatWords_ShouldReturnChitchat() {
+        assertEquals(Intent.CHITCHAT, resolver.resolve("能不能陪我聊天"));
+        assertEquals(Intent.CHITCHAT, resolver.resolve("你好"));
+        assertEquals(Intent.CHITCHAT, resolver.resolve("谢谢你呀"));
+        assertEquals(Intent.CHITCHAT, resolver.resolve("你是谁"));
+        assertEquals(Intent.CHITCHAT, resolver.resolve("今天心情不好，想找人说说话"));
+        verify(streamingChatModel, never()).chat(anyList(), any());
+    }
+
+    @Test
+    @DisplayName("闲聊词 + 商品信号词 → 仍判 PRODUCT（守门，不误伤导购）")
+    void rule_ChitchatWordWithProductSignal_ShouldReturnProduct() {
+        assertEquals(Intent.PRODUCT, resolver.resolve("你好，手机多少钱"));
+        assertEquals(Intent.PRODUCT, resolver.resolve("陪我看看冰箱推荐"));
+        assertEquals(Intent.PRODUCT, resolver.resolve("谢谢，帮我推荐个耳机"));
+        verify(streamingChatModel, never()).chat(anyList(), any());
+    }
 }

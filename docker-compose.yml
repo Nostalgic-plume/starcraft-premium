@@ -1,5 +1,5 @@
 # 中间件 Docker Compose 一键编排
-# 范围：Redis / Qdrant / RocketMQ / Nginx 四个中间件；后端 Spring Boot 保持本地运行
+# 范围：Redis / Qdrant / Elasticsearch / RocketMQ / Nginx 五个中间件；后端 Spring Boot 保持本地运行
 # 启动：docker compose up -d（根目录 .env 提供 REDIS_PASSWORD 等敏感凭证，已 gitignore）
 # 说明：编排细节见 docs/README.md「离线数仓」与「快速开始」；设计稿已归档不随仓库分发
 services:
@@ -37,6 +37,34 @@ services:
       - "127.0.0.1:6334:6334"            # gRPC，仅本机可达（langchain4j QdrantEmbeddingStore 使用）
     volumes:
       - qdrant-data:/qdrant/storage
+
+  # ====== Elasticsearch（关键词检索路，内置 IK 中文分词；镜像由 docker/elasticsearch/Dockerfile 构建）======
+  elasticsearch:
+    build:
+      context: ./docker/elasticsearch
+    image: shop-elasticsearch:8.11.4     # 构建产物打本地标签：up -d 命中即复用，不会每次重建
+    container_name: shop-es
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9200:9200"            # REST API，仅本机可达（后端 ES 关键词检索使用）
+    environment:
+      - discovery.type=single-node       # 单节点模式，免集群发现配置（本地开发）
+      - xpack.security.enabled=false     # 关闭鉴权/证书；靠端口只绑 127.0.0.1 兜底，切勿在公网机器套用
+      - bootstrap.memory_lock=true       # 禁止堆换出，需配合下方 memlock ulimit
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m   # ES 默认吃宿主一半内存，本机内存有限故显式锁 512m 堆
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      # 镜像自带 curl；单节点副本分片必然 unassigned，故 yellow 即视为可用
+      test: ["CMD-SHELL", "curl -fs 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 8s
+      retries: 12
+      start_period: 60s
 
   # ====== RocketMQ NameServer ======
   rocketmq-namesrv:
@@ -96,5 +124,6 @@ services:
 volumes:
   redis-data: {}
   qdrant-data: {}
+  es-data: {}
   rmq-logs: {}
   rmq-store: {}

@@ -98,6 +98,9 @@ rocketmq:
     group: shop-producer-group
 
 rag:
+  # 智能客服 SSE 心跳（秒）：长回答/模型思考期定期下发 ping 帧，防代理判空闲断流；≤0 关闭
+  chat:
+    heartbeat-seconds: 15
   qdrant:
     host: localhost
     port: 6334
@@ -120,3 +123,9 @@ rag:
       - ["球鞋", "运动鞋", "跑鞋", "跑步鞋"]
       - ["充电头", "快充头", "充电器"]
       - ["笔记本电脑", "游戏本", "轻薄本"]
+  # RRF 融合参数：默认两路等权 1.0/1.0、k=60（与改造前行为完全一致，可随时回滚）
+  # 调高 weight-keyword 会提高关键词路话语权：对字面匹配强的 query 有利，但会压制语义类 query
+  rrf:
+    k: 60
+    weight-vector: 1.0
+    weight-keyword: 2.0   # 评估推荐档位：基础集 Recall@3 0.628→0.711（见 docs/rag-evaluation-report.md §8）

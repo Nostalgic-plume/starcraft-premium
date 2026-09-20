@@ -70,7 +70,7 @@ class ProductIndexerTest {
         TableInfoHelper.initTableInfo(assistant, SkuDO.class);
         TableInfoHelper.initTableInfo(assistant, ProductDO.class);
 
-        indexer = new ProductIndexer(productMapper, categoryMapper, skuMapper,
+        indexer = new ProductIndexer(productMapper, categoryMapper, new SkuPriceResolver(skuMapper),
                 embeddingModel, embeddingStore, qdrantCollectionHelper);
     }
 
@@ -103,7 +103,7 @@ class ProductIndexerTest {
     @Test
     @DisplayName("重启场景：新建实例（进程内状态天然为空）后，删除依然生效")
     void remove_afterRestart_shouldStillDelete() {
-        ProductIndexer restarted = new ProductIndexer(productMapper, categoryMapper, skuMapper,
+        ProductIndexer restarted = new ProductIndexer(productMapper, categoryMapper, new SkuPriceResolver(skuMapper),
                 embeddingModel, embeddingStore, qdrantCollectionHelper);
 
         restarted.remove(99L);

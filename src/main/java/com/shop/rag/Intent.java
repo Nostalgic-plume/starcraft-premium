@@ -16,7 +16,9 @@ public enum Intent {
     ORDER_CANCEL("order_cancel", "取消订单"),
     /** 查询订单（只读）：agent 仅持有只读订单工具 */
     ORDER_QUERY("order_query", "查询订单"),
-    /** 商品推荐 / RAG 问答 / 闲聊：默认，agent 不持订单工具（纯 RAG 生成） */
+    /** 闲聊（问候/致谢/告别/情绪/身份/陪聊）：不检索商品、不推商品卡片，走纯对话 */
+    CHITCHAT("chitchat", "闲聊"),
+    /** 商品推荐 / RAG 问答：默认，agent 不持订单工具（纯 RAG 生成） */
     PRODUCT("product", "商品咨询");
 
     /** SSE route 事件用的稳定编码（前端据此显示状态条） */

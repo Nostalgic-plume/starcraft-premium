@@ -7,9 +7,11 @@ import com.shop.mapper.ProductMapper;
 import com.shop.model.entity.CategoryDO;
 import com.shop.model.entity.ChatMessageDO;
 import com.shop.model.entity.ProductDO;
+import com.shop.model.vo.OrderVO;
 import com.shop.service.OrderService;
 import dev.langchain4j.data.message.ChatMessage;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -35,6 +37,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 智能客服服务
@@ -68,8 +73,25 @@ public class ChatService {
 
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
+    /**
+     * SSE 心跳调度器：长回答期间定期下发 ping 帧，让 Nginx/浏览器知道连接仍活着。
+     * 守护线程单例，不随请求创建；线程名固定便于排查。
+     */
+    private final ScheduledExecutorService heartbeatScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "chat-sse-heartbeat");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    /** SSE 心跳间隔（秒）；≤0 表示关闭。默认 15s，短于任何一层代理的空闲超时 */
+    @Value("${rag.chat.heartbeat-seconds:15}")
+    private int heartbeatSeconds;
+
     /** 对话窗口 token 预算（TokenWindowChatMemory 按此裁剪，防 token 爆炸） */
     private static final int TOKEN_BUDGET = 3000;
+
+    /** 订单上下文最多注入的订单条数（与 OrderQueryWorkflow 的 LIST_LIMIT 对齐） */
+    private static final int ORDER_CONTEXT_LIMIT = 10;
     private static final String SYSTEM_PROMPT_TEMPLATE = """
             你是「星辰优选」商城的智能客服「小星」，性格热情耐心，像朋友一样帮用户挑商品。
 
@@ -85,7 +107,15 @@ public class ChatService {
             - 用表情符号（😊👍💪🔥）适当点缀，别刷屏
             - 引用推荐商品时标注编号：[1][2][3] 对应下方"相关商品信息"中的商品 1/2/3（前端卡片按此顺序显示编号）
 
+            ## 当有订单信息时
+            下方内容若包含「===== 用户订单信息 =====」段落，说明本轮问的是订单：
+            - 直接依据该段落里的真实数据回答（订单号、状态、商品、件数），不要编造
+            - 不要再说「看不到订单」，也不要让用户提供订单号
+            - 不要推荐商品、不要追问「您想找什么类型的东西」
+            - 用户想进一步处理某笔订单时，引导他直接说出订单号
+
             ## 当没有商品信息时
+            （若下方已给出「用户订单信息」段落，本节不适用，按上一节的订单规则回答）
             下面商品列表为空，说明目前没有匹配到具体商品，你需要：
             1. 判断用户是不是在问一个商品类别（如「手机」「电脑」「衣服」）
             2. 如果是类别名，直接追问具体要求：「手机是吧，您想要什么价位的？主要用途是？」—— 像导购一样自然引导
@@ -103,6 +133,17 @@ public class ChatService {
             记住：你是小星，不是机器人。说话要像真人导购。
             """;
 
+    /** 闲聊意图专用 system prompt：保留人设，但明确不推销、不把闲聊硬拗成导购 */
+    private static final String CHITCHAT_SYSTEM_PROMPT = """
+            你是「星辰优选」商城的智能客服「小星」，性格热情耐心，像朋友一样说话。
+
+            本轮用户是来闲聊的（问候/道谢/情绪/陪你说话），不是来找商品的：
+            - 像朋友一样自然回应，语气轻松，可用表情符号（😊💪✨）适当点缀
+            - 不要推荐商品、不要罗列商品、不要追问「您想找什么类型的东西」
+            - 回答简洁，两三句即可，别啰嗦
+            - 用户后面主动问商品时，再切回导购模式
+            """;
+
     /**
      * 流式问答（SSE）
      *
@@ -112,6 +153,7 @@ public class ChatService {
      * @param emitter        SSE 发射器
      */
     public void ask(String conversationId, Long userId, String userMessage, SseEmitter emitter) {
+        startHeartbeat(emitter);
         executor.execute(() -> {
             try {
                 // 1. 确保会话存在（MySQL持久化）
@@ -133,7 +175,8 @@ public class ChatService {
                 Intent intent = chatIntentResolver.resolve(userMessage);
                 sendEvent(emitter, "route", intent.code());
 
-                if (intent == Intent.ORDER_CANCEL || intent == Intent.ORDER_QUERY) {
+                boolean orderIntent = intent == Intent.ORDER_CANCEL || intent == Intent.ORDER_QUERY;
+                if (orderIntent) {
                     // 订单域意图：进入受控 workflow（订单查询/取消都不走通用 agent 的自由工具池）
                     WorkflowContext workflowCtx = WorkflowContext.builder()
                             .conversationId(conversationId)
@@ -152,15 +195,25 @@ public class ChatService {
                     // 未消费：取消=反悔/转话题清 pending；查询=模糊长句 → 落回默认链路（该链路对订单只暴露只读工具）
                 }
 
-                // 3. Query 改写：利用 LLM 补全指代、优化搜索关键词
-                String searchQuery = queryRewriter.rewrite(userMessage, chatMemory.messages());
-                log.debug("Query 改写: '{}' → '{}'", userMessage, searchQuery);
+                // 3. Query 改写：利用 LLM 补全指代、优化搜索关键词（不检索的意图直接跳过，省一次 LLM 调用）
+                boolean chitchat = intent == Intent.CHITCHAT;
+                boolean skipRetrieval = chitchat || orderIntent;
+                String searchQuery = skipRetrieval ? userMessage : queryRewriter.rewrite(userMessage, chatMemory.messages());
+                if (!skipRetrieval) {
+                    log.debug("Query 改写: '{}' → '{}'", userMessage, searchQuery);
+                }
 
-                // 4. 混合 RAG 检索 TOP-3（使用改写后的 Query）
-                List<RagHitVO> hits = ragSearchService.search(searchQuery, 3, null, null, null);
+                // 4. 混合 RAG 检索 TOP-3（使用改写后的 Query）；闲聊与订单意图不检索商品：
+                //    闲聊整句会被当作检索词搜一圈货架；问订单同样不该塞回一堆不相关商品
+                List<RagHitVO> hits = skipRetrieval
+                        ? List.of()
+                        : ragSearchService.search(searchQuery, 3, null, null, null);
+                if (chitchat) {
+                    log.info("[客服意图] 闲聊，跳过商品检索: {}", userMessage);
+                }
 
-                // 5. RAG 无结果时，尝试按分类名回退查询数据库（使用原始消息）
-                if (hits == null || hits.isEmpty()) {
+                // 5. RAG 无结果时，尝试按分类名回退查询数据库（使用原始消息）；不检索的意图同样跳过
+                if (!skipRetrieval && (hits == null || hits.isEmpty())) {
                     List<RagHitVO> categoryHits = fallbackSearchByCategory(userMessage);
                     if (categoryHits != null && !categoryHits.isEmpty()) {
                         hits = categoryHits;
@@ -168,8 +221,14 @@ public class ChatService {
                     }
                 }
 
-                // 6. 构建商品上下文
+                // 6. 构建模型上下文：商品检索结果；订单域额外注入 Java 侧实时查回的订单数据
                 String productContext = buildProductContext(hits);
+                if (orderIntent) {
+                    String orderContext = buildOrderContext(userId);
+                    if (!orderContext.isBlank()) {
+                        productContext = orderContext + "\n" + productContext;
+                    }
+                }
 
                 // 7. 保存用户消息到 MySQL
                 ChatMessageDO userMsgDO = new ChatMessageDO();
@@ -181,13 +240,18 @@ public class ChatService {
 
                 // 8. 构建 system prompt（每轮单条最新）并加入本轮 memory；同步写入 store 缓存，
                 //    确保 AiServices 第一轮从 store.getMessages 能读到含 system 的完整窗口
-                String systemPrompt = String.format(SYSTEM_PROMPT_TEMPLATE, productContext);
+                String systemPrompt = chitchat
+                        ? CHITCHAT_SYSTEM_PROMPT
+                        : String.format(SYSTEM_PROMPT_TEMPLATE, productContext);
                 chatMemory.add(new SystemMessage(systemPrompt));
                 mySqlChatMemoryStore.updateMessages(conversationId, chatMemory.messages());
 
                 // 8.5 Phase 3：RAG 命中时推送商品卡片事件（在首个 token 前，前端渲染商品卡片；
                 //      无命中不推送，前端不留空白卡片）；卡片数据随后随 assistant 消息落库，刷新可恢复
-                String productsJson = (hits != null && !hits.isEmpty()) ? buildProductsJson(hits) : null;
+                // 订单域即便回落到通用链路也不推商品卡片：用户问订单却弹商品，语义与观感都不对
+                String productsJson = (hits != null && !hits.isEmpty() && !orderIntent)
+                        ? buildProductsJson(hits)
+                        : null;
                 if (productsJson != null) {
                     sendEvent(emitter, "products", productsJson);
                 }
@@ -330,7 +394,7 @@ public class ChatService {
     private void templateFallback(String productContext, String conversationId, SseEmitter emitter,
                                   String productsJson) {
         String reply = (productContext != null && !productContext.isBlank())
-                ? "抱歉，AI 暂时不可用，以下相关商品供您参考：\n" + productContext
+                ? "抱歉，AI 暂时不可用，以下为系统为您查到的最新信息：\n" + productContext
                 : "抱歉，AI 暂时不可用，请稍后再试";
         saveAssistantMessage(conversationId, reply, productsJson);
         sendEvent(emitter, "end", reply);
@@ -501,6 +565,56 @@ public class ChatService {
      * @param type    事件类型（token/end/error）
      * @param content 事件内容（token 片段或结束/错误提示文案）
      */
+    /** 启动 SSE 心跳：定期发 ping 帧（前端忽略未知 type），防代理在"模型思考期无数据"时判空闲断流 */
+    private void startHeartbeat(SseEmitter emitter) {
+        if (heartbeatSeconds <= 0) {
+            return;
+        }
+        ScheduledFuture<?> future = heartbeatScheduler.scheduleAtFixedRate(
+                () -> sendEvent(emitter, "ping", ""), heartbeatSeconds, heartbeatSeconds, TimeUnit.SECONDS);
+        emitter.onCompletion(() -> future.cancel(false));
+        emitter.onTimeout(() -> future.cancel(false));
+        emitter.onError(e -> future.cancel(false));
+    }
+
+    /**
+     * 订单域确定性上下文：直接用 OrderService 只读方法取当前用户订单，拼成文本喂给模型。
+     * <p>
+     * 为什么不靠工具调用：降级链（qwen 纯问答、模板兜底）都不带工具，实测 DeepSeek 503 期间
+     * 客服只能答「我这边看不到你的订单，得你报订单号」。把数据放进 prompt，才能保证
+     * 「问订单必有真实数据」，无论最后是哪一层模型接手。
+     * </p>
+     */
+    private String buildOrderContext(Long userId) {
+        try {
+            List<OrderVO> orders = orderService.myOrdersByUserId(userId, null, ORDER_CONTEXT_LIMIT);
+            if (orders == null || orders.isEmpty()) {
+                return "===== 用户订单信息 =====\n当前账号下没有订单。";
+            }
+            StringBuilder sb = new StringBuilder("===== 用户订单信息 =====\n");
+            sb.append("共 ").append(orders.size()).append(" 笔（按下单时间倒序）：\n");
+            for (OrderVO order : orders) {
+                sb.append("· 订单 ").append(order.getOrderNo())
+                        .append("｜").append(order.getStatusText());
+                if (order.getItems() != null && !order.getItems().isEmpty()) {
+                    OrderVO.OrderItemVO item = order.getItems().get(0);
+                    String name = item.getProductName() != null ? item.getProductName() : item.getSkuName();
+                    sb.append("｜").append(name);
+                    if (order.getItems().size() > 1) {
+                        sb.append("等").append(order.getItems().size()).append("件");
+                    }
+                }
+                sb.append("\n");
+            }
+            sb.append("以上为系统实时查询结果，请直接据实回答，不要再说「看不到订单」或让用户报订单号。");
+            log.info("[客服意图] 订单上下文注入: {} 笔订单", orders.size());
+            return sb.toString();
+        } catch (Exception e) {
+            log.warn("订单上下文查询失败，本轮不注入订单数据: {}", e.getMessage());
+            return "";
+        }
+    }
+
     private void sendEvent(SseEmitter emitter, String type, String content) {
         try {
             String json = objectMapper.writeValueAsString(Map.of("type", type, "content", content));

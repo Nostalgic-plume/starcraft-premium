@@ -20,10 +20,16 @@ import java.util.Map;
 /**
  * RAG 混合检索服务（Hybrid Search）
  * <p>
- * 双路并行检索 + RRF 合并：
+ * 双路并行检索 + 加权 RRF 合并：
  * ┌─ DashScope embedding → 官方 QdrantEmbeddingStore.search() ─┐
- * │                                                            │→ RRF 合并 → Top-K
- * └─ MySQL FULLTEXT 关键词检索 ────────────────────────────────┘
+ * │                                                            │→ 加权 RRF 合并 → Top-K
+ * └─ MySQL FULLTEXT 关键词检索（同义词扩展 + 分类/价格过滤）───┘
+ * <p>
+ * 两路候选池对齐：均取 {@code queryLimit = clamp(topK × 5, 50, 200)}，
+ * 融合后再截断 topK。此前向量路按 topK 截断、关键词路取 queryLimit，候选池不对称，
+ * topK 越小（如客服链路 topK=3）向量路越被结构性压制。
+ * <p>
+ * 权重与 RRF 常数由 {@link RrfProperties} 外置（默认等权 1.0/1.0、k=60，与改造前行为一致）。
  * <p>
  * 2026-08 升级 LangChain4j 1.19.0（qdrant-client 1.17.0）后，gRPC 兼容坑已修复
  * （裁决测试 QdrantGrpcCompatibilityTest 通过），向量路改走官方
@@ -48,19 +54,29 @@ public class RagSearchService {
     private final QdrantEmbeddingStore embeddingStore;
     private final KeywordSearchService keywordSearchService;
     private final SynonymExpander synonymExpander;
+    private final RrfProperties rrfProperties;
 
     private static final double MIN_RELEVANCE_SCORE = 0.3;
     private static final int EXPECTED_DIMENSION = 1536;
 
+    /** 候选池 = topK × 该倍数（再由 MIN_QUERY_LIMIT 兜底下限） */
+    private static final int CANDIDATE_MULTIPLIER = 5;
+    /** 候选池下限：topK 很小时也要保证向量路有足够的融合候选 */
+    private static final int MIN_QUERY_LIMIT = 50;
+    /** 候选池上限：防止超大 topK 放大 MySQL LIMIT 与 Qdrant maxResults */
+    private static final int MAX_QUERY_LIMIT = 200;
+    /** topK 上限：公开接口未校验参数，超大值会放大下游查询成本 */
+    private static final int MAX_TOP_K = 100;
+
     /**
-     * 混合搜索商品（向量 + 关键词双路 → RRF 合并）
+     * 混合搜索商品（向量 + 关键词双路 → 加权 RRF 合并）
      *
      * @param query      用户查询
-     * @param topK       返回条数
-     * @param categoryId 分类过滤（可选）
-     * @param minPrice   最低价（可选）
-     * @param maxPrice   最高价（可选）
-     * @return 混合匹配结果列表（按 RRF 分数降序）
+     * @param topK       返回条数（越界自动收敛到 [1, 100]）
+     * @param categoryId 分类过滤（可选，两路同语义：比对 firstCategoryId，缺失放行）
+     * @param minPrice   最低价（可选，两路同语义：商品最高价需 >= minPrice）
+     * @param maxPrice   最高价（可选，两路同语义：商品最低价需 <= maxPrice）
+     * @return 混合匹配结果列表（按加权 RRF 分数降序）
      */
     public List<RagHitVO> search(String query, int topK,
                                   Long categoryId, BigDecimal minPrice, BigDecimal maxPrice) {
@@ -69,36 +85,64 @@ public class RagSearchService {
         }
         long startNanos = System.nanoTime();  // T4 可观测性埋点
 
+        // 0. 入参兜底：topK 为负数时 Stream.limit 会抛异常（接口 500），超大值会放大下游 LIMIT
+        int safeTopK = clampTopK(topK);
+
         // 1. 生成查询向量：任何失败都不中断主流程，退化为纯关键词路（见类注释「降级策略」）
         float[] queryVector = embedQueryOrNull(query);
 
-        // 2. 双路并行检索：向量 + 关键词（向量路已降级时为空列表，RRF 合并天然退化为纯关键词）
-        int queryLimit = Math.max(topK * 5, 50);
+        // 2. 双路检索，候选池对齐：两路各取 queryLimit 条，融合后再截断 topK
+        //    （向量路已降级时为空列表，RRF 合并天然退化为纯关键词）
+        int queryLimit = clampQueryLimit(safeTopK * CANDIDATE_MULTIPLIER);
 
         List<RagHitVO> vectorHits = queryVector == null
                 ? Collections.emptyList()
                 : searchViaQdrant(queryVector, queryLimit, MIN_RELEVANCE_SCORE,
-                        categoryId, minPrice, maxPrice, topK);
+                        categoryId, minPrice, maxPrice);
 
         // 关键词路使用同义词扩展后的 query（向量路保持原 query，避免扩展词稀释语义重心）
         String keywordQuery = synonymExpander.expand(query);
         if (!keywordQuery.equals(query)) {
             log.debug("关键词路同义词扩展: '{}' → '{}'", query, keywordQuery);
         }
-        List<RagHitVO> keywordHits = keywordSearchService.searchByKeyword(keywordQuery, queryLimit);
+        // 关键词路的分类 / 价格过滤与向量路对齐（此前不过滤，属契约缺口，见 docs/rag-hybrid-tuning-design.md）
+        List<RagHitVO> keywordHits = keywordSearchService.searchByKeyword(
+                keywordQuery, queryLimit, categoryId, minPrice, maxPrice);
 
-        log.debug("混合检索: 向量命中 {}, 关键词命中 {}, 合并取 Top-{}",
-                vectorHits.size(), keywordHits.size(), topK);
+        log.debug("混合检索: 向量命中 {}, 关键词命中 {}, 候选池 {}, 合并取 Top-{}",
+                vectorHits.size(), keywordHits.size(), queryLimit, safeTopK);
 
-        // 4. RRF 合并
-        List<RagHitVO> merged = RrfMerger.merge(vectorHits, keywordHits, topK);
+        // 4. 加权 RRF 合并（默认等权，与改造前等价）
+        List<RagHitVO> merged = RrfMerger.merge(vectorHits, keywordHits, safeTopK,
+                rrfProperties.getK(), rrfProperties.getWeightVector(), rrfProperties.getWeightKeyword());
 
-        // T4 可观测性埋点：query/耗时/命中数/向量路状态（轻量，不记录对话内容）
-        log.info("[RAG指标] query={} topK={} 耗时{}ms 向量命中{} 关键词命中{} 合并{}条 向量路={}",
-                query, topK, (System.nanoTime() - startNanos) / 1_000_000,
+        // T4 可观测性埋点：query/耗时/命中数/权重/向量路状态（轻量，不记录对话内容）
+        log.info("[RAG指标] query={} topK={} 耗时{}ms 向量命中{} 关键词命中{} 合并{}条 RRF(k={},wv={},wk={}) 向量路={}",
+                query, safeTopK, (System.nanoTime() - startNanos) / 1_000_000,
                 vectorHits.size(), keywordHits.size(), merged.size(),
+                rrfProperties.getK(), rrfProperties.getWeightVector(), rrfProperties.getWeightKeyword(),
                 queryVector == null ? "已降级(纯关键词)" : "正常");
         return merged;
+    }
+
+    /**
+     * topK 入参兜底：收敛到 [1, {@link #MAX_TOP_K}]
+     *
+     * @param topK 原始入参
+     * @return 合法 topK
+     */
+    private static int clampTopK(int topK) {
+        return Math.min(Math.max(topK, 1), MAX_TOP_K);
+    }
+
+    /**
+     * 候选池兜底：收敛到 [{@link #MIN_QUERY_LIMIT}, {@link #MAX_QUERY_LIMIT}]
+     *
+     * @param queryLimit 原始候选池大小
+     * @return 合法候选池大小
+     */
+    private static int clampQueryLimit(int queryLimit) {
+        return Math.min(Math.max(queryLimit, MIN_QUERY_LIMIT), MAX_QUERY_LIMIT);
     }
 
     /**
@@ -138,11 +182,13 @@ public class RagSearchService {
     /**
      * 官方 QdrantEmbeddingStore.search() 向量检索（gRPC，1.19.0 已修复）
      * <p>
+     * 候选池对齐后不再按 topK 截断：Qdrant 请求侧 maxResults 即候选池上限，
+     * 让向量路与关键词路在 RRF 中拥有同等规模的候选集合。
+     * <p>
      * 异常时自动降级：返回空列表，由 RRF 合并退化为纯关键词路，并输出降级标记日志。
      */
     private List<RagHitVO> searchViaQdrant(float[] vector, int queryLimit, double minScore,
-                                            Long categoryId, BigDecimal minPrice, BigDecimal maxPrice,
-                                            int topK) {
+                                            Long categoryId, BigDecimal minPrice, BigDecimal maxPrice) {
         try {
             EmbeddingSearchRequest request = EmbeddingSearchRequest.builder()
                     .queryEmbedding(Embedding.from(vector))
@@ -155,11 +201,9 @@ public class RagSearchService {
                 return Collections.emptyList();
             }
 
-            // 遍历结果，过滤元数据，按 topK 截断
+            // 遍历结果并做元数据过滤（候选数量已由 maxResults 限定，无需再按 topK 截断）
             List<RagHitVO> hits = new ArrayList<>();
             for (EmbeddingMatch<TextSegment> match : matches) {
-                if (hits.size() >= topK) break;
-
                 TextSegment segment = match.embedded();
                 if (segment == null) continue;
                 Map<String, Object> meta = segment.metadata().toMap();

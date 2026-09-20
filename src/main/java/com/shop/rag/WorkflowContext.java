@@ -47,17 +47,38 @@ public class WorkflowContext {
     }
 
     /**
-     * 保存助手回复并收尾（发 end + 完成连接）。workflow 内部完成对话的出口。
+     * 保存本轮用户消息与助手回复并收尾（发 token + end + 完成连接）。workflow 内部完成对话的出口。
      *
      * @param reply 完整回复文本
      */
     public void replyAndComplete(String reply) {
+        saveUserMessage();
         saveAssistantMessage(reply);
+        // 正文必须先以 token 帧下发：前端只在 onToken 里累积正文，且显式忽略 end 帧的 content
+        // （chat.ts 注释「end 已在 done 时触发」）。只发 end 会让工作流回复永远渲染不出来
+        // ——实测订单查询已答「共 9 个订单」，界面却一直转圈
+        sendEvent("token", reply);
         sendEvent("end", reply);
         try {
             emitter.complete();
         } catch (Exception ignored) {
         }
+    }
+
+    /**
+     * 落库本轮用户消息
+     * <p>
+     * workflow 命中时 ChatService 会在路由分支提前 return，走不到它自己的用户消息落库（第 7 步），
+     * 因此必须在这里补存，否则该轮用户消息永久丢失：实测同一会话 user 21 条 / assistant 22 条，
+     * 缺失的正是「我的订单」那句——刷新后用户发言消失，会话记忆也少一轮。
+     * </p>
+     */
+    private void saveUserMessage() {
+        ChatMessageDO userMsgDO = new ChatMessageDO();
+        userMsgDO.setConversationId(Long.valueOf(conversationId));
+        userMsgDO.setRole("user");
+        userMsgDO.setContent(userMessage);
+        chatHistoryService.saveMessage(userMsgDO);
     }
 
     /** 把助手回复落库（首条自动生成会话标题） */

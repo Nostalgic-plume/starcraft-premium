@@ -15,6 +15,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -53,11 +54,11 @@ class RagFallbackTest {
     @BeforeEach
     void setUp() {
         ragSearchService = new RagSearchService(
-                embeddingModel, embeddingStore, keywordSearchService, synonymExpander);
+                embeddingModel, embeddingStore, keywordSearchService, synonymExpander, new RrfProperties());
         // 同义词扩展原样返回，聚焦降级逻辑本身
         when(synonymExpander.expand(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
         // 关键词路固定命中 1 条，用于断言「降级后仍有结果」
-        when(keywordSearchService.searchByKeyword(anyString(), anyInt()))
+        when(keywordSearchService.searchByKeyword(anyString(), anyInt(), any(), any(), any()))
                 .thenReturn(List.of(RagHitVO.builder().productId(PRODUCT_ID).name("海尔 滚筒洗衣机").build()));
     }
 

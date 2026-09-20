@@ -19,9 +19,9 @@ import java.util.concurrent.TimeUnit;
 /**
  * 客服意图识别（规则优先 + LLM 兜底）
  * <p>
- * 规则层用强信号关键词做低延迟、确定性的意图判定（取消/查订单）；
- * 规则无法可靠判定但命中订单域词时，才触发一次 LLM 分类兜底，避免每轮都引入额外 LLM 延迟；
- * LLM 失败或无关消息默认 {@link Intent#PRODUCT}。
+ * 规则层用强信号关键词做低延迟、确定性的意图判定（取消/查订单/闲聊）；
+ * 规则不明确时才触发一次 LLM 分类兜底（命中订单域词，或「短句且无任何信号词」），
+ * 避免每轮都引入额外 LLM 延迟；LLM 失败或无关消息默认 {@link Intent#PRODUCT}。
  * </p>
  *
  * @author shop
@@ -37,14 +37,41 @@ public class ChatIntentResolver {
     private static final String CLASSIFY_SYSTEM = "你是电商客服的意图分类器，只输出一个英文单词，不要任何解释。";
 
     private static final String CLASSIFY_PROMPT_TEMPLATE = """
-            把用户消息归类为以下三种意图之一，只输出对应英文单词（不要标点/解释）：
+            把用户消息归类为以下四种意图之一，只输出对应英文单词（不要标点/解释）：
             - cancel：取消订单（写操作）——用户明确要退单/取消某笔订单
             - query：查询订单（只读）——用户问自己订单的状态/物流/买了什么
-            - product：商品咨询/导购/闲聊——其余所有情况
+            - chitchat：闲聊——问候/道谢/告别/情绪倾诉/问你是谁/让你陪聊，且不涉及具体商品
+            - product：商品咨询/导购——其余所有情况
 
             用户消息：%s
 
             意图：""";
+
+    /** 闲聊强信号词（问候/致谢/告别/情绪/身份/陪聊）——命中且未命中商品信号词时判为闲聊 */
+    private static final String[] CHITCHAT_WORDS = {
+            "你好", "您好", "哈喽", "嗨", "在吗", "在么", "hi", "hello",
+            "谢谢", "感谢", "多谢", "辛苦",
+            "再见", "拜拜", "晚安", "早安",
+            "聊天", "陪我聊", "陪我", "聊两句", "说说话", "讲个笑话", "讲个故事", "讲故事", "唱首歌",
+            "无聊", "心情", "难过", "郁闷", "孤单", "寂寞", "安慰",
+            "你是谁", "你叫什么", "你会什么", "你能干什么", "你能做什么", "你多大", "你是机器人",
+            "介绍下你", "介绍一下你"
+    };
+
+    /**
+     * 商品信号词（闲聊守门用）：命中则一律按商品意图走，避免「陪我看看手机」这类
+     * 「闲聊词 + 商品词」混合句被误判成闲聊、白跑一趟不推商品。
+     * 只列高频词不求穷举——漏网的长尾句仍按原有 PRODUCT 链路处理，行为不劣于改造前。
+     */
+    private static final String[] PRODUCT_SIGNAL_WORDS = {
+            "买", "购", "价", "钱", "便宜", "贵", "推荐", "哪款", "哪个", "怎么样", "值得", "对比",
+            "参数", "配置", "型号", "尺寸", "颜色", "尺码", "品牌", "优惠", "活动", "券", "礼物",
+            "手机", "电脑", "相机", "耳机", "音响", "冰箱", "空调", "洗衣机", "电视", "鞋", "衣服", "包",
+            "面膜", "护肤", "化妆品", "零食", "玩具", "床品", "被子", "家具"
+    };
+
+    /** 「短句且无任何信号词」的长度上限：这类消息交给 LLM 分类兜底，避免漏判词表没覆盖的闲聊 */
+    private static final int AMBIGUOUS_MAX_LEN = 12;
 
     /**
      * 识别用户消息意图
@@ -72,19 +99,31 @@ public class ChatIntentResolver {
             return Intent.ORDER_QUERY;
         }
 
-        // ③ 命中订单域但规则不明确 → LLM 兜底一次（cancel/query/product）
-        if (message.contains("订单") || message.contains("单") || message.contains("快递")
-                || message.contains("退") || message.contains("取消")) {
+        // ③ 规则不明确 → LLM 兜底一次（cancel/query/chitchat/product）：
+        //    条件一：命中订单域词（模糊指代的订单问题）；条件二：短句且无任何信号词
+        //    （如「在干嘛」「你是deepseek吧」这类词表没覆盖的闲聊）
+        boolean orderDomainHit = message.contains("订单") || message.contains("单") || message.contains("快递")
+                || message.contains("退") || message.contains("取消");
+        boolean ambiguousShort = message.length() <= AMBIGUOUS_MAX_LEN
+                && !hasAny(message, PRODUCT_SIGNAL_WORDS) && !hasAny(message, CHITCHAT_WORDS);
+        if (orderDomainHit || ambiguousShort) {
             Intent llmIntent = classifyByLlm(message);
             if (llmIntent != null) {
                 return llmIntent;
             }
         }
 
+        // ④ 规则优先：闲聊强信号且无明显商品意图 → CHITCHAT
+        //    闲聊不检索商品、不推商品卡片：否则「能不能陪我聊天」会被拿去搜货架，
+        //    把毫不相关的商品卡片硬塞进闲聊回答（实测：闲聊被搜出蓝牙耳机/跳绳/扫地机器人并推送卡片）
+        if (hasAny(message, CHITCHAT_WORDS) && !hasAny(message, PRODUCT_SIGNAL_WORDS)) {
+            return Intent.CHITCHAT;
+        }
+
         return Intent.PRODUCT;
     }
 
-    /** 命中订单取消词但消息很短（"退了""取消"）也按取消意图走受控流程，由 workflow 引导订单定位 */
+    /** 关键词命中判定：任一关键词出现即命中（订单域与闲聊规则共用） */
     private boolean hasAny(String text, String... keywords) {
         for (String kw : keywords) {
             if (text.contains(kw)) {
@@ -131,6 +170,12 @@ public class ChatIntentResolver {
             }
             if (raw.contains("query")) {
                 return Intent.ORDER_QUERY;
+            }
+            if (raw.contains("chitchat")) {
+                return Intent.CHITCHAT;
+            }
+            if (raw.contains("product")) {
+                return Intent.PRODUCT;
             }
             return null;
         } catch (Exception e) {

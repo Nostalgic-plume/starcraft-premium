@@ -33,6 +33,7 @@ B2C 电商系统，**Spring Boot 单体后端 + Vue 3 三端分离前端**，Ngi
 | 反向代理 | Nginx 1.20.2 |
 | JDK | OpenJDK 22 |
 | RAG 语义搜索 | LangChain4j 1.19.0 + Qdrant（1536维）+ DashScope（text-embedding-v1 嵌入） |
+| 全文检索（待接入） | Elasticsearch 8.11.4 + IK 8.11.4 中文分词（compose 一键启动已就绪，Java 侧尚未接线） |
 | 智能客服 | LangChain4j AiServices + DeepSeek（主）/ qwen-plus（备）+ Function Calling 工具链 + RAG 检索增强 |
 | 离线数仓 | Hive 3.x + Sqoop 1.4.x + Azkaban 3.x |
 

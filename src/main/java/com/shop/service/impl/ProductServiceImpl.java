@@ -1,6 +1,7 @@
 package com.shop.service.impl;
 
 import cn.dev33.satoken.exception.NotLoginException;
+import cn.dev33.satoken.exception.SaTokenException;
 import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.CollUtil;
@@ -145,13 +146,41 @@ public class ProductServiceImpl implements ProductService {
     }
 
     /**
-     * 商品分页查询：按创建时间倒序，支持一级/二级分类联动筛选、商家筛选、关键字模糊搜索
+     * 商品分页查询（用户端/公开接口）：强制仅返回上架商品，下架与待审核商品对前台不可见；
+     * 管理员登录时放行全状态并支持按 status 筛选（管理后台商品管理复用此接口）
      *
      * @param query 分页与筛选参数（page/pageSize、firstCategoryId、categoryId、shopId、keyword）
      * @return 商品分页结果 {@code PageResult<ProductVO>}
      */
     @Override
     public PageResult<ProductVO> page(ProductPageQuery query) {
+        // 管理后台需查看/筛选全状态商品；其余调用方（含未登录）一律只看上架商品
+        return doPage(query, isAdminLoginQuietly());
+    }
+
+    /**
+     * 静默判断管理员登录态：非 Web 上下文（单元测试、后台线程）取不到 Sa-Token 上下文时降级为 false，
+     * 即按"用户端"处理——只可见上架商品。宁可少展示，也不因上下文缺失而泄漏下架商品
+     *
+     * @return true=管理员已登录
+     */
+    private boolean isAdminLoginQuietly() {
+        try {
+            return StpAdminUtil.INSTANCE.isLogin();
+        } catch (SaTokenException e) {
+            log.debug("无 Sa-Token 上下文（非 Web 线程），商品分页按用户端处理：仅上架可见");
+            return false;
+        }
+    }
+
+    /**
+     * 商品分页查询内部实现：按创建时间倒序，支持一级/二级分类联动筛选、商家筛选、关键字模糊搜索与状态筛选
+     *
+     * @param query            分页与筛选参数
+     * @param canViewAllStatus true=可查看全状态商品（管理端/商家端），false=强制仅上架（用户端）
+     * @return 商品分页结果 {@code PageResult<ProductVO>}
+     */
+    private PageResult<ProductVO> doPage(ProductPageQuery query, boolean canViewAllStatus) {
         int[] pn = PaginationHelper.normalize(query.getPage(), query.getPageSize());
         query.setPage(pn[0]);
         query.setPageSize(pn[1]);
@@ -189,6 +218,16 @@ public class ProductServiceImpl implements ProductService {
         // 关键字搜索
         if (query.getKeyword() != null && !query.getKeyword().isBlank()) {
             wrapper.like(ProductDO::getName, query.getKeyword());
+        }
+
+        // 状态过滤：用户端强制上架（忽略入参，服务端兜底——否则前端传 status=2 即可看到下架商品，
+        // 点进去下单才被 OrderServiceImpl 判为"商品已下架"）；管理端/商家端按需筛选
+        if (canViewAllStatus) {
+            if (query.getStatus() != null) {
+                wrapper.eq(ProductDO::getStatus, query.getStatus());
+            }
+        } else {
+            wrapper.eq(ProductDO::getStatus, ProductConstants.STATUS_ON_SHELF);
         }
 
         IPage<ProductDO> iPage = productMapper.selectPage(mpPage, wrapper);
@@ -302,7 +341,8 @@ public class ProductServiceImpl implements ProductService {
     @Override
     public PageResult<ProductVO> merchantPage(ProductPageQuery query) {
         query.setShopId(StpShopUtil.INSTANCE.getLoginIdAsLong());
-        return page(query);
+        // 商家端管理本店商品，需可见待审核/下架状态（shop_id 已在上面注入，数据隔离不依赖状态过滤）
+        return doPage(query, true);
     }
 
     /** 商品 DO 转 VO */

@@ -29,6 +29,9 @@ public class ProductPageQuery {
     @Schema(description = "关键字（搜索商品名称）")
     private String keyword;
 
+    @Schema(description = "商品状态：0=待审核 1=上架 2=下架。仅管理端/商家端生效；用户端强制仅返回上架商品")
+    private Integer status;
+
     @Schema(description = "排序：price_asc/price_desc/time_desc")
     private String sort;
 }

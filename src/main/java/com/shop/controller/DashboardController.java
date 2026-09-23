@@ -27,8 +27,11 @@ public class DashboardController {
     /**
      * 获取看板全量数据
      * 聚合 9 个数仓维度，返回统一 Result 包装
+     * <p>
+     * 仅供管理后台（loginType="admin"）调用。三端独立会话下 loginType 相互隔离，
+     * 此前误标 {@code type="user"} 会让管理员登录后仍被判为未登录。
      */
-    @SaCheckLogin(type ="user")
+    @SaCheckLogin(type = "admin")
     @GetMapping("/all")
     public Result<DashboardAllVO> all() {
         log.info("查询数据看板全量数据");

@@ -141,6 +141,11 @@ export interface ProductPageQuery {
   keyword?: string
   categoryId?: string | number
   firstCategoryId?: string | number
+  /**
+   * 商品状态：0=待审核 1=上架 2=下架
+   * ⚠️ 仅管理端/商家端生效；用户端由后端强制固定为上架，传其他值无效
+   */
+  status?: number
 }
 
 // ==================== 购物车（对照 CartVO / CartDTO） ====================

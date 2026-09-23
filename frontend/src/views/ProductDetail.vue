@@ -111,6 +111,7 @@
                   class="qty-input"
                 />
               </div>
+              <div v-if="product.status !== 1" class="off-shelf-tip">该商品已下架，暂不支持购买</div>
               <div class="action-buttons">
                 <button type="button" class="btn-add-cart" :disabled="!canBuy" @click="addToCart">
                   <SvgIcon name="cart" :size="18" />
@@ -308,7 +309,11 @@ const saveAmount = computed(() => {
 
 const maxQty = computed(() => Math.max(1, selectedSku.value?.stock ?? 99))
 
-const canBuy = computed(() => !!selectedSku.value && selectedSku.value.stock > 0)
+// 已下架商品（status≠1）或所选规格无库存均不可购买：前者后端下单必被拒（"商品已下架"），
+// 提前在前端置灰，避免用户点下去才看到报错
+const canBuy = computed(
+  () => product.value?.status === 1 && !!selectedSku.value && selectedSku.value.stock > 0
+)
 
 const activeImageUrl = computed(() => {
   const imgs = product.value?.images || []
@@ -811,6 +816,15 @@ onUnmounted(() => {
 .qty-label {
   font-size: 14px;
   color: var(--ds-text-2, #5a6474);
+}
+/* 已下架提示：中性色，与下方置灰按钮呼应 */
+.off-shelf-tip {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border-radius: var(--ds-r, 12px);
+  background: rgba(152, 161, 175, 0.14);
+  color: var(--ds-text-2, #5a6474);
+  font-size: 13px;
 }
 .action-buttons {
   display: flex;

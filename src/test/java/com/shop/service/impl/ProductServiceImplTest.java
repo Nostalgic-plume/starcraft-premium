@@ -1,10 +1,13 @@
 package com.shop.service.impl;
 
 import cn.dev33.satoken.stp.StpUtil;
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.shop.common.BusinessException;
 import com.shop.common.PageResult;
+import com.shop.common.SaTokenMockUtil;
 import com.shop.constant.ProductConstants;
 import com.shop.mapper.CategoryMapper;
 import com.shop.mapper.OrderItemMapper;
@@ -20,6 +23,7 @@ import com.shop.model.query.ProductPageQuery;
 import com.shop.model.vo.ProductVO;
 import com.shop.rag.ProductIndexer;
 import com.shop.service.StockCacheService;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
@@ -27,12 +31,14 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.util.Collection;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -86,6 +92,10 @@ class ProductServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        // 纯 Mockito 无 Spring 上下文：断言 wrapper 条件（getSqlSegment 解析 Lambda 列名）需 TableInfo 缓存，
+        // 手动初始化（幂等，重复调用直接返回已有缓存）
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), ProductDO.class);
+
         parentCategory = new CategoryDO();
         parentCategory.setId(1L);
         parentCategory.setName("手机数码");
@@ -319,6 +329,91 @@ class ProductServiceImplTest {
 
             assertEquals(0, result.getTotal());
             assertTrue(result.getList().isEmpty());
+        }
+
+        @Test
+        @DisplayName("用户端查询：强制仅上架，忽略传入的 status=2（防止下架商品流入前台）")
+        void page_ShouldForceOnShelf_WhenNotAdmin() {
+            ProductPageQuery query = new ProductPageQuery();
+            query.setStatus(2); // 模拟客户端试图绕过限制查看下架商品
+
+            Page<ProductDO> mpPage = new Page<>(1, 10);
+            mpPage.setRecords(List.of(product));
+            mpPage.setTotal(1);
+
+            when(productMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(mpPage);
+            when(categoryMapper.selectById(10L)).thenReturn(leafCategory);
+            when(skuMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(sku));
+
+            productService.page(query);
+
+            LambdaQueryWrapper<ProductDO> wrapper = captureWrapper();
+            assertTrue(wrapper.getSqlSegment().contains("status"), "用户端查询 SQL 应包含 status 过滤条件");
+            Collection<Object> values = wrapper.getParamNameValuePairs().values();
+            assertTrue(values.contains(ProductConstants.STATUS_ON_SHELF), "用户端应强制按上架状态过滤");
+            assertFalse(values.contains(2), "入参 status=2 必须被忽略，不能查出下架商品");
+        }
+
+        @Test
+        @DisplayName("管理员登录：按传入 status 筛选（管理后台状态筛选生效）")
+        void page_ShouldFilterByStatus_WhenAdminLogin() {
+            ProductPageQuery query = new ProductPageQuery();
+            query.setStatus(2);
+
+            Page<ProductDO> mpPage = new Page<>(1, 10);
+            mpPage.setRecords(List.of(product));
+            mpPage.setTotal(1);
+
+            when(productMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(mpPage);
+            when(categoryMapper.selectById(10L)).thenReturn(leafCategory);
+            when(skuMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(sku));
+
+            try (var scope = SaTokenMockUtil.userLogin(1L)) {
+                productService.page(query);
+            }
+
+            LambdaQueryWrapper<ProductDO> wrapper = captureWrapper();
+            Collection<Object> values = wrapper.getParamNameValuePairs().values();
+            assertTrue(values.contains(2), "管理员应按传入的 status=2 筛选");
+            assertFalse(values.contains(ProductConstants.STATUS_ON_SHELF), "管理员查询不应被强制追加仅上架条件");
+        }
+
+        @Test
+        @DisplayName("商家端查询：可查看本店全状态商品（含待审核/下架）")
+        void merchantPage_ShouldNotForceOnShelf() {
+            ProductPageQuery query = new ProductPageQuery();
+
+            Page<ProductDO> mpPage = new Page<>(1, 10);
+            mpPage.setRecords(List.of(product));
+            mpPage.setTotal(1);
+
+            when(productMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(mpPage);
+            when(categoryMapper.selectById(10L)).thenReturn(leafCategory);
+            when(skuMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(sku));
+
+            try (var scope = SaTokenMockUtil.userLogin(50L)) {
+                productService.merchantPage(query);
+            }
+
+            LambdaQueryWrapper<ProductDO> wrapper = captureWrapper();
+            assertFalse(wrapper.getSqlSegment().contains("status"),
+                    "商家端不应被追加 status 条件，否则看不到本店下架商品");
+            assertFalse(wrapper.getParamNameValuePairs().values().contains(ProductConstants.STATUS_ON_SHELF),
+                    "商家端不应被强制仅上架");
+        }
+
+        /**
+         * 捕获传给 Mapper 的查询包装器，并触发 SQL 片段构建
+         * （MyBatis-Plus 条件值在 getSqlSegment() 时才惰性填入 paramNameValuePairs，不先触发则取到空值）
+         */
+        private LambdaQueryWrapper<ProductDO> captureWrapper() {
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<LambdaQueryWrapper<ProductDO>> captor =
+                    ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+            verify(productMapper).selectPage(any(Page.class), captor.capture());
+            LambdaQueryWrapper<ProductDO> wrapper = captor.getValue();
+            wrapper.getSqlSegment();
+            return wrapper;
         }
     }
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { ProductVO } from '@/api/types'
 import SvgIcon from './SvgIcon.vue'
 
@@ -13,6 +14,16 @@ const emit = defineEmits<{
   /** Phase 4：点击商品卡片跳详情（父组件做行为反馈埋点） */
   (e: 'detail-click', product: ProductVO): void
 }>()
+
+/**
+ * 是否售罄（所有规格库存均为 0）
+ * ⚠️ 必须要求 skuList 非空：RAG 语义搜索结果的 skuList 为空数组、totalStock 为占位 0，
+ * 仅凭 totalStock === 0 会把整页搜索结果误标为"已售罄"
+ */
+const isSoldOut = computed(() => {
+  const skus = props.product.skuList
+  return !!skus?.length && skus.every(s => Number(s.stock) <= 0)
+})
 
 /** 价格展示：整数省略小数，否则保留两位 */
 function formatPrice(val: number | undefined | null): string {
@@ -44,7 +55,8 @@ function onDetailClick() {
       <div v-else class="media-placeholder">
         <SvgIcon name="box" :size="46" class="placeholder-icon" />
       </div>
-      <span v-if="product.status === 1" class="card-badge">在售</span>
+      <span v-if="isSoldOut" class="card-badge card-badge--soldout">已售罄</span>
+      <span v-else-if="product.status === 1" class="card-badge">在售</span>
     </div>
 
     <!-- 信息区 -->
@@ -129,6 +141,10 @@ function onDetailClick() {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.3px;
+}
+/* 售罄角标：中性灰，与"在售"的品牌蓝区分 */
+.card-badge--soldout {
+  background: var(--ds-text-3, #98a1af);
 }
 
 /* 信息区 */

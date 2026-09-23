@@ -81,6 +81,12 @@ server:
 
 sa-token:
   token-name: token
+  # 关闭 cookie 读写：三端均为 SPA，token 走请求头、存于各端独立的 localStorage。
+  # 开启 cookie 会因「同源共享 cookie」导致三端会话串扰——例如商家端登录种下的 token cookie，
+  # 会让用户端/未登录游客的请求被识别为商家会话，误触发 ShopDataIsolationInterceptor。
+  # 且前端「退出登录」只清 localStorage，不会清 cookie，残留 cookie 会长期污染游客态。
+  is-read-cookie: false
+  is-write-cookie: false
   # 会话存储介质：memory=JVM 内存（默认，单机可用）；redis=Redis 存储（分布式会话共享，
   # 多实例部署时登录态/强制下线跨实例生效；序列化走 sa-token-jackson，对象以 JSON 存 String 键）
   dao-type: redis

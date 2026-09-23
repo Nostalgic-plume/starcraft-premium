@@ -16,6 +16,8 @@ import org.apache.ibatis.session.RowBounds;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -243,13 +245,22 @@ public class ShopDataIsolationInterceptor implements InnerInterceptor {
     private void addShopIdParameter(MappedStatement ms, BoundSql boundSql) {
         String paramName = "_shopId";
         // 避免重复添加（同一条 SQL 可能被多次拦截）
-        boolean alreadyExists = boundSql.getParameterMappings().stream()
+        List<ParameterMapping> mappings = boundSql.getParameterMappings();
+        boolean alreadyExists = mappings.stream()
                 .anyMatch(m -> paramName.equals(m.getProperty()));
         if (alreadyExists) return;
 
         ParameterMapping mapping = new ParameterMapping.Builder(
                 ms.getConfiguration(), paramName, Long.class).build();
-        boundSql.getParameterMappings().add(mapping);
+
+        // parameterMappings 不保证可变：MyBatis-Plus 分页插件写回分页参数时
+        // （PluginUtils$MPBoundSql#parameterMappings(setter)）会用 Collections.unmodifiableList 包装，
+        // 此时直接 add 会抛 UnsupportedOperationException，导致整个查询 500（游客/用户端查商品曾因此失败）。
+        // 故统一构造可变副本并反射写回（与上方改写 sql 字段为同一手法）。
+        List<ParameterMapping> mutableMappings = new ArrayList<>(mappings);
+        mutableMappings.add(mapping);
+        SystemMetaObject.forObject(boundSql).setValue("parameterMappings", mutableMappings);
+
         boundSql.setAdditionalParameter(paramName, getCurrentShopId());
     }
 

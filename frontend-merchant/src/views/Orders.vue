@@ -494,43 +494,54 @@ onMounted(loadOrders)
   font-weight: 600;
   font-family: var(--ds-mono, Consolas, monospace);
 }
+.table-card :deep(.cell-price) {
+  color: var(--ds-price, #2d7ff9);
+  font-weight: 600;
+  font-family: var(--ds-mono, Consolas, monospace);
+}
 .cell-muted {
+  color: var(--ds-text-3, #98a1af);
+}
+.table-card :deep(.cell-muted) {
   color: var(--ds-text-3, #98a1af);
 }
 .cell-mono {
   font-family: var(--ds-mono, Consolas, monospace);
 }
-.buyer-cell {
+.table-card :deep(.cell-mono) {
+  font-family: var(--ds-mono, Consolas, monospace);
+}
+.table-card :deep(.buyer-cell) {
   display: flex;
   flex-direction: column;
 }
-.buyer-name {
+.table-card :deep(.buyer-name) {
   font-size: 14px;
   color: var(--ds-text, #1e2632);
 }
-.buyer-phone {
+.table-card :deep(.buyer-phone) {
   font-size: 12px;
   color: var(--ds-text-3, #98a1af);
   margin-top: 2px;
 }
-.goods-cell {
+.table-card :deep(.goods-cell) {
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
-.goods-name {
+.table-card :deep(.goods-name) {
   font-size: 14px;
   color: var(--ds-text, #1e2632);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.goods-sub {
+.table-card :deep(.goods-sub) {
   font-size: 12px;
   color: var(--ds-text-3, #98a1af);
   margin-top: 2px;
 }
-.action-cell {
+.table-card :deep(.action-cell) {
   display: inline-flex;
   gap: 4px;
 }

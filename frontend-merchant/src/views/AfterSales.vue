@@ -263,15 +263,15 @@ const columns: DataTableColumns<AfterSaleRow> = [
 }
 
 /* ====== 单元格 ====== */
-.cell-price {
+.table-card :deep(.cell-price) {
   color: var(--ds-price, #2d7ff9);
   font-weight: 600;
   font-family: var(--ds-mono, Consolas, monospace);
 }
-.cell-muted {
+.table-card :deep(.cell-muted) {
   color: var(--ds-text-3, #98a1af);
 }
-.cell-mono {
+.table-card :deep(.cell-mono) {
   font-family: var(--ds-mono, Consolas, monospace);
 }
 </style>

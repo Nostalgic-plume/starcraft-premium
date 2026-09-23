@@ -1,7 +1,7 @@
 <template>
   <div class="page-container fade-in" ref="pageRef">
     <!-- ====== Hero 区域（中性渐变底 + 蓝色强调 + 统计条） ====== -->
-    <section class="hero">
+    <section class="hero" :class="{ 'hero--panel-open': searchPanelOpen }">
       <div class="hero-inner">
         <div class="hero-copy">
           <span class="hero-eyebrow">
@@ -674,6 +674,22 @@ onUnmounted(() => {
   isolation: isolate;
   padding: 44px 48px;
   margin-bottom: 28px;
+}
+/*
+ * 下拉面板打开时提升层级，保证面板压住页面其他组件。
+ * 面板自身 z-index:60 不够用，它被困在三层层叠上下文里：
+ *   .hero(isolation:isolate) → .hero-inner(z-index:1) → .hero-search-wrap(transform)
+ * 1) .hero 的 z-index 是 auto，DOM 中更靠后的粘性分类栏(aside.category-panel) 与商品网格
+ *    (n-spin-container, position:relative) 会整体盖住 hero 这棵树 → 提升 .hero。
+ * 2) hero 内部的数据统计条 .hero-stats 被 GSAP 动画留下 transform，同样脱离普通流层叠顺序，
+ *    且在 DOM 中晚于搜索框 → 会盖住面板 → 同步提升 .hero-search-wrap。
+ * 仅面板打开时生效，避免滚动时 hero 反过来压住粘性侧栏。
+ */
+.hero--panel-open {
+  z-index: 20;
+}
+.hero--panel-open .hero-search-wrap {
+  z-index: 2;
 }
 .hero-inner {
   position: relative;

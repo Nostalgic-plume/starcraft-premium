@@ -392,20 +392,23 @@ function formatPriceRange(row: ProductVO): string {
   return min === max ? `¥${min.toFixed(2)}` : `¥${min.toFixed(2)} ~ ¥${max.toFixed(2)}`
 }
 
-function renderProductCell(row: ProductVO) {
-  return h('div', { class: 'product-cell' }, [
-    h('img', {
-      class: 'product-thumb',
-      src: row.mainImage || IMG_PLACEHOLDER,
-      alt: row.name,
-      onError: (e: Event) => {
-        ;(e.target as HTMLImageElement).src = IMG_PLACEHOLDER
-      }
-    }),
-    h('div', { class: 'product-meta' }, [
-      h('div', { class: 'product-name' }, row.name),
-      row.brand ? h('div', { class: 'product-brand' }, row.brand) : null
-    ])
+/** 商品图片列：只渲染缩略图（表格内样式见底部 :deep 规则） */
+function renderProductThumb(row: ProductVO) {
+  return h('img', {
+    class: 'product-thumb',
+    src: row.mainImage || IMG_PLACEHOLDER,
+    alt: row.name,
+    onError: (e: Event) => {
+      ;(e.target as HTMLImageElement).src = IMG_PLACEHOLDER
+    }
+  })
+}
+
+/** 商品名列：名称 + 品牌 */
+function renderProductName(row: ProductVO) {
+  return h('div', { class: 'product-meta' }, [
+    h('div', { class: 'product-name' }, row.name),
+    row.brand ? h('div', { class: 'product-brand' }, row.brand) : null
   ])
 }
 
@@ -431,7 +434,8 @@ function renderActions(row: ProductVO) {
 }
 
 const columns: DataTableColumns<ProductVO> = [
-  { title: '商品', key: 'name', minWidth: 240, render: renderProductCell },
+  { title: '商品图片', key: 'mainImage', width: 140, align: 'center', render: renderProductThumb },
+  { title: '商品名', key: 'name', minWidth: 220, render: renderProductName },
   {
     title: '分类',
     key: 'categoryName',
@@ -600,6 +604,19 @@ onMounted(async () => {
   border-radius: var(--ds-r, 12px);
   padding: 16px;
 }
+/* ====== 表格内部边框（Naive UI 默认只有外框 + 行分隔线）====== */
+.table-card :deep(.n-data-table-th),
+.table-card :deep(.n-data-table-td) {
+  border-right: 1px solid var(--ds-line, #e7e9ee);
+  border-bottom: 1px solid var(--ds-line, #e7e9ee);
+}
+.table-card :deep(.n-data-table-th:last-child),
+.table-card :deep(.n-data-table-td:last-child) {
+  border-right: none;
+}
+.table-card :deep(.n-data-table-tr:last-child .n-data-table-td) {
+  border-bottom: none;
+}
 .pagination-wrap {
   display: flex;
   justify-content: flex-end;
@@ -607,38 +624,39 @@ onMounted(async () => {
 }
 
 /* ====== 单元格 ====== */
-.cell-price {
-  color: var(--ds-price, #2d7ff9);
-  font-weight: 600;
-  font-family: var(--ds-mono, Consolas, monospace);
-}
 .cell-muted {
   color: var(--ds-text-3, #98a1af);
 }
-.product-cell {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+/* 渲染函数 h() 生成的节点不带 scoped 属性，表格内样式必须走 :deep() 才会生效 */
+.table-card :deep(.cell-price) {
+  color: var(--ds-price, #2d7ff9);
+  font-weight: 600;
+  font-family: var(--ds-mono, Consolas, monospace);
+  white-space: nowrap;
 }
-.product-thumb {
-  width: 48px;
-  height: 48px;
+.table-card :deep(.cell-muted) {
+  color: var(--ds-text-3, #98a1af);
+}
+.table-card :deep(.product-thumb) {
+  display: block;
+  width: 100px;
+  height: 100px;
+  margin: 0 auto;
   border-radius: var(--ds-r-sm, 9px);
   object-fit: cover;
   background: var(--ds-bg-2, #eef0f4);
-  flex-shrink: 0;
 }
-.product-name {
+.table-card :deep(.product-name) {
   font-size: 14px;
   font-weight: 500;
   color: var(--ds-text, #1e2632);
 }
-.product-brand {
+.table-card :deep(.product-brand) {
   font-size: 12px;
   color: var(--ds-text-3, #98a1af);
   margin-top: 2px;
 }
-.action-cell {
+.table-card :deep(.action-cell) {
   display: inline-flex;
   gap: 4px;
 }
@@ -662,8 +680,8 @@ onMounted(async () => {
   color: var(--ds-text-3, #98a1af);
 }
 .preview-img {
-  width: 96px;
-  height: 96px;
+  width: 100px;
+  height: 100px;
   object-fit: cover;
   border-radius: var(--ds-r-sm, 9px);
   background: var(--ds-bg-2, #eef0f4);

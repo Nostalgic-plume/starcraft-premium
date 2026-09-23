@@ -50,10 +50,10 @@
 
         <div class="chart-card">
           <div class="chart-header">
-            <div class="chart-title">订单分布</div>
+            <div class="chart-title">订单状态日趋势</div>
           </div>
-          <div v-if="distribution.length" ref="distRef" class="chart-box"></div>
-          <div v-else class="chart-box chart-empty">暂无分布数据</div>
+          <div v-if="orderTrend.length" ref="orderTrendRef" class="chart-box"></div>
+          <div v-else class="chart-box chart-empty">暂无订单状态数据</div>
         </div>
 
         <div class="chart-card">
@@ -66,10 +66,26 @@
 
         <div class="chart-card">
           <div class="chart-header">
-            <div class="chart-title">用户增长（近30天）</div>
+            <div class="chart-title">分类销售排行</div>
           </div>
-          <div v-if="userGrowth.length" ref="growthRef" class="chart-box"></div>
-          <div v-else class="chart-box chart-empty">暂无增长数据</div>
+          <div v-if="categorySales.length" ref="categoryRef" class="chart-box"></div>
+          <div v-else class="chart-box chart-empty">暂无分类数据</div>
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-header">
+            <div class="chart-title">周趋势与环比</div>
+          </div>
+          <div v-if="weeklyTrend.length" ref="weeklyRef" class="chart-box"></div>
+          <div v-else class="chart-box chart-empty">暂无周趋势数据</div>
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-header">
+            <div class="chart-title">GMV 与付费用户（近 10 天）</div>
+          </div>
+          <div v-if="gmvTrend.length" ref="gmvRef" class="chart-box"></div>
+          <div v-else class="chart-box chart-empty">暂无 GMV 数据</div>
         </div>
       </section>
     </template>
@@ -82,8 +98,17 @@ import * as echarts from 'echarts'
 import { NButton, NRadioButton, NRadioGroup, NResult, NSpin } from 'naive-ui'
 import { dashboardApi } from '@/api/dashboard'
 import { fetchDashboardAll } from '@/api/report'
-import { CHART_BARS, CHART_LINE, CHART_TEXT } from '@shared/js/echarts-theme'
-import type { AdminStatsVO, DashboardAllVO, OrderDistItem, ProductSalesVO, SalesTrendVO } from '@/api/types'
+import { CHART_ACCENT, CHART_BARS, CHART_TEXT } from '@shared/js/echarts-theme'
+import type {
+  AdminStatsVO,
+  CategorySalesVO,
+  DashboardAllVO,
+  GmvTrendPointVO,
+  OrderTrendPointVO,
+  ProductSalesVO,
+  SalesTrendVO,
+  WeeklyTrendVO
+} from '@/api/types'
 
 // ==================== 数据状态 ====================
 
@@ -94,21 +119,30 @@ const stats = ref<AdminStatsVO | null>(null)
 const trend = ref<SalesTrendVO[]>([])
 const productSales = ref<ProductSalesVO[]>([])
 const userGrowth = ref<SalesTrendVO[]>([])
-const distribution = ref<OrderDistItem[]>([])
 const all = ref<DashboardAllVO | null>(null)
 const trendDays = ref<number>(7)
+
+/** ADS 多天序列（随 dashboard/all 一起返回，不额外请求） */
+const orderTrend = computed<OrderTrendPointVO[]>(() => all.value?.orderTrend || [])
+const categorySales = computed<CategorySalesVO[]>(() => all.value?.categorySales || [])
+const weeklyTrend = computed<WeeklyTrendVO[]>(() => all.value?.weeklyTrend || [])
+const gmvTrend = computed<GmvTrendPointVO[]>(() => all.value?.gmvTrend || [])
 
 // ==================== 图表实例 ====================
 
 const trendRef = ref<HTMLElement | null>(null)
-const distRef = ref<HTMLElement | null>(null)
 const productRef = ref<HTMLElement | null>(null)
-const growthRef = ref<HTMLElement | null>(null)
+const orderTrendRef = ref<HTMLElement | null>(null)
+const categoryRef = ref<HTMLElement | null>(null)
+const weeklyRef = ref<HTMLElement | null>(null)
+const gmvRef = ref<HTMLElement | null>(null)
 
 let trendChart: echarts.ECharts | null = null
-let distChart: echarts.ECharts | null = null
 let productChart: echarts.ECharts | null = null
-let growthChart: echarts.ECharts | null = null
+let orderTrendChart: echarts.ECharts | null = null
+let categoryChart: echarts.ECharts | null = null
+let weeklyChart: echarts.ECharts | null = null
+let gmvChart: echarts.ECharts | null = null
 
 // ==================== 数据加载 ====================
 
@@ -123,15 +157,13 @@ async function loadData() {
       dashboardApi.getSalesTrend(trendDays.value),
       dashboardApi.getProductSales(),
       dashboardApi.getUserGrowth(),
-      dashboardApi.getOrderDistribution(),
       fetchDashboardAll()
     ])
-    const [s, t, p, g, dist, allRes] = results
+    const [s, t, p, g, allRes] = results
     stats.value = s.status === 'fulfilled' ? ((s.value?.data as AdminStatsVO | undefined) || null) : null
     trend.value = t.status === 'fulfilled' ? (((t.value?.data as SalesTrendVO[] | undefined) || []) as SalesTrendVO[]) : []
     productSales.value = p.status === 'fulfilled' ? (((p.value?.data as ProductSalesVO[] | undefined) || []) as ProductSalesVO[]) : []
     userGrowth.value = g.status === 'fulfilled' ? (((g.value?.data as SalesTrendVO[] | undefined) || []) as SalesTrendVO[]) : []
-    distribution.value = dist.status === 'fulfilled' ? (((dist.value?.data as OrderDistItem[] | undefined) || []) as OrderDistItem[]) : []
     all.value = allRes.status === 'fulfilled' ? (allRes.value.data || null) : null
 
     const failedCount = results.filter((r) => r.status === 'rejected').length
@@ -223,6 +255,12 @@ function fmtNumber(v: number | string | null | undefined): string {
   return Number(v).toLocaleString('zh-CN')
 }
 
+/** 百分比：ADS 层已乘以 100，直接保留一位小数（对齐 report.ts 的 formatPercent） */
+function fmtPct(v: number | string | null | undefined): string {
+  if (v == null) return '—'
+  return Number(v).toFixed(1) + '%'
+}
+
 function axisMoney(v: number): string {
   const abs = Math.abs(v)
   if (abs >= 1e8) return (v / 1e8).toFixed(1) + '亿'
@@ -268,6 +306,7 @@ const kpiList = computed<KpiItem[]>(() => {
   const s = stats.value
   const gmvDaily = all.value?.gmvDaily
   const userNew = all.value?.userNewRetain
+  const overview = all.value?.overview
   const saleDelta = trendDelta('amount')
   return [
     {
@@ -289,7 +328,20 @@ const kpiList = computed<KpiItem[]>(() => {
       deltaText: saleDelta ? `${saleDelta.up ? '▲' : '▼'} ${Math.abs(saleDelta.pct).toFixed(1)}%` : '—',
       deltaClass: saleDelta ? (saleDelta.up ? 'up' : 'down') : 'flat'
     },
-    { label: '待支付', value: fmtNumber(s?.pendingOrders), deltaText: '—', deltaClass: 'flat' }
+    { label: '待支付', value: fmtNumber(s?.pendingOrders), deltaText: '—', deltaClass: 'flat' },
+    { label: '客单价', value: fmtMoney(overview?.avgOrderPrice), deltaText: '近一日', deltaClass: 'flat' },
+    {
+      label: '次日留存',
+      value: fmtPct(userNew?.day1RetainRate),
+      deltaText: userNew ? `留存 ${fmtNumber(userNew.day1RetainUsers)} 人` : '—',
+      deltaClass: 'flat'
+    },
+    {
+      label: '7日留存',
+      value: fmtPct(userNew?.day7RetainRate),
+      deltaText: userNew ? `留存 ${fmtNumber(userNew.day7RetainUsers)} 人` : '—',
+      deltaClass: 'flat'
+    }
   ]
 })
 
@@ -401,33 +453,96 @@ function buildTrendOption(): echarts.EChartsOption {
   }
 }
 
-function buildDistOption(): echarts.EChartsOption {
-  const statusNameMap: Record<number, string> = { 0: '待支付', 1: '已支付', 2: '已发货', 3: '已收货', 4: '已完成', 5: '已取消', 6: '已退款' }
-  const palette = [...CHART_BARS, '#1E63D6', '#DCE8FB', '#98A1AF']
-  const data = distribution.value.map((d, i) => ({
-    name: statusNameMap[Number(d.status)] || '未知',
-    value: Number(d.cnt) || 0,
-    itemStyle: { color: palette[i % palette.length] }
-  }))
+/**
+ * 订单状态日趋势：堆叠柱（ADS ads_order_stats_daily 多天构成）。
+ * 替代原「订单分布」饼图 —— 饼图只有最新一天快照，浪费了 10 天数据。
+ */
+function buildOrderTrendOption(): echarts.EChartsOption {
+  const rows = orderTrend.value
+  const defs: Array<{ name: string; color: string; get: (r: OrderTrendPointVO) => number }> = [
+    { name: '已支付', color: CHART_BARS[0], get: (r) => Number(r.paidOrders) || 0 },
+    { name: '已发货', color: CHART_BARS[1], get: (r) => Number(r.shippedOrders) || 0 },
+    { name: '已完成', color: CHART_BARS[2], get: (r) => Number(r.completedOrders) || 0 },
+    { name: '已取消', color: CHART_BARS[3], get: (r) => Number(r.cancelledOrders) || 0 }
+  ]
   return {
-    tooltip: { trigger: 'item', formatter: '{b}: {c} 单 ({d}%)' },
-    legend: {
-      bottom: 0,
-      icon: 'circle',
-      itemWidth: 8,
-      itemHeight: 8,
-      textStyle: { color: CHART_TEXT, fontSize: 11 }
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      backgroundColor: 'rgba(23,34,47,0.92)',
+      borderColor: 'rgba(255,255,255,0.1)',
+      textStyle: { color: '#fff' }
+    },
+    legend: { top: 0, right: 0, icon: 'circle', itemWidth: 8, itemHeight: 8, textStyle: { color: CHART_TEXT, fontSize: 11 } },
+    grid: { left: 4, right: 8, top: 30, bottom: 0, containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: rows.map((r) => String(r.dt || '').slice(5)),
+      axisLine: { lineStyle: { color: '#D8DCE4' } },
+      axisTick: { show: false },
+      axisLabel: { color: CHART_TEXT, fontSize: 10 }
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: { color: CHART_TEXT, fontSize: 10 },
+      splitLine: { lineStyle: { color: '#EEF0F4', type: 'dashed' } }
+    },
+    series: defs.map((d) => ({
+      name: d.name,
+      type: 'bar',
+      stack: 'status',
+      barWidth: '46%',
+      itemStyle: { color: d.color },
+      data: rows.map(d.get)
+    }))
+  }
+}
+
+/** 分类销售排行：横向条形（ADS ads_category_sales，取金额 TOP8 保证标签可读） */
+function buildCategoryOption(): echarts.EChartsOption {
+  const top = [...categorySales.value]
+    .sort((a, b) => (Number(a.saleAmount) || 0) - (Number(b.saleAmount) || 0))
+    .slice(-8)
+  return {
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      backgroundColor: 'rgba(23,34,47,0.92)',
+      borderColor: 'rgba(255,255,255,0.1)',
+      textStyle: { color: '#fff' }
+    },
+    grid: { left: 4, right: 56, top: 8, bottom: 0, containLabel: true },
+    xAxis: {
+      type: 'value',
+      axisLabel: { color: CHART_TEXT, fontSize: 10, formatter: (v: number) => axisMoney(v) },
+      splitLine: { lineStyle: { color: '#EEF0F4', type: 'dashed' } }
+    },
+    yAxis: {
+      type: 'category',
+      data: top.map((d) => d.categoryName),
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: { color: CHART_TEXT, fontSize: 11 }
     },
     series: [
       {
-        type: 'pie',
-        radius: ['42%', '66%'],
-        center: ['50%', '43%'],
-        itemStyle: { borderRadius: 5, borderColor: '#fff', borderWidth: 2 },
-        label: { color: CHART_TEXT, fontSize: 11, formatter: '{b}' },
-        labelLine: { lineStyle: { color: '#D8DCE4' } },
-        emphasis: { label: { fontSize: 13, fontWeight: 700 } },
-        data
+        type: 'bar',
+        barWidth: 12,
+        data: top.map((d) => Number(d.saleAmount) || 0),
+        itemStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+            { offset: 0, color: '#5AA3FF' },
+            { offset: 1, color: '#2D7FF9' }
+          ]),
+          borderRadius: [0, 6, 6, 0]
+        },
+        label: {
+          show: true,
+          position: 'right',
+          color: CHART_TEXT,
+          fontSize: 10,
+          formatter: (p) => axisMoney(Number(p.value))
+        }
       }
     ]
   }
@@ -446,7 +561,8 @@ function buildProductOption(): echarts.EChartsOption {
     grid: { left: 8, right: 46, top: 8, bottom: 0, containLabel: true },
     xAxis: {
       type: 'value',
-      axisLabel: { color: CHART_TEXT, fontSize: 11 },
+      splitNumber: 3,
+      axisLabel: { color: CHART_TEXT, fontSize: 10, formatter: (v: number) => axisMoney(v) },
       splitLine: { lineStyle: { color: '#EEF0F4', type: 'dashed' } }
     },
     yAxis: {
@@ -480,9 +596,10 @@ function buildProductOption(): echarts.EChartsOption {
   }
 }
 
-function buildGrowthOption(): echarts.EChartsOption {
-  const dates = userGrowth.value.map((d) => (d.date || '').slice(5))
-  const cnts = userGrowth.value.map((d) => Number(d.cnt) || 0)
+/** 周趋势与环比：GMV 柱 + 环比折线（右轴 %，ADS ads_trend_weekly） */
+function buildWeeklyOption(): echarts.EChartsOption {
+  const rows = weeklyTrend.value
+  const labels = rows.map((r) => `${String(r.weekStart || '').slice(5)}~${String(r.weekEnd || '').slice(5)}`)
   return {
     tooltip: {
       trigger: 'axis',
@@ -490,34 +607,112 @@ function buildGrowthOption(): echarts.EChartsOption {
       borderColor: 'rgba(255,255,255,0.1)',
       textStyle: { color: '#fff' }
     },
-    grid: { left: 8, right: 8, top: 20, bottom: 0, containLabel: true },
+    legend: { top: 0, right: 0, icon: 'circle', itemWidth: 8, itemHeight: 8, data: ['GMV', '环比'], textStyle: { color: CHART_TEXT, fontSize: 11 } },
+    grid: { left: 4, right: 8, top: 30, bottom: 0, containLabel: true },
     xAxis: {
       type: 'category',
-      data: dates,
+      data: labels,
       axisLine: { lineStyle: { color: '#D8DCE4' } },
       axisTick: { show: false },
-      axisLabel: { color: CHART_TEXT, fontSize: 11 }
+      axisLabel: { color: CHART_TEXT, fontSize: 10 }
     },
-    yAxis: {
-      type: 'value',
-      axisLabel: { color: CHART_TEXT, fontSize: 11 },
-      splitLine: { lineStyle: { color: '#EEF0F4', type: 'dashed' } }
-    },
+    yAxis: [
+      {
+        type: 'value',
+        axisLabel: { color: CHART_TEXT, fontSize: 10, formatter: (v: number) => axisMoney(v) },
+        splitLine: { lineStyle: { color: '#EEF0F4', type: 'dashed' } }
+      },
+      {
+        type: 'value',
+        axisLabel: { color: CHART_TEXT, fontSize: 10, formatter: '{value}%' },
+        splitLine: { show: false }
+      }
+    ],
     series: [
       {
+        name: 'GMV',
+        type: 'bar',
+        barWidth: '34%',
+        itemStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: '#5AA3FF' },
+            { offset: 1, color: '#2D7FF9' }
+          ]),
+          borderRadius: [4, 4, 0, 0]
+        },
+        data: rows.map((r) => Number(r.gmv) || 0)
+      },
+      {
+        name: '环比',
         type: 'line',
-        data: cnts,
+        yAxisIndex: 1,
         smooth: true,
         symbol: 'circle',
         symbolSize: 6,
-        lineStyle: { width: 2.4, color: CHART_LINE },
-        itemStyle: { color: CHART_LINE },
-        areaStyle: {
+        lineStyle: { width: 2.2, color: CHART_ACCENT },
+        itemStyle: { color: CHART_ACCENT },
+        data: rows.map((r) => Number(r.gmvMom) || 0)
+      }
+    ]
+  }
+}
+
+/** GMV 与付费用户：柱 + 右轴折线（ADS ads_gmv_daily 多天） */
+function buildGmvOption(): echarts.EChartsOption {
+  const rows = gmvTrend.value
+  return {
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      backgroundColor: 'rgba(23,34,47,0.92)',
+      borderColor: 'rgba(255,255,255,0.1)',
+      textStyle: { color: '#fff' }
+    },
+    legend: { top: 0, right: 0, icon: 'circle', itemWidth: 8, itemHeight: 8, data: ['GMV', '付费用户数'], textStyle: { color: CHART_TEXT, fontSize: 11 } },
+    grid: { left: 4, right: 8, top: 30, bottom: 0, containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: rows.map((r) => String(r.dt || '').slice(5)),
+      axisLine: { lineStyle: { color: '#D8DCE4' } },
+      axisTick: { show: false },
+      axisLabel: { color: CHART_TEXT, fontSize: 10 }
+    },
+    yAxis: [
+      {
+        type: 'value',
+        axisLabel: { color: CHART_TEXT, fontSize: 10, formatter: (v: number) => axisMoney(v) },
+        splitLine: { lineStyle: { color: '#EEF0F4', type: 'dashed' } }
+      },
+      {
+        type: 'value',
+        axisLabel: { color: CHART_TEXT, fontSize: 10 },
+        splitLine: { show: false }
+      }
+    ],
+    series: [
+      {
+        name: 'GMV',
+        type: 'bar',
+        barWidth: '40%',
+        itemStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(45,127,249,0.28)' },
-            { offset: 1, color: 'rgba(45,127,249,0.02)' }
-          ])
-        }
+            { offset: 0, color: '#5AA3FF' },
+            { offset: 1, color: '#2D7FF9' }
+          ]),
+          borderRadius: [4, 4, 0, 0]
+        },
+        data: rows.map((r) => Number(r.gmv) || 0)
+      },
+      {
+        name: '付费用户数',
+        type: 'line',
+        yAxisIndex: 1,
+        smooth: true,
+        symbol: 'circle',
+        symbolSize: 5,
+        lineStyle: { width: 2.2, color: CHART_BARS[3] },
+        itemStyle: { color: CHART_BARS[3] },
+        data: rows.map((r) => Number(r.paidUserCount) || 0)
       }
     ]
   }
@@ -532,7 +727,7 @@ function initChart(el: HTMLElement, option: echarts.EChartsOption): echarts.ECha
 }
 
 function disposeCharts() {
-  ;[trendChart, distChart, productChart, growthChart].forEach((c) => {
+  ;[trendChart, orderTrendChart, productChart, categoryChart, weeklyChart, gmvChart].forEach((c) => {
     if (c) {
       try {
         c.dispose()
@@ -541,19 +736,21 @@ function disposeCharts() {
       }
     }
   })
-  trendChart = distChart = productChart = growthChart = null
+  trendChart = orderTrendChart = productChart = categoryChart = weeklyChart = gmvChart = null
 }
 
 function initCharts() {
   disposeCharts()
   if (trendRef.value) trendChart = initChart(trendRef.value, buildTrendOption())
-  if (distRef.value) distChart = initChart(distRef.value, buildDistOption())
+  if (orderTrendRef.value) orderTrendChart = initChart(orderTrendRef.value, buildOrderTrendOption())
   if (productRef.value) productChart = initChart(productRef.value, buildProductOption())
-  if (growthRef.value) growthChart = initChart(growthRef.value, buildGrowthOption())
+  if (categoryRef.value) categoryChart = initChart(categoryRef.value, buildCategoryOption())
+  if (weeklyRef.value) weeklyChart = initChart(weeklyRef.value, buildWeeklyOption())
+  if (gmvRef.value) gmvChart = initChart(gmvRef.value, buildGmvOption())
 }
 
 function handleResize() {
-  ;[trendChart, distChart, productChart, growthChart].forEach((c) => c?.resize())
+  ;[trendChart, orderTrendChart, productChart, categoryChart, weeklyChart, gmvChart].forEach((c) => c?.resize())
 }
 
 onMounted(() => {
@@ -586,8 +783,8 @@ onUnmounted(() => {
   gap: 14px;
   background: linear-gradient(135deg, #5aa3ff 0%, #2d7ff9 55%, #1e63d6 100%);
   border-radius: var(--ds-r-lg, 16px);
-  padding: 22px 24px;
-  margin-bottom: 16px;
+  padding: 14px 18px;
+  margin-bottom: 12px;
   box-shadow: var(--ds-shadow-brand, 0 4px 14px rgba(45, 127, 249, 0.25));
 }
 .banner-item {
@@ -601,10 +798,10 @@ onUnmounted(() => {
 }
 .banner-value {
   font-family: var(--ds-mono, Consolas, monospace);
-  font-size: 26px;
+  font-size: 21px;
   font-weight: 700;
-  line-height: 1.3;
-  margin: 4px 0 3px;
+  line-height: 1.2;
+  margin: 2px 0;
 }
 .banner-delta {
   font-size: 12px;
@@ -623,15 +820,16 @@ onUnmounted(() => {
 /* ====== KPI 行 ====== */
 .kpi-row {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 14px;
-  margin-bottom: 16px;
+  /* 一屏放全：8 张 KPI 卡一行铺满 */
+  grid-template-columns: repeat(8, 1fr);
+  gap: 10px;
+  margin-bottom: 12px;
 }
 .kpi-card {
   background: var(--ds-card, #fff);
   border: 1px solid var(--ds-line, #e7e9ee);
   border-radius: var(--ds-r, 12px);
-  padding: 16px 18px;
+  padding: 10px 12px;
   transition: box-shadow 0.2s ease, transform 0.2s ease;
 }
 .kpi-card:hover {
@@ -644,10 +842,10 @@ onUnmounted(() => {
 }
 .kpi-value {
   font-family: var(--ds-mono, Consolas, monospace);
-  font-size: 24px;
+  font-size: 19px;
   font-weight: 700;
   color: var(--ds-text, #1e2632);
-  margin: 6px 0 3px;
+  margin: 4px 0 2px;
   line-height: 1.2;
 }
 .kpi-delta {
@@ -667,29 +865,30 @@ onUnmounted(() => {
 /* ====== 图表卡 ====== */
 .chart-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  /* 2 行 × 3 列：6 张图一屏放全 */
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
 }
 .chart-card {
   background: var(--ds-card, #fff);
   border: 1px solid var(--ds-line, #e7e9ee);
   border-radius: var(--ds-r, 12px);
-  padding: 16px 16px 10px;
+  padding: 12px 12px 8px;
 }
 .chart-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 .chart-title {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--ds-text, #1e2632);
 }
 .chart-box {
   width: 100%;
-  height: 300px;
+  height: 240px;
 }
 .chart-empty {
   display: flex;
@@ -701,12 +900,21 @@ onUnmounted(() => {
   border-radius: 10px;
 }
 
-@media (max-width: 1100px) {
+/* 窄屏回退：3 列 → 2 列 → 1 列；KPI 8 列 → 4 列 → 2 列 */
+@media (max-width: 1400px) {
+  .kpi-row {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  .chart-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 900px) {
   .banner {
     grid-template-columns: repeat(2, 1fr);
   }
   .kpi-row {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
   }
   .chart-grid {
     grid-template-columns: 1fr;

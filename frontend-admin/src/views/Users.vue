@@ -367,7 +367,7 @@ onMounted(loadUsers)
   font-size: 13px;
   color: var(--ds-text-3, #98a1af);
 }
-.action-btns {
+.table-card :deep(.action-btns) {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -387,10 +387,10 @@ onMounted(loadUsers)
 }
 
 /* ====== 单元格 ====== */
-.cell-muted {
+.table-card :deep(.cell-muted) {
   color: var(--ds-text-3, #98a1af);
 }
-.cell-mono {
+.table-card :deep(.cell-mono) {
   font-family: var(--ds-mono, Consolas, monospace);
 }
 </style>

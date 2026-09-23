@@ -560,7 +560,7 @@ onMounted(async () => {
 }
 
 /* ====== 单元格 ====== */
-.cell-price {
+.table-card :deep(.cell-price) {
   color: var(--ds-price, #2d7ff9);
   font-weight: 600;
   font-family: var(--ds-mono, Consolas, monospace);
@@ -568,12 +568,15 @@ onMounted(async () => {
 .cell-muted {
   color: var(--ds-text-3, #98a1af);
 }
-.product-cell {
+.table-card :deep(.cell-muted) {
+  color: var(--ds-text-3, #98a1af);
+}
+.table-card :deep(.product-cell) {
   display: flex;
   align-items: center;
   gap: 10px;
 }
-.product-thumb {
+.table-card :deep(.product-thumb) {
   width: 48px;
   height: 48px;
   border-radius: var(--ds-r-sm, 9px);
@@ -581,17 +584,17 @@ onMounted(async () => {
   background: var(--ds-bg-2, #eef0f4);
   flex-shrink: 0;
 }
-.product-name {
+.table-card :deep(.product-name) {
   font-size: 14px;
   font-weight: 500;
   color: var(--ds-text, #1e2632);
 }
-.product-brand {
+.table-card :deep(.product-brand) {
   font-size: 12px;
   color: var(--ds-text-3, #98a1af);
   margin-top: 2px;
 }
-.action-cell {
+.table-card :deep(.action-cell) {
   display: inline-flex;
   gap: 4px;
 }

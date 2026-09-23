@@ -162,29 +162,29 @@ const columns: DataTableColumns<StockAlertRow> = [
 }
 
 /* ====== 单元格 ====== */
-.goods-cell {
+.table-card :deep(.goods-cell) {
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
-.goods-name {
+.table-card :deep(.goods-name) {
   font-size: 14px;
   color: var(--ds-text, #1e2632);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.goods-sub {
+.table-card :deep(.goods-sub) {
   font-size: 12px;
   color: var(--ds-text-3, #98a1af);
   margin-top: 2px;
 }
-.cell-stock {
+.table-card :deep(.cell-stock) {
   color: var(--ds-red, #e0404e);
   font-weight: 700;
   font-family: var(--ds-mono, Consolas, monospace);
 }
-.cell-muted {
+.table-card :deep(.cell-muted) {
   color: var(--ds-text-3, #98a1af);
 }
 </style>

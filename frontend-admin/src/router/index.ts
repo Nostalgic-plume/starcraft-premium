@@ -18,6 +18,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'after-sales', name: 'AfterSales', component: () => import('@/views/AfterSales.vue'), meta: { title: '售后管理' } },
       { path: 'users', name: 'Users', component: () => import('@/views/Users.vue'), meta: { title: '用户管理' } },
       { path: 'categories', name: 'Categories', component: () => import('@/views/Categories.vue'), meta: { title: '分类管理' } },
+      { path: 'rag-index', name: 'RagIndex', component: () => import('@/views/RagIndex.vue'), meta: { title: '索引管理' } },
       { path: 'settings', name: 'Settings', component: () => import('@/views/Settings.vue'), meta: { title: '系统设置' } },
       // 旧「数据看板」入口兼容：并入控制台 Dashboard，避免旧链接 404
       { path: 'report', redirect: '/dashboard' }

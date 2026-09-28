@@ -58,9 +58,9 @@
 
         <div class="chart-card">
           <div class="chart-header">
-            <div class="chart-title">商品销量排行 TOP10</div>
+            <div class="chart-title">商品销售排行 TOP10（金额）</div>
           </div>
-          <div v-if="productSales.length" ref="productRef" class="chart-box"></div>
+          <div v-if="productTop.length" ref="productRef" class="chart-box"></div>
           <div v-else class="chart-box chart-empty">暂无排行数据</div>
         </div>
 
@@ -105,7 +105,7 @@ import type {
   DashboardAllVO,
   GmvTrendPointVO,
   OrderTrendPointVO,
-  ProductSalesVO,
+  ProductTopVO,
   SalesTrendVO,
   WeeklyTrendVO
 } from '@/api/types'
@@ -117,7 +117,6 @@ const error = ref('')
 
 const stats = ref<AdminStatsVO | null>(null)
 const trend = ref<SalesTrendVO[]>([])
-const productSales = ref<ProductSalesVO[]>([])
 const userGrowth = ref<SalesTrendVO[]>([])
 const all = ref<DashboardAllVO | null>(null)
 const trendDays = ref<number>(7)
@@ -127,6 +126,8 @@ const orderTrend = computed<OrderTrendPointVO[]>(() => all.value?.orderTrend || 
 const categorySales = computed<CategorySalesVO[]>(() => all.value?.categorySales || [])
 const weeklyTrend = computed<WeeklyTrendVO[]>(() => all.value?.weeklyTrend || [])
 const gmvTrend = computed<GmvTrendPointVO[]>(() => all.value?.gmvTrend || [])
+/** 商品销售排行：改用 ADS ads_product_top50（干净口径），OLTP 榜单被脏数据污染 */
+const productTop = computed<ProductTopVO[]>(() => all.value?.productTop || [])
 
 // ==================== 图表实例 ====================
 
@@ -155,14 +156,12 @@ async function loadData() {
     const results = await Promise.allSettled([
       dashboardApi.getStats(),
       dashboardApi.getSalesTrend(trendDays.value),
-      dashboardApi.getProductSales(),
       dashboardApi.getUserGrowth(),
       fetchDashboardAll()
     ])
-    const [s, t, p, g, allRes] = results
+    const [s, t, g, allRes] = results
     stats.value = s.status === 'fulfilled' ? ((s.value?.data as AdminStatsVO | undefined) || null) : null
     trend.value = t.status === 'fulfilled' ? (((t.value?.data as SalesTrendVO[] | undefined) || []) as SalesTrendVO[]) : []
-    productSales.value = p.status === 'fulfilled' ? (((p.value?.data as ProductSalesVO[] | undefined) || []) as ProductSalesVO[]) : []
     userGrowth.value = g.status === 'fulfilled' ? (((g.value?.data as SalesTrendVO[] | undefined) || []) as SalesTrendVO[]) : []
     all.value = allRes.status === 'fulfilled' ? (allRes.value.data || null) : null
 
@@ -548,17 +547,28 @@ function buildCategoryOption(): echarts.EChartsOption {
   }
 }
 
+/**
+ * 商品销售排行 TOP10：横向条形（ADS ads_product_top50，金额口径，tooltip 附销量）。
+ * 不用 OLTP order_item 的销量榜：8-29 有 25,204 笔脏订单灌入同一商品会把其余商品压平，
+ * 且原写法用金额格式（axisMoney）渲染件数，单位不符。
+ */
 function buildProductOption(): echarts.EChartsOption {
-  const top = [...productSales.value].slice(0, 10).reverse()
+  const top = [...productTop.value].slice(0, 10).reverse()
   return {
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
       backgroundColor: 'rgba(23,34,47,0.92)',
       borderColor: 'rgba(255,255,255,0.1)',
-      textStyle: { color: '#fff' }
+      textStyle: { color: '#fff' },
+      formatter: (params) => {
+        const first = (Array.isArray(params) ? params[0] : params) as { dataIndex: number }
+        const row = top[first.dataIndex]
+        if (!row) return ''
+        return `${row.productName}<br/>销售额 ${axisMoney(Number(row.saleAmount) || 0)}<br/>销量 ${Number(row.saleQuantity) || 0} 件`
+      }
     },
-    grid: { left: 8, right: 46, top: 8, bottom: 0, containLabel: true },
+    grid: { left: 8, right: 56, top: 8, bottom: 0, containLabel: true },
     xAxis: {
       type: 'value',
       splitNumber: 3,
@@ -567,16 +577,16 @@ function buildProductOption(): echarts.EChartsOption {
     },
     yAxis: {
       type: 'category',
-      data: top.map((d) => d.name),
+      data: top.map((d) => d.productName),
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: { color: CHART_TEXT, fontSize: 12 }
+      axisLabel: { color: CHART_TEXT, fontSize: 11 }
     },
     series: [
       {
         type: 'bar',
         barWidth: 14,
-        data: top.map((d) => Number(d.totalSales) || 0),
+        data: top.map((d) => Number(d.saleAmount) || 0),
         itemStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
             { offset: 0, color: '#2D7FF9' },
@@ -588,7 +598,7 @@ function buildProductOption(): echarts.EChartsOption {
           show: true,
           position: 'right',
           color: CHART_TEXT,
-          fontSize: 11,
+          fontSize: 10,
           formatter: (p) => axisMoney(Number(p.value))
         }
       }

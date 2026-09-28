@@ -90,7 +90,8 @@ export interface ProductVO {
   description: string
   categoryId: string
   categoryName: string
-  brand: string
+  brandId: string
+  brandName: string
   mainImage: string
   images: string[]
   detail: string
@@ -325,4 +326,36 @@ export interface OrderTrendPointVO {
   shippedOrders: number
   completedOrders: number
   cancelledOrders: number
+}
+
+// ==================== RAG 索引管理（对照 IndexAdminController） ====================
+
+/** MySQL FULLTEXT 索引健康检查结果 */
+export interface FulltextIndexStatus {
+  healthy: boolean
+  testMatchCount: number
+  message: string
+}
+
+/** 索引状态（GET /api/admin/rag/status） */
+export interface RagIndexStatus {
+  /** Qdrant 集合内已索引的商品数 */
+  indexedCount: number
+  /**
+   * 最近一次全量重建的「结束」时间；未重建时是字符串「未重建」。仅进程内有效，后端重启后回到该值。
+   * ⚠️ 只表示动作已结束、**不代表成功**：重建首步会先删掉 Qdrant 集合，
+   * 失败早返回时集合已为空，必须结合 lastRebuildSuccess 判断成败。
+   */
+  lastRebuildTime: string
+  /** 最近一次全量重建是否成功 */
+  lastRebuildSuccess: boolean
+  /** 最近一次重建的结果说明（失败原因 / 成功条数） */
+  lastRebuildMessage: string
+  /** FULLTEXT 索引健康检查 */
+  fulltextIndex: FulltextIndexStatus
+}
+
+/** 触发重建的返回（POST /api/admin/rag/rebuild） */
+export interface RagRebuildResult {
+  message: string
 }

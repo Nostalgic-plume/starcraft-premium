@@ -32,8 +32,8 @@ public class ProductDO {
     @Schema(description = "一级分类ID")
     private Long firstCategoryId;
 
-    @Schema(description = "品牌")
-    private String brand;
+    @Schema(description = "品牌ID（关联 brand 表）")
+    private Long brandId;
 
     @Schema(description = "主图URL")
     private String mainImage;

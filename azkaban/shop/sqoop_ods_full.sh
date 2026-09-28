@@ -1,7 +1,7 @@
 #!/bin/bash
 # =========================================================
 # Sqoop 全量导入 — MySQL shop → Hive ODS
-# 处理 10 张全量表，并行执行（MAX_PARALLEL=3）
+# 处理 11 张全量表，并行执行（MAX_PARALLEL=3）
 # =========================================================
 source "$(dirname "$0")/load_common.sh"
 
@@ -12,10 +12,11 @@ MAX_PARALLEL=3
 HDFS_TMP_PREFIX="/tmp/sqoop/ods_full"
 failed=0
 
-# 10 张全量表
+# 11 张全量表
 FULL_TABLES=(
   "address"
   "admin"
+  "brand"
   "cart"
   "category"
   "permission"

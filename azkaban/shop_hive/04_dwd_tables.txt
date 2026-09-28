@@ -12,15 +12,35 @@
 SET hive.execution.engine=mr;
 
 -- ============================================================
+-- ⚠️ 重跑前置（务必先读）：
+--   本文件的维度表均为 EXTERNAL + TEXTFILE，数据文件在 HDFS LOCATION 下，
+--   DROP TABLE **不会删除数据文件**。若表结构发生列增删或**顺序变化**
+--   （如 2026-09 品牌迁移在 dwd_dim_product_zip 中间插入了 brand_id / brand_name），
+--   重跑本脚本后旧文件会按新 schema 解析 —— 列数/顺序不一致会导致**整表数据错位**：
+--   STRING 品牌名被读成 BIGINT（→ NULL）、其后的 category_id / shop_id / status
+--   全部左移一列并被 CAST 成错误类型。
+--   该错位会经 dwd_etl.hql 的 `INSERT OVERWRITE ... SELECT d.*` 原样传播到事实表，
+--   并污染全部下游 ADS 指标（分类销售额、商品 TOP50 等）。
+--
+--   重跑前请先清空对应 LOCATION 目录，例如：
+--     hdfs dfs -rm -r -skipTrash /warehouse/dwd/dwd_dim_product_zip
+--   再执行本文件，最后按 01→06 顺序重建下游（ods → dwd → dws → ads）。
+-- ============================================================
+
+-- ============================================================
 -- 1. dwd_dim_product_zip：商品维度拉链表
 --    来源：ods_product_inc（增量变更驱动，每天合并版本）
 --    变更驱动表：ods_product_inc（update_time 变更触发）
 -- ============================================================
+-- ⚠️ 本表为 EXTERNAL：DROP 不删 LOCATION 数据文件。下方 brand_id / brand_name 是
+--    2026-09 品牌迁移**插入在第 3、4 位**（并非追加到末尾），重跑前必须先清空
+--    /warehouse/dwd/dwd_dim_product_zip，否则旧文件按新 schema 读取会整体错位（见文件头说明）。
 DROP TABLE IF EXISTS dwd.dwd_dim_product_zip;
 CREATE EXTERNAL TABLE dwd.dwd_dim_product_zip (
     product_id         BIGINT        COMMENT '商品ID',
     product_name       STRING        COMMENT '商品名称',
-    brand              STRING        COMMENT '品牌',
+    brand_id           BIGINT        COMMENT '品牌ID（关联 brand.id）',
+    brand_name         STRING        COMMENT '品牌名称（退化维度，关联 ods_brand_full）',
     category_id        BIGINT        COMMENT '分类ID',
     first_category_id  BIGINT        COMMENT '一级分类ID',
     category_name      STRING        COMMENT '分类名称（退化维度）',

@@ -99,7 +99,8 @@ export interface ProductVO {
   description: string
   categoryId: string
   categoryName: string
-  brand: string
+  brandId: string
+  brandName: string
   mainImage: string
   images: string[]
   detail: string

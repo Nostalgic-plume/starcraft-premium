@@ -15,7 +15,7 @@ SET mapreduce.job.reduces=4;
 -- =========================================================
 INSERT OVERWRITE TABLE dwd.dwd_dim_product_zip
 SELECT
-  d.product_id, d.product_name, d.brand,
+  d.product_id, d.product_name, d.brand_id, d.brand_name,
   d.category_id, d.first_category_id, d.category_name,
   d.shop_id, d.status,
   d.start_date,
@@ -30,7 +30,8 @@ INSERT INTO TABLE dwd.dwd_dim_product_zip
 SELECT
   t.id AS product_id,
   t.name AS product_name,
-  t.brand,
+  t.brand_id,
+  COALESCE(b.name, '未知') AS brand_name,
   t.category_id,
   t.first_category_id,
   COALESCE(c.name, c2.name, '未知') AS category_name,
@@ -43,6 +44,8 @@ LEFT JOIN ods.ods_category_full c
   ON t.category_id = c.id AND c.dt = '${hivevar:dt}'
 LEFT JOIN ods.ods_category_full c2
   ON t.first_category_id = c2.id AND c2.dt = '${hivevar:dt}'
+LEFT JOIN ods.ods_brand_full b
+  ON t.brand_id = b.id AND b.dt = '${hivevar:dt}'
 WHERE t.dt = '${hivevar:dt}'
   AND NOT EXISTS (
     SELECT 1 FROM dwd.dwd_dim_product_zip d

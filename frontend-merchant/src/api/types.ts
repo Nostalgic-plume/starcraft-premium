@@ -77,7 +77,8 @@ export interface ProductVO {
   /** Long→string */
   categoryId: string
   categoryName: string
-  brand: string
+  brandId: string
+  brandName: string
   mainImage: string
   images: string[]
   detail: string
@@ -115,7 +116,7 @@ export interface ProductForm {
   description?: string
   /** Long→string */
   categoryId: string | number
-  brand?: string
+  brandId?: string | number
   mainImage?: string
   images?: string[]
   detail?: string

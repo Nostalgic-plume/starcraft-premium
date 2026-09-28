@@ -5,7 +5,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * RAG 配置属性 - Qdrant + DashScope
+ * RAG 配置属性 - Qdrant
  *
  * @author shop
  */
@@ -19,6 +19,11 @@ public class RagProperties {
     private int port = 6334;
     /** 集合名称 */
     private String collectionName = "products";
-    /** 向量维度（DashScope text-embedding-v1 默认 1536） */
-    private int dimension = 1536;
+    /**
+     * 向量维度（BGE-M3 为 1024）
+     * <p>
+     * 这是全链路维度的**唯一事实来源**：建集合（QdrantCollectionHelper）与查询向量自检
+     * （RagSearchService）都读此值，避免出现「配置改了、自检常量没改」导致的静默降级。
+     */
+    private int dimension = 1024;
 }

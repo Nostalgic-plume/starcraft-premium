@@ -257,10 +257,10 @@ public class ChatService {
                 }
 
                 // 9. 生成层降级链（Phase 5 T5）：
-                //    DeepSeek(带工具) → 熔断 → qwen 纯 RAG 问答(不带工具) → 模板拼检索结果 → 提示不可用
+                //    DeepSeek(带工具) → 熔断 → 备用模型纯 RAG 问答(不带工具) → 模板拼检索结果 → 提示不可用
                 if (circuitBreaker.isOpen()) {
-                    log.warn("DeepSeek 熔断中 → 降级到 qwen 纯 RAG 问答（不调用工具）");
-                    qwenRagFallback(systemPrompt, productContext, userMessage, conversationId, emitter, productsJson);
+                    log.warn("DeepSeek 熔断中 → 降级到备用模型纯 RAG 问答（不调用工具）");
+                    backupRagFallback(systemPrompt, productContext, userMessage, conversationId, emitter, productsJson);
                 } else {
                     deepSeekAgentLoop(intent, userId, systemPrompt, productContext, chatMemory,
                             userMessage, conversationId, emitter, productsJson);
@@ -276,7 +276,7 @@ public class ChatService {
 
     /**
      * 主链路：DeepSeek + AiServices 工具链（agent loop）
-     * 熔断挂载：onError → onFailure()（并当场降级 qwen）；onCompleteResponse → onSuccess()
+     * 熔断挂载：onError → onFailure()（并当场降级到备用模型）；onCompleteResponse → onSuccess()
      */
     private void deepSeekAgentLoop(Intent intent, Long userId, String systemPrompt, String productContext,
                                    TokenWindowChatMemory chatMemory, String userMessage,
@@ -337,17 +337,17 @@ public class ChatService {
                 })
                 .onError(error -> {
                     circuitBreaker.onFailure();
-                    log.error("DeepSeek 调用失败，当场降级到 qwen 纯 RAG 问答", error);
-                    qwenRagFallback(systemPrompt, productContext, userMessage, conversationId, emitter, productsJson);
+                    log.error("DeepSeek 调用失败，当场降级到备用模型纯 RAG 问答", error);
+                    backupRagFallback(systemPrompt, productContext, userMessage, conversationId, emitter, productsJson);
                 })
                 .start();
     }
 
     /**
-     * 降级链路：qwen 纯 RAG 问答（不带工具，仅检索上下文 + qwen 生成）
-     * qwen 也失败 → templateFallback（无 LLM 模板拼检索结果）
+     * 降级链路：备用模型纯 RAG 问答（不带工具，仅检索上下文 + 备用模型生成）
+     * 备用模型也失败 → templateFallback（无 LLM 模板拼检索结果）
      */
-    private void qwenRagFallback(String systemPrompt, String productContext,
+    private void backupRagFallback(String systemPrompt, String productContext,
                                  String userMessage, String conversationId, SseEmitter emitter,
                                  String productsJson) {
         try {
@@ -366,7 +366,7 @@ public class ChatService {
                 public void onCompleteResponse(ChatResponse response) {
                     String reply = response != null && response.aiMessage() != null
                             ? response.aiMessage().text() : "";
-                    // T4 可观测性：qwen 备用模型 token 消耗
+                    // T4 可观测性：备用模型 token 消耗
                     if (response != null && response.tokenUsage() != null) {
                         log.info("[LLM指标] 会话={} 降级模型 输入token={} 输出token={}",
                                 conversationId, response.tokenUsage().inputTokenCount(),
@@ -378,12 +378,12 @@ public class ChatService {
 
                 @Override
                 public void onError(Throwable error) {
-                    log.warn("qwen 备用模型也失败，降级到模板拼检索结果", error);
+                    log.warn("备用模型也失败，降级到模板拼检索结果", error);
                     templateFallback(productContext, conversationId, emitter, productsJson);
                 }
             });
         } catch (Exception e) {
-            log.warn("qwen 备用模型异常，降级到模板拼检索结果", e);
+            log.warn("备用模型异常，降级到模板拼检索结果", e);
             templateFallback(productContext, conversationId, emitter, productsJson);
         }
     }
@@ -580,7 +580,7 @@ public class ChatService {
     /**
      * 订单域确定性上下文：直接用 OrderService 只读方法取当前用户订单，拼成文本喂给模型。
      * <p>
-     * 为什么不靠工具调用：降级链（qwen 纯问答、模板兜底）都不带工具，实测 DeepSeek 503 期间
+     * 为什么不靠工具调用：降级链（备用模型纯问答、模板兜底）都不带工具，实测 DeepSeek 503 期间
      * 客服只能答「我这边看不到你的订单，得你报订单号」。把数据放进 prompt，才能保证
      * 「问订单必有真实数据」，无论最后是哪一层模型接手。
      * </p>

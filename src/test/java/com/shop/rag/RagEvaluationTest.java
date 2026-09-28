@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 离线评估集（真实混合检索）：人工标注 (query → 期望商品ID)，计算 Recall@K 与 MRR。
  *
- * 依赖：Qdrant 运行 + 商品向量索引存在 + DashScope API Key 可用（真实混合检索链路）。
+ * 依赖：Qdrant 运行 + 商品向量索引存在 + 向量化服务（本地 TEI / BGE-M3）可用（真实混合检索链路）。
  * 环境缺失时自动跳过（assumeTrue），不污染 CI。答辩环境启动 Qdrant 后运行即可复现指标。
  *
  * 两个评估维度：

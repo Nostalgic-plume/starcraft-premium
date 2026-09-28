@@ -53,12 +53,13 @@ class RagSearchServiceTest {
     @BeforeEach
     void setUp() {
         ragSearchService = new RagSearchService(embeddingModel, embeddingStore,
-                keywordSearchService, synonymExpander, new RrfProperties());
+                keywordSearchService, synonymExpander, new RrfProperties(), new RagProperties());
         when(synonymExpander.expand(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     private static Embedding queryVector() {
-        float[] vector = new float[1536];
+        // 与 RagProperties.dimension 默认值（1024，BGE-M3）一致，否则会被维度自检丢弃
+        float[] vector = new float[1024];
         Arrays.fill(vector, 0.1f);
         return Embedding.from(vector);
     }

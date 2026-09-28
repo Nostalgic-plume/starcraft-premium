@@ -21,7 +21,7 @@ import java.util.Map;
  * RAG 混合检索服务（Hybrid Search）
  * <p>
  * 双路并行检索 + 加权 RRF 合并：
- * ┌─ DashScope embedding → 官方 QdrantEmbeddingStore.search() ─┐
+ * ┌─ 向量化（本地 TEI / BGE-M3）→ 官方 QdrantEmbeddingStore.search() ─┐
  * │                                                            │→ 加权 RRF 合并 → Top-K
  * └─ MySQL FULLTEXT 关键词检索（同义词扩展 + 分类/价格过滤）───┘
  * <p>
@@ -55,9 +55,9 @@ public class RagSearchService {
     private final KeywordSearchService keywordSearchService;
     private final SynonymExpander synonymExpander;
     private final RrfProperties rrfProperties;
+    private final RagProperties ragProperties;
 
     private static final double MIN_RELEVANCE_SCORE = 0.3;
-    private static final int EXPECTED_DIMENSION = 1536;
 
     /** 候选池 = topK × 该倍数（再由 MIN_QUERY_LIMIT 兜底下限） */
     private static final int CANDIDATE_MULTIPLIER = 5;
@@ -149,11 +149,11 @@ public class RagSearchService {
      * 生成 query 向量，任一环节失败一律返回 {@code null}（不抛异常），由调用方降级为纯关键词检索。
      * <p>
      * 覆盖四类失败：调用异常（网络/鉴权）、返回空列表、返回空向量、维度不符。
-     * 与对话链路的降级思路一致（DeepSeek → qwen-plus → 模板兜底），
+     * 与对话链路的降级思路一致（DeepSeek → 备用模型 → 模板兜底），
      * 保证检索侧不因单一外部依赖故障而整体不可用。
      *
      * @param query 用户查询
-     * @return 1536 维查询向量；任一环节失败返回 null
+     * @return 与 {@code rag.qdrant.dimension} 同维的查询向量；任一环节失败返回 null
      */
     private float[] embedQueryOrNull(String query) {
         try {
@@ -167,9 +167,13 @@ public class RagSearchService {
                 log.warn("[RAG降级] 嵌入模型返回空向量，跳过向量路，退化为纯关键词检索");
                 return null;
             }
-            if (embedding.vector().length != EXPECTED_DIMENSION) {
-                log.warn("[RAG降级] 向量维度不匹配：期望 {}，实际 {}，跳过向量路，退化为纯关键词检索",
-                        EXPECTED_DIMENSION, embedding.vector().length);
+            // 维度以 rag.qdrant.dimension 为唯一事实来源。⚠️ 此处不可退化为字面量常量：
+            // 本方法对维度不符只 WARN + return null（不抛异常），常量与配置漂移会导致
+            // 向量被静默丢弃、向量路整体失效，而接口全部正常返回 200，极难排查。
+            int expectedDimension = ragProperties.getDimension();
+            if (embedding.vector().length != expectedDimension) {
+                log.warn("[RAG降级] 向量维度不匹配：期望 {}（rag.qdrant.dimension），实际 {}，跳过向量路，退化为纯关键词检索",
+                        expectedDimension, embedding.vector().length);
                 return null;
             }
             return embedding.vector();

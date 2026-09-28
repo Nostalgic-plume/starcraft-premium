@@ -111,14 +111,26 @@ rag:
     host: localhost
     port: 6334
     collection-name: products
-    dimension: 1536
+    # 向量维度：BGE-M3 为 1024（原 DashScope text-embedding-v1 为 1536）
+    # 全链路唯一事实来源——建集合（QdrantCollectionHelper）与查询向量自检（RagSearchService）都读此值
+    dimension: 1024
   llm:
-    api-key: ${DASHSCOPE_API_KEY}
-    # 对话模型 key：优先 DEEPSEEK_API_KEY，未配回退 rag.llm.api-key（保证测试/未配置环境上下文可加载）
+    # 每个键都带「:」默认值：绑定期取不到值时宁可落到默认值，也不要让上下文启动失败
+    # （唯一 @SpringBootTest RagEvaluationTest 会因此起不来）
+    api-key: ${DASHSCOPE_API_KEY:}          # 保留仅作回滚用，embedding / backup 已不再引用
+    # 对话模型 key：优先 DEEPSEEK_API_KEY，未配回退 rag.llm.api-key
     chat-api-key: ${DEEPSEEK_API_KEY:${rag.llm.api-key}}
     chat-model: deepseek-chat
-    backup-model: qwen-plus
-    embedding-model: text-embedding-v1
+    # 向量化：本地 TEI 容器挂载的 BAAI/bge-m3 完整版权重（OpenAI 兼容 /v1/embeddings，1024 维）
+    # 命名刻意用通用的 EMBEDDING_*：底层换成 Ollama / 其他 OpenAI 兼容服务只改这一个 URL，不改代码
+    # ⚠️ 端口避开 8080（server.port）与 9080（被 NahimicService 占用）
+    embedding-base-url: ${EMBEDDING_BASE_URL:http://localhost:9090/v1}
+    embedding-api-key: ${EMBEDDING_API_KEY:dummy}   # TEI 不校验鉴权，但 SDK 要求非空
+    embedding-model: ${EMBEDDING_MODEL:bge-m3}
+    # 备用对话模型：智谱 glm-4-flash（与主模型 DeepSeek 异构，保留容灾语义）
+    backup-base-url: ${BACKUP_LLM_BASE_URL:https://open.bigmodel.cn/api/paas/v4}
+    backup-api-key: ${BACKUP_LLM_API_KEY:}
+    backup-model: ${BACKUP_LLM_MODEL:glm-4-flash}
   # 领域同义词表（组内词互为同义词）：仅用于关键词路扩展，提升口语化用词的召回
   # enabled=false 可关闭扩展，用于评估 baseline 对比或线上回滚
   synonym:

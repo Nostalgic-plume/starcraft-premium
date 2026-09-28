@@ -1,6 +1,9 @@
 # 中间件 Docker Compose 一键编排
-# 范围：Redis / Qdrant / Elasticsearch / RocketMQ / Nginx 五个中间件；后端 Spring Boot 保持本地运行
-# 启动：docker compose up -d（根目录 .env 提供 REDIS_PASSWORD 等敏感凭证，已 gitignore）
+# 范围：Redis / Qdrant / TEI(向量化) / Elasticsearch / RocketMQ / Nginx 六个中间件；后端 Spring Boot 保持本地运行
+# 启动：docker compose up -d（根目录 .env 提供 REDIS_PASSWORD、BGE_M3_MODEL_PATH 等，已 gitignore）
+# ⚠️ TEI 归入 gpu profile，**默认不随 up 启动** —— 无 NVIDIA GPU 的机器上 `gpus` 不可用会让
+#    整个 up 命令非零退出，卡住「一键启动」的第一步。需要 RAG 向量检索时显式启用：
+#        docker compose --profile gpu up -d
 # 说明：编排细节见 docs/README.md「离线数仓」与「快速开始」；设计稿已归档不随仓库分发
 services:
   # ====== Redis（仅本机可达，含密码）======
@@ -37,6 +40,38 @@ services:
       - "127.0.0.1:6334:6334"            # gRPC，仅本机可达（langchain4j QdrantEmbeddingStore 使用）
     volumes:
       - qdrant-data:/qdrant/storage
+
+  # ====== TEI（文本向量化：本地 BGE-M3，1024 维；后端 RAG 向量路依赖）======
+  # 前置：宿主机需 NVIDIA GPU + nvidia-container-toolkit（下方 gpus 依赖它）。
+  # 无 GPU 机器：改用 cpu-1.7 镜像并删掉 gpus 一行（CPU 推理慢，仅够开发自测）。
+  tei:
+    image: ghcr.io/huggingface/text-embeddings-inference:1.7
+    container_name: shop-tei
+    restart: unless-stopped
+    # 归入 gpu profile：默认 up 不启动它，避免无 GPU 机器上「第一步就失败」。
+    # 启用：docker compose --profile gpu up -d（只起 TEI 亦可：--profile gpu up -d tei）
+    profiles: ["gpu"]
+    gpus: all                            # 等价 docker run --gpus all；需 nvidia-container-toolkit
+    ports:
+      - "127.0.0.1:9090:80"              # 宿主 9090 → 容器 80（TEI 默认端口）；⚠️ 不可用 8080（被后端 server.port 占用）
+    volumes:
+      # 模型权重目录（.env 的 BGE_M3_MODEL_PATH，默认 D:/models/bge-m3，约 2.2G）
+      # :ro 只读 —— 防止容器回写权重；⚠️ 目录缺失时 Docker 会建空目录，TEI 将启动失败
+      - "${BGE_M3_MODEL_PATH:-D:/models/bge-m3}:/data/BAAI/bge-m3:ro"
+    environment:
+      - HF_HOME=/data
+      - HUGGINGFACE_HUB_CACHE=/data
+      - HF_ENDPOINT=https://hf-mirror.com   # 国内镜像；离线环境避免卡在联网校验
+    # ⚠️ --model-id 必须是【容器内绝对路径】：写成模型名（BAAI/bge-m3）时 TEI 会强制联网
+    #    拉取 1_Pooling/config.json 并卡死；--pooling cls 显式指定池化，省去该次探测。
+    command: --model-id /data/BAAI/bge-m3 --pooling cls
+    healthcheck:
+      # TEI 镜像自带 curl；/health 就绪后才真正可用（后端重建索引前务必确认）
+      test: ["CMD-SHELL", "curl -fs http://localhost:80/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s                  # 首次加载 2.2G 权重到 GPU 需要时间
 
   # ====== Elasticsearch（关键词检索路，内置 IK 中文分词；镜像由 docker/elasticsearch/Dockerfile 构建）======
   elasticsearch:

@@ -94,6 +94,26 @@ STORED AS TEXTFILE
 LOCATION '/warehouse/ods/ods_category_full';
 
 -- ============================================================
+-- 4.1 ods_brand_full：品牌主数据表
+--     对应 MySQL：brand
+-- ============================================================
+DROP TABLE IF EXISTS ods.ods_brand_full;
+CREATE EXTERNAL TABLE ods.ods_brand_full (
+    id           BIGINT       COMMENT '品牌ID',
+    name         STRING       COMMENT '品牌名',
+    logo         STRING       COMMENT '品牌LOGO',
+    description  STRING       COMMENT '品牌简介',
+    sort         INT          COMMENT '排序值（升序）',
+    status       TINYINT      COMMENT '状态：0正常 1停用',
+    create_time  STRING       COMMENT '创建时间',
+    update_time  STRING       COMMENT '更新时间',
+    deleted      TINYINT      COMMENT '逻辑删除：0未删 1已删'
+) PARTITIONED BY (dt STRING COMMENT '分区：数据日期')
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\001'
+STORED AS TEXTFILE
+LOCATION '/warehouse/ods/ods_brand_full';
+
+-- ============================================================
 -- 5. ods_permission_full：权限表
 --    对应 MySQL：permission
 -- ============================================================

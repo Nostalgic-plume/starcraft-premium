@@ -231,7 +231,8 @@ hive -e "
   ${hive_setup}
   INSERT OVERWRITE TABLE dwd.dwd_dim_product_zip
   SELECT
-    t.id AS product_id, t.name AS product_name, t.brand,
+    t.id AS product_id, t.name AS product_name, t.brand_id,
+    COALESCE(b.name, '未知') AS brand_name,
     t.category_id, t.first_category_id,
     COALESCE(c.name, c2.name, '未知') AS category_name,
     t.shop_id, t.status,
@@ -240,6 +241,7 @@ hive -e "
   FROM ods.ods_product_inc t
   LEFT JOIN ods.ods_category_full c ON t.category_id = c.id AND c.dt = '${target_dt}'
   LEFT JOIN ods.ods_category_full c2 ON t.first_category_id = c2.id AND c2.dt = '${target_dt}'
+  LEFT JOIN ods.ods_brand_full b ON t.brand_id = b.id AND b.dt = '${target_dt}'
   WHERE t.dt = '${target_dt}';
 "
 

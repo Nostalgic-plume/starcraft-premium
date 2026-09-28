@@ -80,7 +80,7 @@ CREATE EXTERNAL TABLE ods.ods_product_inc (
     description        STRING         COMMENT '商品描述',
     category_id        BIGINT         COMMENT '分类ID',
     first_category_id  BIGINT         COMMENT '一级分类ID',
-    brand              STRING         COMMENT '品牌',
+    brand_id           BIGINT         COMMENT '品牌ID（关联 MySQL brand.id）',
     main_image         STRING         COMMENT '主图URL',
     images             STRING         COMMENT '轮播图（JSON数组）',
     detail             STRING         COMMENT '详情内容（富文本）',

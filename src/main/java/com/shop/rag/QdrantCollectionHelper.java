@@ -30,16 +30,84 @@ public class QdrantCollectionHelper {
     private static final Pattern COUNT_PATTERN = Pattern.compile("\"count\"\\s*:\\s*(\\d+)");
 
     /**
+     * 从集合信息响应中提取向量维度（config.params.vectors.size）
+     * <p>
+     * 限定 "vectors" 前缀，避免误匹配响应中的其它 size 字段。
+     */
+    private static final Pattern VECTOR_SIZE_PATTERN =
+            Pattern.compile("\"vectors\"\\s*:\\s*\\{\\s*\"size\"\\s*:\\s*(\\d+)");
+
+    /**
      * 确保集合存在，不存在则创建
      */
     public void ensureCollection() {
         String name = ragProperties.getCollectionName();
         if (exists(name)) {
             log.info("Qdrant 集合 '{}' 已存在，跳过创建", name);
+            verifyDimension(name);
             return;
         }
         log.info("Qdrant 集合 '{}' 不存在，正在创建...", name);
         createCollection(name);
+    }
+
+    /**
+     * 校验已存在集合的向量维度与配置一致
+     * <p>
+     * 为什么必须校验：换 embedding 模型（如 1536 维 → 1024 维）时，集合维度**无法修改**，
+     * 只能删了重建；而 {@link #ensureCollection()} 见集合存在即跳过、索引器见 point 数 >0 也跳过，
+     * 集合会停留在旧维度。此时写入/检索都会因维度不符失败，RagSearchService 会 catch 后
+     * **静默退化为纯关键词检索**（仅一条 WARN），管理页仍显示 indexedCount 正常 —— 极难排查。
+     * <p>
+     * 这里只**告警**、不自动重建：删集合是破坏性操作，必须由人显式触发
+     * （{@code POST /api/admin/rag/rebuild}），避免"为了修一个问题而删掉全部向量"。
+     *
+     * @param name 集合名称
+     */
+    private void verifyDimension(String name) {
+        Integer actual = fetchVectorSize(name);
+        if (actual == null) {
+            log.warn("无法读取 Qdrant 集合 '{}' 的向量维度（集合信息解析失败或 Qdrant 不可用），跳过维度校验", name);
+            return;
+        }
+        int expected = ragProperties.getDimension();
+        if (actual != expected) {
+            log.error("Qdrant 集合 '{}' 向量维度不匹配：集合实际 {} 维，配置 {} 维（rag.qdrant.dimension）。"
+                            + "向量路将整体失效（检索时维度校验不通过会静默跳过向量路，退化为纯关键词检索），"
+                            + "请执行全量重建：POST /api/admin/rag/rebuild",
+                    name, actual, expected);
+        } else {
+            log.info("Qdrant 集合 '{}' 向量维度校验通过: {} 维", name, actual);
+        }
+    }
+
+    /**
+     * 读取集合的向量维度（REST GET /collections/{name}）
+     *
+     * @param name 集合名称
+     * @return 向量维度；Qdrant 不可用、集合不存在或响应无法解析时返回 null
+     */
+    private Integer fetchVectorSize(String name) {
+        try {
+            URI uri = URI.create(QDRANT_REST_URL + name);
+            HttpURLConnection conn = (HttpURLConnection) uri.toURL().openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(3000);
+            conn.setReadTimeout(3000);
+            int code = conn.getResponseCode();
+            if (code != 200) {
+                conn.disconnect();
+                return null;
+            }
+            String json = new String(conn.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            conn.disconnect();
+
+            Matcher matcher = VECTOR_SIZE_PATTERN.matcher(json);
+            return matcher.find() ? Integer.parseInt(matcher.group(1)) : null;
+        } catch (Exception e) {
+            log.warn("读取 Qdrant 集合维度异常: {}", e.getMessage());
+            return null;
+        }
     }
 
     /**

@@ -51,9 +51,13 @@ public class IndexAdminController {
 
     /**
      * 查看索引状态（需 product:edit 权限）
-     * 返回 Qdrant 已索引商品数、最近重建时间（未重建时返回"未重建"）以及 FULLTEXT 索引健康检查结果
+     * <p>
+     * 返回 Qdrant 已索引商品数、最近重建时间与**重建结果**（成功/失败 + 说明）、FULLTEXT 健康检查。
+     * ⚠️ `lastRebuildTime` 只表示「动作已结束」，不代表成功：重建首步会先删集合，
+     * 失败时集合可能已为空。前端必须以 `lastRebuildSuccess` 判断成败，否则会把
+     * 「索引为空 + 向量服务故障」显示成「重建完成」。
      *
-     * @return 索引状态 Map（indexedCount/lastRebuildTime/fulltextIndex）
+     * @return 索引状态 Map（indexedCount/lastRebuildTime/lastRebuildSuccess/lastRebuildMessage/fulltextIndex）
      */
     @GetMapping("/status")
     @SaCheckPermission(value = {"product:edit"}, type ="admin")
@@ -65,6 +69,8 @@ public class IndexAdminController {
                 ? LocalDateTime.ofInstant(Instant.ofEpochMilli(productIndexer.getLastRebuildTime()),
                         ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
                 : "未重建");
+        data.put("lastRebuildSuccess", productIndexer.isLastRebuildSuccess());
+        data.put("lastRebuildMessage", productIndexer.getLastRebuildMessage());
         // 添加 FULLTEXT 索引健康检查
         data.put("fulltextIndex", productIndexer.checkFulltextIndex());
         return Result.success(data);

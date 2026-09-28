@@ -65,6 +65,16 @@
               placeholder="请选择叶子分类（如「手机」而非「手机数码」）"
             />
           </n-form-item>
+          <n-form-item label="商品品牌">
+            <n-select
+              v-model:value="form.brandId"
+              :disabled="isEdit"
+              :options="brandOptions"
+              clearable
+              filterable
+              placeholder="请选择品牌（品牌参与 RAG 语义检索，建议填写）"
+            />
+          </n-form-item>
           <n-form-item label="主图 URL">
             <n-input v-model:value="form.mainImage" :disabled="isEdit" placeholder="请输入商品主图 URL" />
           </n-form-item>
@@ -214,6 +224,27 @@ async function loadCategories() {
   }
 }
 
+/* ==================== 品牌（新增表单用） ==================== */
+
+interface BrandNode {
+  id: string | number
+  name: string
+}
+
+const brands = ref<BrandNode[]>([])
+
+const brandOptions = computed(() => brands.value.map((b) => ({ label: b.name, value: b.id })))
+
+async function loadBrands() {
+  try {
+    const res = await get<BrandNode[]>('/brand/list')
+    brands.value = res.data || []
+  } catch (e) {
+    console.error('加载品牌失败:', e)
+    brands.value = []
+  }
+}
+
 /* ==================== 新增 / 编辑表单 ==================== */
 
 interface SkuFormItem {
@@ -227,7 +258,7 @@ interface ProductFormModel {
   id: string | null
   name: string
   description: string
-  brand: string
+  brandId: string | number | null
   categoryId: string | number | null
   mainImage: string
   status: number
@@ -242,7 +273,7 @@ const form = ref<ProductFormModel>({
   id: null,
   name: '',
   description: '',
-  brand: '',
+  brandId: null,
   categoryId: null,
   mainImage: '',
   status: 1,
@@ -263,7 +294,7 @@ function openAdd() {
     id: null,
     name: '',
     description: '',
-    brand: '',
+    brandId: null,
     categoryId: null,
     mainImage: '',
     status: 1,
@@ -279,7 +310,7 @@ function openEdit(row: ProductVO) {
     id: row.id,
     name: row.name || '',
     description: row.description || '',
-    brand: row.brand || '',
+    brandId: row.brandId ?? null,
     categoryId: row.categoryId ?? null,
     mainImage: row.mainImage || '',
     status: row.status ?? 1,
@@ -351,7 +382,7 @@ async function handleSubmit() {
     await productApi.add({
       name: form.value.name.trim(),
       description: form.value.description,
-      brand: form.value.brand,
+      brandId: form.value.brandId,
       categoryId: form.value.categoryId,
       mainImage: form.value.mainImage,
       skuList: form.value.skuList.map((s) => ({
@@ -403,7 +434,7 @@ function renderProductCell(row: ProductVO) {
     }),
     h('div', { class: 'product-meta' }, [
       h('div', { class: 'product-name' }, row.name),
-      row.brand ? h('div', { class: 'product-brand' }, row.brand) : null
+      row.brandName ? h('div', { class: 'product-brand' }, row.brandName) : null
     ])
   ])
 }
@@ -517,6 +548,7 @@ function toggleStatus(row: ProductVO, newStatus: number) {
 
 onMounted(async () => {
   await loadCategories()
+  await loadBrands()
   await loadProducts()
 })
 </script>

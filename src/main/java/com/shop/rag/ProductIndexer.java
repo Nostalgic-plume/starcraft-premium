@@ -3,8 +3,10 @@ package com.shop.rag;
 import cn.hutool.core.collection.CollUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.shop.constant.ProductConstants;
+import com.shop.mapper.BrandMapper;
 import com.shop.mapper.CategoryMapper;
 import com.shop.mapper.ProductMapper;
+import com.shop.model.entity.BrandDO;
 import com.shop.model.entity.CategoryDO;
 import com.shop.model.entity.ProductDO;
 import dev.langchain4j.data.embedding.Embedding;
@@ -37,13 +39,31 @@ public class ProductIndexer {
 
     private final ProductMapper productMapper;
     private final CategoryMapper categoryMapper;
+    private final BrandMapper brandMapper;
     private final SkuPriceResolver skuPriceResolver;
     private final OpenAiEmbeddingModel embeddingModel;
     private final QdrantEmbeddingStore embeddingStore;
     private final QdrantCollectionHelper qdrantCollectionHelper;
 
-    /** 最后一次全量重建时间（毫秒时间戳，0 表示未重建） */
+    /**
+     * 最后一次全量重建的**结束**时间（毫秒时间戳，0 表示未重建）
+     * <p>
+     * 语义是「动作已结束」，**不代表成功** —— 结果看 {@link #lastRebuildSuccess}。
+     * 失败时同样更新：前端靠轮询时间戳变化判断动作是否结束，若失败不更新，前端只能干等到超时。
+     */
     private volatile long lastRebuildTime = 0;
+
+    /**
+     * 最后一次全量重建是否成功
+     * <p>
+     * ⚠️ 必须与时间戳分开记录：重建首步 {@code recreateCollection()} 会**先删掉集合**，
+     * 之后若向量化失败（如 TEI 未就绪导致全部空向量）而提前返回，集合已空却仍更新了时间戳 ——
+     * 只看时间戳的前端会弹「重建完成」，而此刻向量检索已完全不可用。
+     */
+    private volatile boolean lastRebuildSuccess = false;
+
+    /** 最后一次重建的结果说明（失败原因 / 成功条数） */
+    private volatile String lastRebuildMessage = "尚未执行重建";
 
     /**
      * 计算商品的确定性 Qdrant point id
@@ -58,8 +78,17 @@ public class ProductIndexer {
         return String.valueOf(productId);
     }
 
-    /** 详情文本最大长度（embedding 单条 token 上限防护，超长截断） */
-    private static final int MAX_DETAIL_LENGTH = 500;
+    /**
+     * 详情文本最大长度（字符）——embedding 单条 token 上限防护，超长截断。
+     * <p>
+     * 2026-09 迁移 BGE-M3 时由 500 放宽至 2000：原 500 是为适配 DashScope
+     * text-embedding-v1 的 2048 上下文所设的防护；BGE-M3 上下文为 8192，可容纳更长详情。
+     * <p>
+     * ⚠️ 实测（2026-09-27，278 条在售商品）：详情长度平均 56 字符、**最长仅 122 字符**，
+     * 无一超过 500 —— 即原阈值从未真正触发过。故本次放宽**不改变任何一条索引文本**，
+     * 无需重建索引，属为数据增长预留余量；若后续详情显著变长，此值才会生效（届时需重建）。
+     */
+    private static final int MAX_DETAIL_LENGTH = 2000;
 
     /**
      * 统计 Qdrant 集合中已索引的商品数量
@@ -120,17 +149,22 @@ public class ProductIndexer {
                         .orderByDesc(ProductDO::getCreateTime));
 
         if (CollUtil.isEmpty(products)) {
-            log.info("没有上架商品，跳过索引构建");
-            lastRebuildTime = System.currentTimeMillis();
+            // ⚠️ 此处集合已被 recreateCollection() 清空，属失败态（而非"成功重建 0 条"）
+            log.warn("没有上架商品，索引构建跳过（集合已被重建为空）");
+            markRebuildFinished(false, "没有上架商品，索引为空");
             return;
         }
 
         // 批量查询 SKU 价格
         Map<Long, BigDecimal[]> priceMap = loadPriceMap(products);
 
+        // 批量预加载分类名与品牌名：二者都参与索引文本，逐条 selectById 会让重建多出 2N 次
+        // DB 往返（商品数百时线性放大；同方法内 SKU 价格已用 loadPriceMap 批量预加载，保持一致）
+        IndexLookup lookup = loadIndexLookup(products);
+
         // 批量构建 TextSegment（携元数据）
         List<TextSegment> segments = products.stream()
-                .map(p -> buildTextSegment(p, priceMap.get(p.getId())))
+                .map(p -> buildTextSegment(p, priceMap.get(p.getId()), lookup))
                 .collect(Collectors.toList());
 
         // 批量生成 embedding（分批，text-embedding-v1 单次最多 25 条）
@@ -163,20 +197,35 @@ public class ProductIndexer {
         }
 
         if (validEmbeddings.isEmpty()) {
-            log.warn("所有商品向量化结果均为空，请检查嵌入服务是否正常运行");
-            lastRebuildTime = System.currentTimeMillis();
+            log.error("所有商品向量化结果均为空（集合已被重建为空），请检查向量化服务（TEI）是否正常运行");
+            markRebuildFinished(false, "所有商品向量化结果均为空，集合已为空，请检查向量化服务（TEI）");
             return;
         }
 
         // 批量写入 Qdrant：点 id = productId，同 id 重复写入即为覆盖，无需记录返回值
         embeddingStore.addAll(validIds, validEmbeddings, validSegments);
 
-        lastRebuildTime = System.currentTimeMillis();
+        markRebuildFinished(true, String.format("重建成功，索引 %d 条", validIds.size()));
         long elapsed = System.currentTimeMillis() - start;
         log.info("===== 商品向量索引完成: {} 条, 耗时 {}ms =====", validIds.size(), elapsed);
 
         // 联动重建 MySQL FULLTEXT 索引
         rebuildFulltextIndex();
+    }
+
+    /**
+     * 记录一次重建的结果（结束时间 + 成功标志 + 说明）
+     * <p>
+     * 无论成功失败都更新时间戳（标识「动作已结束」，让前端停止轮询），
+     * 但成功与否必须靠 {@link #lastRebuildSuccess} 区分 —— 失败时集合可能已被清空。
+     *
+     * @param success 是否成功
+     * @param message 结果说明（失败原因 / 成功条数）
+     */
+    private void markRebuildFinished(boolean success, String message) {
+        this.lastRebuildSuccess = success;
+        this.lastRebuildMessage = message;
+        this.lastRebuildTime = System.currentTimeMillis();
     }
 
     /**
@@ -229,7 +278,8 @@ public class ProductIndexer {
         BigDecimal[] prices = loadProductPrice(product.getId());
 
         // 构建 embedding 并以确定性 point id 写入：同 id 覆盖，天然幂等，无需先删旧点
-        TextSegment segment = buildTextSegment(product, prices);
+        // 单条路径不预加载（传 null → 内部逐条回退查询），避免为一条商品建 Map 的开销
+        TextSegment segment = buildTextSegment(product, prices, null);
         Embedding embedding = embeddingModel.embed(segment.text()).content();
         if (embedding.vector() == null || embedding.vector().length == 0) {
             log.warn("商品 '{}' 向量化为空，跳过索引更新", product.getName());
@@ -260,32 +310,153 @@ public class ProductIndexer {
         return countIndexedPoints();
     }
 
-    /** 最后重建时间 */
+    /** 最后重建时间（语义为「动作结束时间」，成功与否见 {@link #isLastRebuildSuccess()}） */
     public long getLastRebuildTime() {
         return lastRebuildTime;
     }
 
+    /** 最后一次重建是否成功 */
+    public boolean isLastRebuildSuccess() {
+        return lastRebuildSuccess;
+    }
+
+    /** 最后一次重建的结果说明（失败原因 / 成功条数） */
+    public String getLastRebuildMessage() {
+        return lastRebuildMessage;
+    }
+
+    /**
+     * 索引文本构建所需的批量预加载上下文
+     * <p>
+     * 分类名与品牌名都参与索引文本，逐条 {@code selectById} 会让全量重建多出 2N 次 DB 往返
+     * （商品数百时线性放大）。统一预加载后按 id 取用，缺失的 id 回退为空串。
+     *
+     * @param categoryNames 分类 id → 名称
+     * @param brandNames    品牌 id → 名称
+     */
+    private record IndexLookup(Map<Long, String> categoryNames, Map<Long, String> brandNames) {
+    }
+
     /**
      * 构建索引文本（供 embedding 用）
+     *
+     * @param product 商品
+     * @param lookup  批量预加载上下文；传 null 时逐条回退查询
+     *                （单条增量索引路径 {@link #addOrUpdate(ProductDO)} 用）
+     * @return 索引文本
      */
-    private String buildIndexText(ProductDO product) {
-        CategoryDO category = categoryMapper.selectById(product.getCategoryId());
-        String categoryName = category != null ? category.getName() : "";
+    private String buildIndexText(ProductDO product, IndexLookup lookup) {
+        String categoryName = lookup != null
+                ? nameOf(lookup.categoryNames(), product.getCategoryId())
+                : resolveCategoryName(product.getCategoryId());
+        String brandName = lookup != null
+                ? nameOf(lookup.brandNames(), product.getBrandId())
+                : resolveBrandName(product.getBrandId());
 
         return String.format("名称：%s\n描述：%s\n品牌：%s\n分类：%s\n详情：%s",
                 safe(product.getName()),
                 safe(product.getDescription()),
-                safe(product.getBrand()),
+                safe(brandName),
                 categoryName,
                 truncateDetail(stripHtml(safe(product.getDetail()))));
     }
 
     /**
-     * 构建带元数据的 TextSegment
+     * 从预加载映射取值，id 为 null 或未命中时返回空串
+     *
+     * @param nameMap id → 名称
+     * @param id      待查 id（可为 null）
+     * @return 名称；无则空串
      */
-    private TextSegment buildTextSegment(ProductDO product, BigDecimal[] prices) {
-        return TextSegment.from(buildIndexText(product),
+    private static String nameOf(Map<Long, String> nameMap, Long id) {
+        return id == null ? "" : nameMap.getOrDefault(id, "");
+    }
+
+    /**
+     * 构建带元数据的 TextSegment
+     *
+     * @param product 商品
+     * @param prices  SKU 价格区间
+     * @param lookup  批量预加载上下文；null 时逐条回退查询
+     * @return TextSegment
+     */
+    private TextSegment buildTextSegment(ProductDO product, BigDecimal[] prices, IndexLookup lookup) {
+        return TextSegment.from(buildIndexText(product, lookup),
                 Metadata.from(toMetadataMap(product, prices)));
+    }
+
+    /**
+     * 解析品牌名（单条回退路径）
+     *
+     * @param brandId 品牌 ID（可为 null）
+     * @return 品牌名；无品牌或查不到时返回空串
+     */
+    private String resolveBrandName(Long brandId) {
+        if (brandId == null) {
+            return "";
+        }
+        BrandDO brand = brandMapper.selectById(brandId);
+        return brand != null ? brand.getName() : "";
+    }
+
+    /**
+     * 解析分类名（单条回退路径）
+     *
+     * @param categoryId 分类 ID（可为 null）
+     * @return 分类名；无分类或查不到时返回空串
+     */
+    private String resolveCategoryName(Long categoryId) {
+        if (categoryId == null) {
+            return "";
+        }
+        CategoryDO category = categoryMapper.selectById(categoryId);
+        return category != null ? category.getName() : "";
+    }
+
+    /**
+     * 批量预加载索引文本所需的分类名与品牌名
+     *
+     * @param products 商品列表
+     * @return 预加载上下文
+     */
+    private IndexLookup loadIndexLookup(List<ProductDO> products) {
+        return new IndexLookup(loadCategoryNameMap(products), loadBrandNameMap(products));
+    }
+
+    /**
+     * 批量预加载分类名（categoryId → name）
+     *
+     * @param products 商品列表
+     * @return 分类名映射；商品均无分类时返回空 Map
+     */
+    private Map<Long, String> loadCategoryNameMap(List<ProductDO> products) {
+        Set<Long> categoryIds = products.stream()
+                .map(ProductDO::getCategoryId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (categoryIds.isEmpty()) {
+            return Map.of();
+        }
+        return categoryMapper.selectBatchIds(categoryIds).stream()
+                .collect(Collectors.toMap(CategoryDO::getId, CategoryDO::getName, (existing, ignored) -> existing));
+    }
+
+    /**
+     * 批量预加载品牌名（brandId → name）
+     *
+     * @param products 商品列表
+     * @return 品牌名映射；商品均无品牌时返回空 Map
+     */
+    private Map<Long, String> loadBrandNameMap(List<ProductDO> products) {
+        Set<Long> brandIds = products.stream()
+                .map(ProductDO::getBrandId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (brandIds.isEmpty()) {
+            return Map.of();
+        }
+        return brandMapper.selectBatchIds(brandIds).stream()
+                .collect(Collectors.toMap(BrandDO::getId, BrandDO::getName, (existing, ignored) -> existing));
     }
 
     /**

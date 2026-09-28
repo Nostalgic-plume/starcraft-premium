@@ -29,8 +29,11 @@ public class ProductVO {
     @Schema(description = "分类名称")
     private String categoryName;
 
-    @Schema(description = "品牌")
-    private String brand;
+    @Schema(description = "品牌ID（关联 brand 表）")
+    private Long brandId;
+
+    @Schema(description = "品牌名（由品牌ID关联 brand 表取得）")
+    private String brandName;
 
     @Schema(description = "主图")
     private String mainImage;

@@ -27,8 +27,8 @@ public class ProductDTO {
     @Schema(description = "分类ID", requiredMode = Schema.RequiredMode.REQUIRED)
     private Long categoryId;
 
-    @Schema(description = "品牌")
-    private String brand;
+    @Schema(description = "品牌ID（关联 brand 表）")
+    private Long brandId;
 
     @Schema(description = "主图URL")
     private String mainImage;

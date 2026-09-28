@@ -63,7 +63,7 @@ function onDetailClick() {
     <div class="card-body">
       <h3 class="card-name" :title="product.name">{{ product.name }}</h3>
       <div class="card-meta">
-        <span class="card-brand">{{ product.brand || '通用' }}</span>
+        <span class="card-brand">{{ product.brandName || '通用' }}</span>
         <span class="card-sold">已售 {{ product.soldCount || 0 }}</span>
       </div>
       <div class="card-footer">

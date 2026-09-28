@@ -20,8 +20,8 @@ public interface ProductMapper extends BaseMapper<ProductDO> {
      * MATCH AGAINST IN NATURAL LANGUAGE MODE 返回按相关性降序排列的商品
      */
     @Select("SELECT * FROM product WHERE deleted = 0 AND status = 1 " +
-            "AND MATCH(name, description, brand) AGAINST(#{query} IN NATURAL LANGUAGE MODE) > 0 " +
-            "ORDER BY MATCH(name, description, brand) AGAINST(#{query} IN NATURAL LANGUAGE MODE) DESC " +
+            "AND MATCH(name, description) AGAINST(#{query} IN NATURAL LANGUAGE MODE) > 0 " +
+            "ORDER BY MATCH(name, description) AGAINST(#{query} IN NATURAL LANGUAGE MODE) DESC " +
             "LIMIT #{limit}")
     List<ProductDO> searchByKeyword(@Param("query") String query, @Param("limit") int limit);
 
@@ -37,6 +37,6 @@ public interface ProductMapper extends BaseMapper<ProductDO> {
      * 返回匹配行数 > 0 表示索引可用
      */
     @Select("SELECT COUNT(*) FROM product WHERE deleted = 0 AND status = 1 " +
-            "AND MATCH(name, description, brand) AGAINST(#{query} IN NATURAL LANGUAGE MODE)")
+            "AND MATCH(name, description) AGAINST(#{query} IN NATURAL LANGUAGE MODE)")
     int testFulltextIndex(@Param("query") String query);
 }

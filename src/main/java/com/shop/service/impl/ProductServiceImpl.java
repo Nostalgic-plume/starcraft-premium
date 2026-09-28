@@ -17,12 +17,15 @@ import com.shop.common.StpShopUtil;
 import com.shop.common.PaginationHelper;
 import com.shop.common.RedisCache;
 import com.shop.constant.ProductConstants;
+import com.shop.mapper.BrandMapper;
 import com.shop.mapper.CategoryMapper;
 import com.shop.mapper.OrderItemMapper;
 import com.shop.mapper.ProductMapper;
 import com.shop.mapper.ShopMapper;
 import com.shop.mapper.SkuMapper;
 import com.shop.model.dto.ProductDTO;
+import com.shop.model.dto.ProductSalesDTO;
+import com.shop.model.entity.BrandDO;
 import com.shop.model.entity.CategoryDO;
 import com.shop.model.entity.ProductDO;
 import com.shop.model.entity.ShopDO;
@@ -42,7 +45,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -59,6 +64,7 @@ public class ProductServiceImpl implements ProductService {
     private final ProductMapper productMapper;
     private final SkuMapper skuMapper;
     private final CategoryMapper categoryMapper;
+    private final BrandMapper brandMapper;
     private final ShopMapper shopMapper;
     private final OrderItemMapper orderItemMapper;
     private final ProductIndexer productIndexer;
@@ -84,6 +90,12 @@ public class ProductServiceImpl implements ProductService {
         // 校验：商品只能挂到二级分类（叶子分类）下
         if (category.getParentId() == null || category.getParentId() == 0) {
             throw new BusinessException("请选择具体的子分类（如「手机」而非「手机数码」）");
+        }
+
+        // 校验品牌存在（品牌本身可选，但传了就必须有效）：前端下拉已限制取值，
+        // 这里防的是直接调 API 写入悬空 brand_id —— 否则该商品品牌位恒为空且无从排查
+        if (dto.getBrandId() != null && brandMapper.selectById(dto.getBrandId()) == null) {
+            throw new BusinessException("品牌不存在");
         }
 
         ProductDO product = new ProductDO();
@@ -231,7 +243,12 @@ public class ProductServiceImpl implements ProductService {
         }
 
         IPage<ProductDO> iPage = productMapper.selectPage(mpPage, wrapper);
-        List<ProductVO> voList = iPage.getRecords().stream().map(this::convertToVO).collect(Collectors.toList());
+        // 整页预加载分类/品牌/SKU/销量：convertToVO 逐条查会让单次分页产生 4N 次查询
+        // （pageSize 上限 200 → 最多 800 次），故一次性预加载后按 id 取用
+        ProductVoLookup lookup = loadLookup(iPage.getRecords());
+        List<ProductVO> voList = iPage.getRecords().stream()
+                .map(p -> convertToVO(p, lookup))
+                .collect(Collectors.toList());
         return PageResult.of(iPage, voList);
     }
 
@@ -345,8 +362,22 @@ public class ProductServiceImpl implements ProductService {
         return doPage(query, true);
     }
 
-    /** 商品 DO 转 VO */
+    /** 商品 DO 转 VO（单条路径：逐条查库） */
     private ProductVO convertToVO(ProductDO product) {
+        return convertToVO(product, null);
+    }
+
+    /**
+     * 商品 DO 转 VO
+     * <p>
+     * {@code lookup} 为 null 时逐条查库（详情页等单条场景）；分页场景传入整页预加载上下文，
+     * 避免每个商品各查 4 次（分类 / 品牌 / SKU / 销量）导致的 4N 次查询。
+     *
+     * @param product 商品 DO
+     * @param lookup  整页预加载上下文；null 表示单条查询
+     * @return 商品 VO
+     */
+    private ProductVO convertToVO(ProductDO product, ProductVoLookup lookup) {
         ProductVO vo = new ProductVO();
         BeanUtil.copyProperties(product, vo);
 
@@ -354,13 +385,39 @@ public class ProductServiceImpl implements ProductService {
             vo.setImages(JSONUtil.toList(product.getImages(), String.class));
         }
 
-        CategoryDO category = categoryMapper.selectById(product.getCategoryId());
-        if (category != null) {
-            vo.setCategoryName(category.getName());
+        // 分类名（保持原语义：查不到则不设该字段）
+        String categoryName;
+        if (lookup != null) {
+            categoryName = lookup.categoryNames().get(product.getCategoryId());
+        } else {
+            CategoryDO category = categoryMapper.selectById(product.getCategoryId());
+            categoryName = category != null ? category.getName() : null;
+        }
+        if (categoryName != null) {
+            vo.setCategoryName(categoryName);
         }
 
-        List<SkuDO> skuList = skuMapper.selectList(
-                new LambdaQueryWrapper<SkuDO>().eq(SkuDO::getProductId, product.getId()));
+        // 品牌名由品牌ID关联品牌主数据表取得（商品表不再冗余存储品牌名）
+        if (product.getBrandId() != null) {
+            String brandName;
+            if (lookup != null) {
+                brandName = lookup.brandNames().get(product.getBrandId());
+            } else {
+                BrandDO brand = brandMapper.selectById(product.getBrandId());
+                brandName = brand != null ? brand.getName() : null;
+            }
+            if (brandName != null) {
+                vo.setBrandName(brandName);
+            }
+        }
+
+        List<SkuDO> skuList;
+        if (lookup != null) {
+            skuList = lookup.skusByProduct().getOrDefault(product.getId(), List.of());
+        } else {
+            skuList = skuMapper.selectList(
+                    new LambdaQueryWrapper<SkuDO>().eq(SkuDO::getProductId, product.getId()));
+        }
 
         if (CollUtil.isNotEmpty(skuList)) {
             BigDecimal minPrice = skuList.stream().map(SkuDO::getPrice).min(BigDecimal::compareTo).orElse(BigDecimal.ZERO);
@@ -384,9 +441,72 @@ public class ProductServiceImpl implements ProductService {
             skuList.forEach(sku -> stockCacheService.initStock(sku.getId(), sku.getStock()));
         }
 
-        Integer sold = orderItemMapper.sumQuantityByProductId(product.getId());
+        Integer sold;
+        if (lookup != null) {
+            sold = lookup.soldCounts().get(product.getId());
+        } else {
+            sold = orderItemMapper.sumQuantityByProductId(product.getId());
+        }
         vo.setSoldCount(sold != null ? sold : 0);
 
         return vo;
+    }
+
+    /**
+     * 商品 VO 转换所需的整页预加载上下文
+     * <p>
+     * 商品列表每条都要展示分类名 / 品牌名 / 价格区间 / 销量，逐条查库会让单次分页
+     * 产生 4N 次查询（pageSize 上限 200 → 最多 800 次）。整页一次性预加载后按 id 取用。
+     *
+     * @param categoryNames 分类 id → 名称
+     * @param brandNames    品牌 id → 名称
+     * @param skusByProduct 商品 id → SKU 列表
+     * @param soldCounts    商品 id → 累计销量（无销量的商品不在 Map 中，按 0 处理）
+     */
+    private record ProductVoLookup(Map<Long, String> categoryNames,
+                                   Map<Long, String> brandNames,
+                                   Map<Long, List<SkuDO>> skusByProduct,
+                                   Map<Long, Integer> soldCounts) {
+    }
+
+    /**
+     * 整页预加载分类名 / 品牌名 / SKU / 销量（各一次批量查询，替代逐条查库）
+     *
+     * @param products 当前页商品列表
+     * @return 预加载上下文；空页返回各字段为空 Map 的实例
+     */
+    private ProductVoLookup loadLookup(List<ProductDO> products) {
+        if (CollUtil.isEmpty(products)) {
+            return new ProductVoLookup(Map.of(), Map.of(), Map.of(), Map.of());
+        }
+
+        Set<Long> categoryIds = products.stream().map(ProductDO::getCategoryId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        Set<Long> brandIds = products.stream().map(ProductDO::getBrandId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        List<Long> productIds = products.stream().map(ProductDO::getId)
+                .filter(Objects::nonNull).collect(Collectors.toList());
+
+        Map<Long, String> categoryNames = categoryIds.isEmpty() ? Map.of()
+                : categoryMapper.selectBatchIds(categoryIds).stream()
+                        .collect(Collectors.toMap(CategoryDO::getId, CategoryDO::getName, (first, ignored) -> first));
+
+        Map<Long, String> brandNames = brandIds.isEmpty() ? Map.of()
+                : brandMapper.selectBatchIds(brandIds).stream()
+                        .collect(Collectors.toMap(BrandDO::getId, BrandDO::getName, (first, ignored) -> first));
+
+        // 批量查 SKU 后按商品分组：无 SKU 的商品不会出现在 Map 中（调用方 getOrDefault 取空列表）
+        Map<Long, List<SkuDO>> skusByProduct = productIds.isEmpty() ? Map.of()
+                : skuMapper.selectList(new LambdaQueryWrapper<SkuDO>().in(SkuDO::getProductId, productIds))
+                        .stream().collect(Collectors.groupingBy(SkuDO::getProductId));
+
+        // 批量查销量：SQL 侧 GROUP BY 只返回有销量的商品，无销量的按 0 处理
+        Map<Long, Integer> soldCounts = productIds.isEmpty() ? Map.of()
+                : orderItemMapper.sumQuantityByProductIds(productIds).stream()
+                        .filter(dto -> dto.getProductId() != null)
+                        .collect(Collectors.toMap(ProductSalesDTO::getProductId,
+                                dto -> dto.getTotal() != null ? dto.getTotal() : 0, (first, ignored) -> first));
+
+        return new ProductVoLookup(categoryNames, brandNames, skusByProduct, soldCounts);
     }
 }

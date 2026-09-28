@@ -42,6 +42,14 @@ B2C 电商系统，**Spring Boot 单体后端 + Vue 3 三端分离前端**，Ngi
 ## 快速开始
 
 ```bash
+# 0. 中间件一键启动（Redis / Qdrant / Elasticsearch / RocketMQ / Nginx 五个，默认不含 TEI）
+cd shop && docker compose up -d
+
+# 0b. 启用 RAG 向量检索（TEI 文本向量化，需 NVIDIA GPU + nvidia-container-toolkit）
+#     TEI 归入 gpu profile 默认不启动 —— 无 GPU 机器上它会让整条 up 命令失败。
+#     BGE-M3 权重目录由 .env 的 BGE_M3_MODEL_PATH 指定（默认 D:/models/bge-m3，约 2.2G，需含 1_Pooling/）
+cd shop && docker compose --profile gpu up -d
+
 # 1. 后端编译启动
 cd shop && mvn clean package -DskipTests -q && mvn spring-boot:run
 
@@ -50,8 +58,8 @@ cd frontend            && npm run build
 cd frontend-admin      && npm run build
 cd frontend-merchant   && npm run build
 
-# 3. Nginx 启动
-cd shop/deploy && nginx.exe -c conf/nginx.conf -p .
+# 3. Nginx：已由步骤 0 的 compose 提供（shop-nginx 容器，监听 80）
+#    不用 Docker 时可改本地 nginx.exe：cd shop/deploy && nginx.exe -c conf/nginx.conf -p .
 ```
 
 | 地址 | 页面 | 默认账号 |
@@ -62,7 +70,9 @@ cd shop/deploy && nginx.exe -c conf/nginx.conf -p .
 | `http://localhost:8080/swagger-ui.html` | 接口文档（Swagger UI） | — |
 
 > 所有账号密码统一 **`123456`**。
-> 首次运行前复制 `.env.example` 为 `.env` 并填写 DB 密码 / DashScope Key（已 gitignore，由 spring-dotenv 启动时加载）。
+> 首次运行前复制 `.env.example` 为 `.env` 并填写 DB 密码、`DEEPSEEK_API_KEY`、`BACKUP_LLM_API_KEY`
+> （Compose 另需 `REDIS_PASSWORD`、`BGE_M3_MODEL_PATH`）。`.env` 已 gitignore，由 spring-dotenv 启动时加载。
+> 向量化已于 2026-09 由 DashScope `text-embedding-v1` 换为本地 TEI/BGE-M3，`DASHSCOPE_API_KEY` 仅留作回滚。
 
 ---
 

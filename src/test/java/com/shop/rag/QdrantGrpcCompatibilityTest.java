@@ -35,8 +35,8 @@ class QdrantGrpcCompatibilityTest {
                 .collectionName("products")
                 .build();
 
-        // 假 1536 维向量（对应 products 集合维度，绕过 embedding 服务依赖）
-        float[] vector = new float[1536];
+        // 假 1024 维向量（对应 products 集合维度 BGE-M3，绕过 embedding 服务依赖）
+        float[] vector = new float[1024];
         Random random = new Random(42);
         for (int i = 0; i < vector.length; i++) {
             vector[i] = random.nextFloat();

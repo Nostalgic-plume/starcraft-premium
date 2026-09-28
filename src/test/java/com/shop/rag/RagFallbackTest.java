@@ -54,7 +54,8 @@ class RagFallbackTest {
     @BeforeEach
     void setUp() {
         ragSearchService = new RagSearchService(
-                embeddingModel, embeddingStore, keywordSearchService, synonymExpander, new RrfProperties());
+                embeddingModel, embeddingStore, keywordSearchService, synonymExpander,
+                new RrfProperties(), new RagProperties());
         // 同义词扩展原样返回，聚焦降级逻辑本身
         when(synonymExpander.expand(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
         // 关键词路固定命中 1 条，用于断言「降级后仍有结果」

@@ -3,6 +3,7 @@ package com.shop.rag;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.shop.constant.ProductConstants;
+import com.shop.mapper.BrandMapper;
 import com.shop.mapper.CategoryMapper;
 import com.shop.mapper.ProductMapper;
 import com.shop.mapper.SkuMapper;
@@ -52,6 +53,8 @@ class ProductIndexerTest {
     @Mock
     private CategoryMapper categoryMapper;
     @Mock
+    private BrandMapper brandMapper;
+    @Mock
     private SkuMapper skuMapper;
     @Mock
     private OpenAiEmbeddingModel embeddingModel;
@@ -70,7 +73,7 @@ class ProductIndexerTest {
         TableInfoHelper.initTableInfo(assistant, SkuDO.class);
         TableInfoHelper.initTableInfo(assistant, ProductDO.class);
 
-        indexer = new ProductIndexer(productMapper, categoryMapper, new SkuPriceResolver(skuMapper),
+        indexer = new ProductIndexer(productMapper, categoryMapper, brandMapper, new SkuPriceResolver(skuMapper),
                 embeddingModel, embeddingStore, qdrantCollectionHelper);
     }
 
@@ -103,7 +106,7 @@ class ProductIndexerTest {
     @Test
     @DisplayName("重启场景：新建实例（进程内状态天然为空）后，删除依然生效")
     void remove_afterRestart_shouldStillDelete() {
-        ProductIndexer restarted = new ProductIndexer(productMapper, categoryMapper, new SkuPriceResolver(skuMapper),
+        ProductIndexer restarted = new ProductIndexer(productMapper, categoryMapper, brandMapper, new SkuPriceResolver(skuMapper),
                 embeddingModel, embeddingStore, qdrantCollectionHelper);
 
         restarted.remove(99L);

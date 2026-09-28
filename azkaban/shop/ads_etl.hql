@@ -67,7 +67,10 @@ SELECT
   first_category_id,
   COALESCE(category_name, '未知')                              AS category_name,
   CAST(SUM(quantity) AS BIGINT)                               AS sale_count,
-  CAST(SUM(actual_amount) AS DECIMAL(16,2))                   AS sale_amount
+  -- ⚠️ 用 subtotal（订单项小计）而非 actual_amount（整单实付）：
+  --    本表按分类聚合，而 dwd_fact_order_detail 的粒度是「一行一个订单项」，
+  --    一笔含多商品的订单会把整单金额重复累加到其涉及的每个分类上，金额虚高且排名失真
+  CAST(SUM(subtotal) AS DECIMAL(16,2))                        AS sale_amount
 FROM dwd.dwd_fact_order_detail
 WHERE dt = '${hivevar:dt}'
 GROUP BY first_category_id, category_name
@@ -84,7 +87,10 @@ SELECT
   product_name,
   category_name,
   CAST(SUM(quantity) AS BIGINT)                               AS sale_quantity,
-  CAST(SUM(actual_amount) AS DECIMAL(16,2))                   AS sale_amount
+  -- ⚠️ 用 subtotal（订单项小计）而非 actual_amount（整单实付）：
+  --    本表按商品聚合，事实表粒度为「一行一个订单项」，
+  --    一笔含 3 个商品的订单会把整单金额记到 3 个商品头上 → 营业额虚高、TOP 排名被带偏
+  CAST(SUM(subtotal) AS DECIMAL(16,2))                        AS sale_amount
 FROM dwd.dwd_fact_order_detail
 WHERE dt = '${hivevar:dt}'
 GROUP BY product_id, product_name, category_name

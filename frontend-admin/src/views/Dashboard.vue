@@ -548,6 +548,21 @@ function buildCategoryOption(): echarts.EChartsOption {
 }
 
 /**
+ * HTML 转义（& < > " '）
+ * <p>
+ * 用途：ECharts tooltip 默认 `renderMode: 'html'`，formatter 返回的字符串会被当作
+ * **HTML** 解析。任何拼进去的外部数据（商品名、分类名等）都必须先转义，
+ * 否则商家把商品名写成 `<img src=x onerror=...>` 再存入库，管理员一打开看板
+ * hover 图表就会执行该脚本 —— 典型的存储型 XSS（商品名是商家可写字段）。
+ */
+function escapeHtml(value: unknown): string {
+  return String(value ?? '').replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string
+  )
+}
+
+/**
  * 商品销售排行 TOP10：横向条形（ADS ads_product_top50，金额口径，tooltip 附销量）。
  * 不用 OLTP order_item 的销量榜：8-29 有 25,204 笔脏订单灌入同一商品会把其余商品压平，
  * 且原写法用金额格式（axisMoney）渲染件数，单位不符。
@@ -565,7 +580,9 @@ function buildProductOption(): echarts.EChartsOption {
         const first = (Array.isArray(params) ? params[0] : params) as { dataIndex: number }
         const row = top[first.dataIndex]
         if (!row) return ''
-        return `${row.productName}<br/>销售额 ${axisMoney(Number(row.saleAmount) || 0)}<br/>销量 ${Number(row.saleQuantity) || 0} 件`
+        // ⚠️ productName 必须转义：商家可写字段 + tooltip 按 HTML 渲染 = 存储型 XSS
+        const name = escapeHtml(row.productName)
+        return `${name}<br/>销售额 ${axisMoney(Number(row.saleAmount) || 0)}<br/>销量 ${Number(row.saleQuantity) || 0} 件`
       }
     },
     grid: { left: 8, right: 56, top: 8, bottom: 0, containLabel: true },

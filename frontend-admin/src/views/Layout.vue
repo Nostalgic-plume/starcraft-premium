@@ -74,6 +74,7 @@ const menuOptions: MenuOption[] = [
   { label: '售后管理', key: '/dashboard/after-sales', icon: renderIcon('M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5') },
   { label: '用户管理', key: '/dashboard/users', icon: renderIcon('M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75') },
   { label: '分类管理', key: '/dashboard/categories', icon: renderIcon('M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82zM7 7h.01') },
+  { label: '索引管理', key: '/dashboard/rag-index', icon: renderIcon('M12 2C7.58 2 4 3.79 4 6s3.58 4 8 4 8-1.79 8-4-3.58-4-8-4zM4 6v6c0 2.21 3.58 4 8 4s8-1.79 8-4V6M4 12v6c0 2.21 3.58 4 8 4s8-1.79 8-4v-6') },
   { label: '系统设置', key: '/dashboard/settings', icon: renderIcon('M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6') }
 ]
 

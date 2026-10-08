@@ -1,0 +1,29 @@
+flowchart LR
+    F["商城前端<br/>Vue 3"]
+    B["商城后端<br/>Spring Boot 3.2.12"]
+    D["DataForge<br/>行为生成与加速回放"]
+    K[("Kafka<br/>user-behavior")]
+    FL["Flink 1.17.2<br/>事件时间 · 滑动窗口"]
+    RD[("Redis<br/>实时特征 · TTL")]
+    IM["用户画像更新<br/>LLM 归纳"]
+    PS[("画像存储")]
+    G["商品数据"]
+    EM["文本向量化<br/>Embedding 服务"]
+    QD[("Qdrant<br/>商品向量索引")]
+    RS["推荐服务<br/>多路召回与融合"]
+
+    F -->|"上报行为事件"| B
+    B -->|"写入后立即返回"| K
+    B -.->|"历史行为加速回放"| D
+    D -.->|"按倍率压缩回放"| K
+    K --> FL
+    FL -->|"写入特征"| RD
+    K --> IM
+    IM --> PS
+    G --> EM
+    EM --> QD
+    RD --> RS
+    PS --> RS
+    QD --> RS
+    RS -->|"商品候选集"| B
+    B -->|"首页商品列表"| F

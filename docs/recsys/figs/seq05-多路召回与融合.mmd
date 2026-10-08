@@ -1,0 +1,14 @@
+sequenceDiagram
+    autonumber
+    participant B as 商城后端
+    participant R as 推荐服务
+    participant V as 向量索引
+    participant D as 数据存储
+
+    B->>R: 请求推荐候选集
+    Note over R: 三路召回并行执行
+    R->>V: 语义召回
+    R->>D: 协同过滤召回
+    R->>D: 热门兜底召回
+    Note over R: 三路结果去重后融合
+    R-->>B: 返回候选集

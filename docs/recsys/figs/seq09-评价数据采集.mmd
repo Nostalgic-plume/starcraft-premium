@@ -1,0 +1,16 @@
+sequenceDiagram
+    autonumber
+    participant U as 用户
+    participant F as 商城前端
+    participant B as 商城后端
+    participant D as 数据存储
+
+    U->>F: 提交评分与评价
+    F->>B: 提交评价
+    B->>D: 校验归属后保存评价
+    D-->>B: 保存成功
+    B-->>F: 返回提交结果
+    Note over B: 同步评价数据至推荐服务
+    U->>F: 查看商品评价
+    F->>B: 请求评价列表
+    B-->>F: 分页返回评价

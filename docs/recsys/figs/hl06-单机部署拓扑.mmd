@@ -1,0 +1,24 @@
+flowchart LR
+    subgraph HOST["单机宿主机（内存上限 16GB）"]
+        subgraph DK["Docker Compose 容器组"]
+            D1["mysql:8<br/>:3306<br/>业务库 + 推荐库"]
+            D2["redis:8.8-alpine<br/>:6379<br/>特征 · 热度 · 缓存"]
+            D3["kafka:3.6 单节点 KRaft<br/>:9092<br/>user-behavior"]
+            D4["flink:1.17.2<br/>JobManager :8081<br/>TaskManager"]
+            D5["nginx:1.20.2-alpine<br/>:80<br/>静态资源 + 反向代理"]
+        end
+        subgraph LP["宿主机本地进程"]
+            J1["商城后端 Spring Boot<br/>:8080<br/>行为上报与榜单查询"]
+            J2["推荐服务 Spring Boot<br/>:8082<br/>召回 · 融合 · 重排 · 查询"]
+        end
+    end
+    BR["浏览器<br/>首页与后台"] --> D5
+    D5 -->|"反向代理"| J1
+    J1 -->|"HTTP 调用"| J2
+    J1 --> D3
+    J2 --> D2
+    J2 --> D1
+    D3 --> D4
+    D4 --> D2
+
+

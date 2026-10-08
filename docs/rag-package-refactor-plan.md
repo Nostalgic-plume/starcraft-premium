@@ -5,15 +5,18 @@
 
 ## 顶层子任务（7 个）
 
-按关联性分批，每批独立可验收。**每批结束立即编译**，不攒着一起编。
+> **执行修正（2026-10-08）**：原计划给 Task 1–4 各设一个编译验收点，**该方式不成立** —— Java 包间引用是
+> 原子性的：搬走 `rag.search` 后，包内类仍要引用尚在 `rag/` 根的 `RagProperties`、`ProductIndexer` 等，
+> 跨包即缺 import，编译必失败；要让它通过就得先写指向旧位置的临时 import，等该类搬走再改一遍（同一行改两次）。
+> 因此 28 个类的搬迁**一次做完再编译**，Task 1–4 只体现为操作步骤，验证点合并到「主代码搬迁完成」后。
 
 | # | 顶层子任务 | 触及文件 | 验收方式 |
 |---|-----------|---------|---------|
-| 1 | 建骨架 + `rag.search`（9 类）+ 改 `RagSearchController` 的 2 处 import | 9 主 + 1 外部 | `mvn -o compile` 无错误 |
-| 2 | `rag.index`（2 类）+ 改 `IndexAdminController` / `ProductServiceImpl` / `ProductServiceImplTest` 的 3 处 import | 2 主 + 3 外部 | `mvn -o compile` 无错误 |
-| 3 | `rag.chat`（9 类）+ `rag.memory`（3 类）+ 改 `ChatController` 的 3 处 import | 12 主 + 1 外部 | `mvn -o compile` 无错误 |
+| 1 | 建骨架 + `rag.search`（9 类）+ 改 `RagSearchController` 的 2 处 import | 9 主 + 1 外部 | 累计至 #4 后一次编译 |
+| 2 | `rag.index`（2 类）+ 改 `IndexAdminController` / `ProductServiceImpl` / `ProductServiceImplTest` 的 3 处 import | 2 主 + 3 外部 | 累计至 #4 后一次编译 |
+| 3 | `rag.chat`（9 类）+ `rag.memory`（3 类）+ 改 `ChatController` 的 3 处 import | 12 主 + 1 外部 | 累计至 #4 后一次编译 |
 | 4 | `rag.resilience`（2 类）+ `rag.config`（3 类） | 5 主 | `mvn -o compile` 无错误 |
-| 5 | 测试目录归位（19 文件） | 19 测试 | `mvn -o test-compile` 无错误 + 离线单测全绿 |
+| 5 | 测试目录归位（18 文件） | 18 测试 | `mvn -o test-compile` 无错误 + 离线单测全绿 |
 | 6 | `config` 搬 2 个类（+ `BusinessException:11` 的 `@see` 更新） | 2 主 + 1 注释 | `mvn -o compile` 无错误 |
 | 7 | 文档同步：`CLAUDE.md` 架构树 + 新增 `docs/rag-code-map.md` + 启动自测 | 2 文档 | 人工复核；`mvn spring-boot:run` 启动无 Bean 装配错误 |
 
@@ -135,13 +138,21 @@
 
 | # | 顶层子任务 | 完成日期 | 验收命令 | 实际输出摘要 | 结论 |
 |---|-----------|---------|---------|-------------|------|
-| 1 | 骨架 + `rag.search` | | `mvn -o compile` | | |
-| 2 | `rag.index` | | `mvn -o compile` | | |
-| 3 | `rag.chat` + `rag.memory` | | `mvn -o compile` | | |
-| 4 | `rag.resilience` + `rag.config` | | `mvn -o compile` | | |
-| 5 | 测试目录归位 | | `mvn -o test-compile` + 离线单测 | | |
-| 6 | `config` 搬 2 类 | | `mvn -o compile` | | |
-| 7 | 文档同步 + 启动自测 | | 人工复核 + `mvn spring-boot:run` | | |
+| 1 | 骨架 + `rag.search` | 2026-10-08 | 累计编译（含 #2–#4） | 28 类 `git mv` + `package` 声明改写，无旧包名残留 | ✅ 通过 |
+| 2 | `rag.index` | 2026-10-08 | 同上 | 同上 | ✅ 通过 |
+| 3 | `rag.chat` + `rag.memory` | 2026-10-08 | 同上 | 同上 | ✅ 通过 |
+| 4 | `rag.resilience` + `rag.config` | 2026-10-08 | `mvn -o compile` | EXIT=0，1.968s BUILD SUCCESS；补齐 6 处跨子包 import + 4 处外部 import 改写 | ✅ 通过 |
+| 5 | 测试目录归位（18 文件） | 2026-10-08 | `mvn -o test-compile` + 离线单测 | test-compile EXIT=0；`Tests run: 31, Failures: 0, Errors: 0, Skipped: 0` | ✅ 通过 |
+| 6 | `config` 搬 2 类 | 2026-10-08 | `mvn -o test-compile` | EXIT=0，10.670s BUILD SUCCESS | ✅ 通过 |
+| 7 | 文档同步 + 启动自测 | 2026-10-08 | 人工复核 + `mvn spring-boot:run` | `CLAUDE.md` 架构树 + `docs/rag-code-map.md` 已更新；**启动自测未执行** | ⚠️ 部分 |
+
+**#7 未覆盖的验证缺口（如实登记）**：启动自测依赖的中间件均未运行（Docker 未启动，Redis 6379 / Qdrant 6333·6334 / TEI 9090 均未监听，仅 MySQL 3306 在跑），故以下三项**只有推理依据、没有实测证据**：
+
+1. `@Qualifier("openAiStreamingChatModel")` / `("openAiStreamingChatModelBackup")` 双 bean 注入 —— 依据：Spring 默认 bean 名取类名（不含包），`lombok.config` 在项目根未被移动；
+2. `@ConfigurationProperties(prefix = "rag.llm")` / `RagProperties` / `RrfProperties` / `SynonymProperties` 绑定 —— 依据：按 prefix 绑定与包名无关，`application.yml` 未改动；
+3. `@RestControllerAdvice`（现 `com.shop.web.GlobalExceptionHandler`）与 `@Scheduled`（现 `com.shop.task.ScheduledTasks`）被扫描到 —— 依据：`@SpringBootApplication` 位于 `com.shop`，两个新包均为其子包，组件扫描覆盖。
+
+**补齐方式**：`docker compose up -d` 起 Redis/Qdrant/ES/RocketMQ 后跑 `mvn spring-boot:run`，确认启动无 Bean 装配错误、`/swagger-ui.html` 可访问、客服一问一答正常。
 
 ## 回滚方式
 

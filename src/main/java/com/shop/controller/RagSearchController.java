@@ -2,8 +2,8 @@ package com.shop.controller;
 
 import cn.hutool.core.collection.CollUtil;
 import com.shop.common.Result;
-import com.shop.rag.RagHitVO;
-import com.shop.rag.RagSearchService;
+import com.shop.rag.search.RagHitVO;
+import com.shop.rag.search.RagSearchService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;

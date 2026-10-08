@@ -1,4 +1,4 @@
-package com.shop.config;
+package com.shop.web;
 
 import cn.dev33.satoken.exception.NotLoginException;
 import cn.dev33.satoken.exception.NotPermissionException;

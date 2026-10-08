@@ -199,9 +199,7 @@ public class ChatService {
                 boolean chitchat = intent == Intent.CHITCHAT;
                 boolean skipRetrieval = chitchat || orderIntent;
                 String searchQuery = skipRetrieval ? userMessage : queryRewriter.rewrite(userMessage, chatMemory.messages());
-                if (!skipRetrieval) {
-                    log.debug("Query 改写: '{}' → '{}'", userMessage, searchQuery);
-                }
+                // 改写前后的对照日志由 QueryRewriter 内部记录（含失败/空值回落），此处不再重复打印
 
                 // 4. 混合 RAG 检索 TOP-3（使用改写后的 Query）；闲聊与订单意图不检索商品：
                 //    闲聊整句会被当作检索词搜一圈货架；问订单同样不该塞回一堆不相关商品

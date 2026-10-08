@@ -41,3 +41,6 @@ azkaban/**/common.properties
 
 # AI 助手指导文件（含本机绝对路径与连接信息，不入库）
 AGENTS.md
+
+# 推荐子系统文档的分页渲染产物（约 117MB，可由 figs/render.ps1 与 tools/md2docx.py 重新生成，不入库）
+docs/recsys/out/

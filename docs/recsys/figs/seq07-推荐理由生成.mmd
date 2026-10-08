@@ -1,0 +1,11 @@
+sequenceDiagram
+    autonumber
+    participant R as 推荐服务
+    participant D as 数据存储
+    participant B as 商城后端
+
+    R->>D: 读取商品评分与热度
+    D-->>R: 返回评分与热度
+    Note over R: 按得分来源选择理由类型
+    Note over R: 生成失败则不显示理由
+    R-->>B: 列表与理由同批返回

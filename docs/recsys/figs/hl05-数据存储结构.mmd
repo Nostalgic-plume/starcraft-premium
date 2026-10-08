@@ -1,0 +1,9 @@
+flowchart TB
+    W1["在线写入链路<br/>商城后端行为上报<br/>流式计算作业产出特征"] --> R1["内存库 · 在线层<br/>用户偏好特征（类目偏好分 · 品牌偏好分）<br/>特征元信息（最近事件时间 · 计算时间）<br/>商品热度榜<br/>类目候选索引<br/>商品可售状态<br/>过滤清单<br/>榜单快照<br/>上报去重标识<br/>配置副本"]
+
+    W2["定时写入链路<br/>画像生成任务<br/>热度快照任务<br/>指标统计任务"] --> M1["MySQL 8 推荐库<br/>t_user_behavior_log 行为明细与回放<br/>t_user_profile 用户画像历史版本<br/>t_item_hot_score 商品热度分快照<br/>t_rec_config 策略配置项<br/>t_rec_fixed_slot 固定坑位配置<br/>t_rec_filter_rule 过滤规则<br/>t_pipeline_metric 链路指标"]
+
+    S1["商城业务库 只读依赖<br/>product 商品与二级类目 · 品牌标识 · 上下架状态<br/>sku 规格与库存<br/>category 一级 / 二级类目层级<br/>brand 品牌主数据（品牌标识 · 品牌名）<br/>user 账号状态"] --> V1["在线读取方<br/>召回模块<br/>融合与过滤模块<br/>重排与固定坑位模块<br/>榜单查询服务"]
+
+    R1 --> V1
+    M1 --> V1

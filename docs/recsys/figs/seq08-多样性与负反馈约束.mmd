@@ -1,0 +1,12 @@
+sequenceDiagram
+    autonumber
+    participant B as 商城后端
+    participant R as 推荐服务
+    participant D as 数据存储
+
+    B->>R: 提交排序后列表
+    R->>D: 读取负反馈清单
+    D-->>R: 返回负反馈清单
+    Note over R: 按类目占比上限调整
+    Note over R: 剔除位置按原序补位
+    R-->>B: 返回最终推荐列表

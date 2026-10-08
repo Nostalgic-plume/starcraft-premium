@@ -1,0 +1,15 @@
+sequenceDiagram
+    autonumber
+    participant B as 商城后端
+    participant R as 推荐服务
+    participant P as 画像存储
+    participant M as 模型服务
+
+    B->>R: 提交候选集
+    Note over R: 按规则打分排序
+    R->>P: 读取用户画像
+    P-->>R: 返回用户画像
+    R->>M: 提交排序结果与画像
+    M-->>R: 返回重排结果
+    Note over R: 校验不通过则退回
+    R-->>B: 返回最终排序列表

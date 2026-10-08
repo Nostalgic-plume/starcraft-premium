@@ -1,0 +1,16 @@
+sequenceDiagram
+    autonumber
+    participant B as 商城后端
+    participant R as 推荐服务
+    participant P as 画像存储
+    participant M as 模型服务
+
+    B->>R: 推送行为与评价
+    Note over R: 5 秒内行为合并提交
+    R->>P: 读取上一版画像
+    P-->>R: 返回历史画像
+    R->>M: 提交行为序列与评价
+    M-->>R: 返回新版画像
+    R->>P: 写入新版画像
+    P-->>R: 写入成功
+    Note over R: 归纳失败时保留上一版

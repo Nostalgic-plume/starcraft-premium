@@ -1,0 +1,16 @@
+sequenceDiagram
+    autonumber
+    participant O as 离线处理
+    participant D as 数据存储
+    participant R as 推荐服务
+    participant M as 模型服务
+
+    O->>D: 按时间切分评测集
+    D-->>O: 返回评测集
+    Note over O,D: 每组配置各执行一次
+    O->>R: 输入同一评测集
+    R->>M: 调用大模型重排
+    M-->>R: 返回重排结果
+    R-->>O: 返回推荐列表
+    Note over O: 计算 Recall@K 等指标
+    Note over O: 汇总为对比报告

@@ -2,7 +2,7 @@ package com.shop.controller;
 
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import com.shop.common.Result;
-import com.shop.rag.ProductIndexer;
+import com.shop.rag.index.ProductIndexer;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;

@@ -90,7 +90,11 @@ public class QueryRewriter {
 
                 @Override
                 public void onCompleteResponse(ChatResponse response) {
-                    future.complete(sb.toString().trim());
+                    // 优先用累积的流式 token；个别供应商不逐 token 回调时，回落到最终响应的完整文本
+                    String text = sb.isEmpty() && response != null && response.aiMessage() != null
+                            ? response.aiMessage().text()
+                            : sb.toString();
+                    future.complete(text == null ? "" : text.trim());
                 }
 
                 @Override
@@ -100,11 +104,17 @@ public class QueryRewriter {
             });
 
             String rewritten = future.get(10, TimeUnit.SECONDS);
+            // 改写返回空值时回落原始消息：空串进入检索链路会得到零召回，劣于用原 query 检索
+            if (rewritten == null || rewritten.isBlank()) {
+                log.warn("Query 改写返回空值，使用原始消息: '{}'", userMessage);
+                return userMessage;
+            }
             log.debug("Query 改写: '{}' → '{}'", userMessage, rewritten);
             return rewritten;
 
         } catch (Exception e) {
-            log.warn("Query 改写失败，使用原始消息: {}", e.getMessage());
+            // 带异常对象输出：末位 Throwable 由 slf4j 打完整堆栈，否则线上只剩一行 message 无从排查
+            log.warn("Query 改写失败，使用原始消息: '{}'", userMessage, e);
             return userMessage;
         }
     }

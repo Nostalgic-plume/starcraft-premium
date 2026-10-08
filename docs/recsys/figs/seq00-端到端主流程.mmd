@@ -1,0 +1,20 @@
+sequenceDiagram
+    autonumber
+    participant U as 用户
+    participant F as 商城前端
+    participant B as 商城后端
+    participant S as 实时链路
+    participant D as 数据存储
+    participant R as 推荐服务
+
+    U->>F: 浏览/加购/收藏/购买
+    F->>B: 上报行为事件
+    B-->>F: 立即返回
+    B->>S: 写入行为队列
+    S->>D: 写入特征与画像
+    U->>F: 打开首页
+    F->>B: 请求推荐
+    B->>R: 请求候选集
+    R->>D: 读取特征/画像/索引
+    R-->>B: 返回候选集
+    B-->>F: 返回商品列表

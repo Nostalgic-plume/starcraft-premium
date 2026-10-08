@@ -1,0 +1,13 @@
+sequenceDiagram
+    autonumber
+    participant B as 商城后端
+    participant R as 推荐服务
+    participant S as 特征存储
+
+    B->>R: 投递行为事件
+    R->>S: 读取窗口状态
+    S-->>R: 返回窗口状态
+    Note over R: 按事件时间落入滑动窗口
+    R->>S: 写入实时特征
+    S-->>R: 写入成功
+    Note over R: 窗口计算以事件时间为准

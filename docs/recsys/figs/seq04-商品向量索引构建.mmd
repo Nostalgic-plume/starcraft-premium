@@ -1,0 +1,13 @@
+sequenceDiagram
+    autonumber
+    participant B as 商城后端
+    participant R as 推荐服务
+    participant M as 模型服务
+    participant V as 向量索引
+
+    B->>R: 通知商品文本变更
+    R->>M: 提交商品文本
+    M-->>R: 返回商品向量
+    R->>V: 按批更新向量索引
+    V-->>R: 返回更新结果
+    Note over R,V: 更新不阻塞在线查询

@@ -1,0 +1,29 @@
+sequenceDiagram
+    autonumber
+    participant U as 用户
+    participant F as 商城前端
+    participant B as 商城后端
+    participant K as Kafka
+    participant FL as Flink 作业
+    participant R as 推荐服务
+    participant RD as Redis / MySQL
+
+    Note over U,RD: 路径一 · 行为上报与实时特征生效
+    U->>F: 浏览 / 加购 / 收藏 / 购买
+    F->>B: 上报行为事件（含事件时间）
+    B->>B: 字段校验与重复上报过滤
+    B-->>F: 立即返回 200，不阻塞主流程
+    B->>K: 投递 topic user-behavior
+    K->>FL: 消费行为事件流
+    FL->>FL: 按事件时间分桶并加权聚合
+    FL->>RD: 写入类目偏好与品牌偏好特征
+
+    Note over U,RD: 路径二 · 榜单查询与个性化重排
+    U->>F: 打开首页
+    F->>B: 请求首页个性化榜单
+    B->>R: 转发榜单查询请求
+    R->>RD: 读取实时特征 · 画像 · 热度榜 · 配置
+    R->>R: 双路召回 · 融合去重 · 过滤 · 加权打分 · 注入坑位
+    R-->>B: 返回榜单与降级状态
+    B-->>F: 返回非空商品列表
+    F-->>U: 渲染个性化榜单

@@ -21,7 +21,7 @@ import com.shop.model.entity.ShopDO;
 import com.shop.model.entity.SkuDO;
 import com.shop.model.query.ProductPageQuery;
 import com.shop.model.vo.ProductVO;
-import com.shop.rag.ProductIndexer;
+import com.shop.rag.index.ProductIndexer;
 import com.shop.service.StockCacheService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeEach;

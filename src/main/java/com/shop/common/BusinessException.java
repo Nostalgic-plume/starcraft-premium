@@ -8,7 +8,7 @@ import java.io.Serializable;
  * 异常信息包含中文描述和上下文参数，禁止纯错误码
  *
  * @author shop
- * @see com.shop.config.GlobalExceptionHandler
+ * @see com.shop.web.GlobalExceptionHandler
  */
 public class BusinessException extends RuntimeException implements Serializable {
 

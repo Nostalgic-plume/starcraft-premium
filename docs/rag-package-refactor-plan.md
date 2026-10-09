@@ -144,15 +144,25 @@
 | 4 | `rag.resilience` + `rag.config` | 2026-10-08 | `mvn -o compile` | EXIT=0，1.968s BUILD SUCCESS；补齐 6 处跨子包 import + 4 处外部 import 改写 | ✅ 通过 |
 | 5 | 测试目录归位（18 文件） | 2026-10-08 | `mvn -o test-compile` + 离线单测 | test-compile EXIT=0；`Tests run: 31, Failures: 0, Errors: 0, Skipped: 0` | ✅ 通过 |
 | 6 | `config` 搬 2 类 | 2026-10-08 | `mvn -o test-compile` | EXIT=0，10.670s BUILD SUCCESS | ✅ 通过 |
-| 7 | 文档同步 + 启动自测 | 2026-10-08 | 人工复核 + `mvn spring-boot:run` | `CLAUDE.md` 架构树 + `docs/rag-code-map.md` 已更新；**启动自测未执行** | ⚠️ 部分 |
+| 7 | 文档同步 + 启动自测 | 2026-10-08 | 人工复核 + `mvn spring-boot:run` | `CLAUDE.md` 架构树 + `docs/rag-code-map.md` 已更新 | ⚠️ 部分 |
+| 7b | **启动自测补齐** | 2026-10-09 | `mvn spring-boot:run`（中间件全就绪） | `Started ShopApplication in 7.001 seconds`，见下方实测表 | ✅ 通过 |
 
-**#7 未覆盖的验证缺口（如实登记）**：启动自测依赖的中间件均未运行（Docker 未启动，Redis 6379 / Qdrant 6333·6334 / TEI 9090 均未监听，仅 MySQL 3306 在跑），故以下三项**只有推理依据、没有实测证据**：
+**#7b 启动自测实测记录（2026-10-09 补齐）**
 
-1. `@Qualifier("openAiStreamingChatModel")` / `("openAiStreamingChatModelBackup")` 双 bean 注入 —— 依据：Spring 默认 bean 名取类名（不含包），`lombok.config` 在项目根未被移动；
-2. `@ConfigurationProperties(prefix = "rag.llm")` / `RagProperties` / `RrfProperties` / `SynonymProperties` 绑定 —— 依据：按 prefix 绑定与包名无关，`application.yml` 未改动；
-3. `@RestControllerAdvice`（现 `com.shop.web.GlobalExceptionHandler`）与 `@Scheduled`（现 `com.shop.task.ScheduledTasks`）被扫描到 —— 依据：`@SpringBootApplication` 位于 `com.shop`，两个新包均为其子包，组件扫描覆盖。
+`docker compose up -d` + `--profile gpu up -d tei` 起齐 Redis/Qdrant/ES/RocketMQ/Nginx/TEI 六个容器后启动应用：
 
-**补齐方式**：`docker compose up -d` 起 Redis/Qdrant/ES/RocketMQ 后跑 `mvn spring-boot:run`，确认启动无 Bean 装配错误、`/swagger-ui.html` 可访问、客服一问一答正常。
+| 验证点 | 实测证据 |
+|--------|---------|
+| `@Qualifier` 双 bean 注入 | `Started ShopApplication in 7.001 seconds` —— 两个同类型 `OpenAiStreamingChatModel` Bean 若注入歧义会直接启动失败 |
+| `@ConfigurationProperties` 绑定 | 日志 `com.shop.rag.config.RagLlmProperties : RAG 端点配置: embedding=http://localhost:9090/v1 model=bge-m3 \| backup=https://open.bigmodel.cn/api/paas/v4 model=glm-4-flash \| chatModel=deepseek-chat`（logger 名即新包名，三项配置值均正确绑定） |
+| `@RestControllerAdvice` 扫描（现 `com.shop.web`） | `GET /api/product/detail/999999999999` → `{"code":500,"msg":"商品不存在","data":null}`，异常被统一接管 |
+| `RagConfig.@PostConstruct` + 跨包引用 `rag.index.QdrantCollectionHelper` | Qdrant 由 `{"collections":[]}` → `{"collections":[{"name":"products"}]}` |
+| RAG 全链路 | `com.shop.rag.index.ProductIndexer : 商品向量索引完成: 278 条, 耗时 4405ms`（TEI 向量化 + Qdrant 写入均通） |
+| 接口层 | `Tomcat started on port 8080`；`/api/product/page` HTTP 200；Swagger UI HTTP 302 |
+
+**仍未单独实测的一项**：`@Scheduled`（现 `com.shop.task.ScheduledTasks`）。它与 `GlobalExceptionHandler` 同属"移出 `config` 包"的类、走同一套组件扫描规则，而后者已实测生效；但 `ScheduledTasks` 的任务周期为 60 分钟，本轮未等其触发 —— 属**同机制已验、该类未单独触发**，如需彻底闭环可在下一轮跑满一小时观察。
+
+**（原 2026-10-08 登记）** 当时启动自测因中间件未运行而无法执行：Docker 未启动，Redis 6379 / Qdrant 6333·6334 / TEI 9090 均未监听，仅 MySQL 3306 在跑（根因是 `AppData\Local\Docker` 为 junction，WSL 3.0 用 `\\?\` 长路径挂载 vhdx 时拒绝穿越装入点，报 `0x800701c0`；已删除该 junction 并改用 Docker Desktop 官方 `CustomWslDistroDir` 把数据盘置于 D 盘）。
 
 ## 回滚方式
 

@@ -21,12 +21,12 @@
 - **数据看板** — ECharts 图表：销售额趋势、商品排行、用户增长
 - **离线数仓** — Hive 分层（ODS → DWD → DWS → ADS），Azkaban 每日调度
 
-## 项目亮点（面试重点）
+## 项目亮点
 
 - **高并发下单**：下单接口仅投 RocketMQ 异步落库（前端轮询 processingId），消费端事务内「Redis Lua 预扣 → MySQL 行锁落单 → 订单快照」，削峰 + 防超卖双保险
 - **三级缓存防穿透**：ID 布隆过滤 + 商品详情逻辑过期缓存（物理永不过期 + 异步重建 + 互斥锁）
 - **AI 客服 Agent「小星」**：LangChain4j Function Calling 工具链（`getMyOrders`/`getOrderStatus`/`cancelOrder`）接真实订单服务，写操作状态机 + 库存回滚；安全边界（userId 不来自 LLM 参数 + Service 归属校验）+ 系统韧性（熔断 + 主备降级链）
-- **RAG 语义搜索**：向量 + 关键词双路召回 + RRF 融合，30 条人工标注集离线评估 **Recall@3=0.639 / Recall@5=0.722 / MRR=0.482**；领域同义词扩展使口语化 query Recall@5 提升 +0.100；嵌入模型故障自动降级为纯关键词检索；回答带引用溯源编号 + 商品卡片推送
+- **RAG 语义搜索**：向量 + 关键词双路召回 + 加权 RRF 融合（关键词权重 2.0），30 条人工标注集离线评估 **Recall@3=0.711 / Recall@5=0.753 / MRR=0.474**，口语化同义词集 Recall@5=0.867；向量化由 DashScope 迁至本地 TEI 部署的 **BGE-M3**（1024 维）；嵌入模型故障自动降级为纯关键词检索；回答带引用溯源编号 + 商品卡片推送
 - **三端独立会话**：Sa-Token 独立 loginType（user/shop/admin），权限/数据彻底隔离
 
 ## 快速启动

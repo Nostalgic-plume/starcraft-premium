@@ -132,7 +132,9 @@ public class ChatService {
             - 语气自然，可以顺带说一句补货后可以再来看看
 
             ## 当没有商品信息时
-            （若下方已给出「用户订单信息」段落，本节不适用，按上一节的订单规则回答）
+            （若下方已给出「用户订单信息」段落或「商品库存提示」段落，本节不适用，
+            分别按对应的订单规则、库存规则回答 —— 缺货时商品列表同样是空的，
+            但那是「买不到」而非「没搜到」，不可套用本节的追问话术）
             下面商品列表为空，说明目前没有匹配到具体商品，你需要：
             1. 判断用户是不是在问一个商品类别（如「手机」「电脑」「衣服」）
             2. 如果是类别名，直接追问具体要求：「手机是吧，您想要什么价位的？主要用途是？」—— 像导购一样自然引导
@@ -256,6 +258,9 @@ public class ChatService {
                 // 真正没搜到 → 保持原占位文本，走「没找到，您具体想找什么」的引导话术
                 if (hits.isEmpty() && searchResult.allOutOfStock()) {
                     productContext = OUT_OF_STOCK_CONTEXT;
+                    log.info("[客服意图] 候选全部售罄 → 注入缺货提示, query={}", searchQuery);
+                } else if (hits.isEmpty()) {
+                    log.info("[客服意图] 未命中商品 → 走「没找到」引导话术, query={}", searchQuery);
                 }
                 if (orderIntent) {
                     String orderContext = buildOrderContext(userId);

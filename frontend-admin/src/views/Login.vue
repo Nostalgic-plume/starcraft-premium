@@ -59,7 +59,11 @@ const message = useMessage()
 
 const formRef = ref<FormInst | null>(null)
 const loading = ref(false)
-const form = reactive({ username: 'admin', password: '123456' })
+// 测试账号仅在开发环境预填：生产构建留空，避免部署后登录页直接奉上一套可用的管理端凭证
+const form = reactive({
+  username: import.meta.env.DEV ? 'admin' : '',
+  password: import.meta.env.DEV ? '123456' : ''
+})
 
 const rules: FormRules = {
   username: { required: true, message: '请输入用户名', trigger: ['input', 'blur'] },

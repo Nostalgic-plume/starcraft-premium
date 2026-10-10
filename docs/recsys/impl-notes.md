@@ -28,6 +28,10 @@
 
 **连带约束**：推荐服务进程内看不到商城 `config` 包下的组件（如 `MyMetaObjectHandler`）。凡推荐侧需要商城通用组件处，一律用 `ObjectProvider` 可选注入或自建，禁止硬依赖——首次启动即因此报错（`MetaObjectHandler` 找不到）。
 
+**连带约束（测试）**：工程内有两个 `@SpringBootApplication`，而 `@SpringBootTest` 会从测试类所在包向上查找启动类。位于 `com.shop.rec` 包下的测试会被解析为推荐服务上下文（`RecApplication`），该上下文不加载商城侧 Mapper，导致依赖注入失败。凡测试 M-01 等商城侧组件，必须显式声明上下文：`@SpringBootTest(classes = ShopApplication.class)`；测试推荐服务侧组件则用 `RecApplication`。
+
+**连带约束（Sa-Token）**：Sa-Token 的 `StpLogic.login()` 依赖 Web 上下文，在测试线程中直接调用会抛 `SaTokenContextException`。测试内模拟登录须用官方工具包裹：`SaTokenContextMockUtil.setMockContext(() -> { ... })`。
+
 ---
 
 ## 2 数据源
@@ -74,16 +78,28 @@ Spring Boot 生态的自动配置普遍带 `@ConditionalOnMissingBean` 条件—
 
 ---
 
-## 4 消息队列（待 T2 确认）
+## 4 消息队列
 
-设计选型为 **Kafka 3.6**（理由是 Flink 事件时间语义与连接器成熟度），而商城现网使用的是 **RocketMQ 4.9.7**（已在 pom 中锁定版本并有完整生产消费封装）。
+推荐链路使用 **Kafka**（选型理由见概要设计 5.1：事件时间语义与 Flink 集成成熟度），商城原有订单/消息链路继续使用 **RocketMQ**，两套并存。
 
-即：推荐链路使用 Kafka，商城原有消息链路继续用 RocketMQ，两套并存。实施 T2 时需要：
-1. 在 pom 引入 Kafka 客户端依赖（注意与 RocketMQ 客户端共存时的自动配置干扰）；
-2. 在 `docker/` 编排中加入 Kafka 3.6（KRaft 单节点）；
-3. 确认新增的 Kafka 自动配置不会影响商城现有 RocketMQ 生产消费。
+**依赖选择**：使用原生 `kafka-clients`，不用 `spring-kafka`。后者会引入 `KafkaAutoConfiguration`，与商城现网的 RocketMQ 自动配置并存时徒增干扰面；而行为采集只需要生产者，原生客户端足够且能精确控制 acks、幂等与投递超时。实测：引入后商城后端启动与原有 RocketMQ 生产消费均无异常。
 
-> 该节在 T2 完成后补充实际结论。
+**部署**：`apache/kafka:3.7.0`，KRaft 单节点，归入 compose 的 `rec` profile（`docker compose --profile rec up -d`）。双 listener 配置——宿主机客户端走 `127.0.0.1:9092`，compose 网络内客户端走 `kafka:9093`；主题由 `kafka-init` 容器幂等创建。
+
+### 4.1 幂等生产者与 acks 的硬约束（设计文档已修正）
+
+Kafka 的幂等生产者**强制要求 `acks=all`**，配置为 `acks=1` 会在生产者构造时直接抛
+`ConfigException: Must set acks to all in order to use the idempotent producer`，导致应用启动失败。
+
+原设计同时要求「开启幂等」与「确认模式单副本确认（acks=1）」，二者不可共存。已按以下方式修正（详细设计 3.1、4.3 与精简版同步更新）：
+
+- **保留幂等**（避免重试导致重复写入，更契合"事件不重复"的系统要求）；
+- **确认模式改为 `acks=all`**。单机单副本部署下，`all` 就是等待唯一副本确认，**与 acks=1 等价，不额外增加等待时间**，因此不违背原设计对延迟的考量。
+
+### 4.2 消费者并不在本工程
+
+行为事件与商品变更事件的消费端均在独立 Flink 作业（`shop-rec-flink`）中，
+商城工程只承担生产端，因此 `user-behavior` 主题在本工程内没有消费者组。
 
 ---
 

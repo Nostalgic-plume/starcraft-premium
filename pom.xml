@@ -205,6 +205,34 @@
                         </exclude>
                     </excludes>
                 </configuration>
+                <!--
+                    双进程打包说明：
+                    同一工程内含两个启动类（商城后端 ShopApplication 与推荐服务 RecApplication），
+                    故显式绑定各自的可执行 jar 产物：
+                    - 默认 execution 产出的 shop-1.0.0.jar 仍为商城后端，沿用原有部署方式不变；
+                    - repackage-rec execution 产出 shop-1.0.0-rec.jar，为推荐服务（端口 8082）启动包。
+                -->
+                <executions>
+                    <execution>
+                        <id>repackage</id>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                        <configuration>
+                            <mainClass>com.shop.ShopApplication</mainClass>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>repackage-rec</id>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                        <configuration>
+                            <mainClass>com.shop.rec.RecApplication</mainClass>
+                            <classifier>rec</classifier>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

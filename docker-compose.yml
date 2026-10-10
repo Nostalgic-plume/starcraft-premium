@@ -1,10 +1,20 @@
-# 中间件 Docker Compose 一键编排
-# 范围：Redis / Qdrant / TEI(向量化) / Elasticsearch / RocketMQ / Nginx 六个中间件；后端 Spring Boot 保持本地运行
-# 启动：docker compose up -d（根目录 .env 提供 REDIS_PASSWORD、BGE_M3_MODEL_PATH 等，已 gitignore）
-# ⚠️ TEI 归入 gpu profile，**默认不随 up 启动** —— 无 NVIDIA GPU 的机器上 `gpus` 不可用会让
-#    整个 up 命令非零退出，卡住「一键启动」的第一步。需要 RAG 向量检索时显式启用：
-#        docker compose --profile gpu up -d
-# 说明：编排细节见 docs/README.md「离线数仓」与「快速开始」；设计稿已归档不随仓库分发
+# 中间件 Docker Compose 编排（按 profile 分组，按需启动以控制内存占用）
+#
+# 默认启动（docker compose up -d）：Redis / RocketMQ / Nginx —— 商城核心运行必需
+#
+# 可选分组（默认不启动，用 --profile 显式启用）：
+#   --profile rec   → Kafka（推荐子系统行为事件流，KRaft 单节点，约 1GB 内存）
+#   --profile rag   → Qdrant（RAG 向量库）
+#   --profile gpu   → TEI（本地 BGE-M3 向量化，需 NVIDIA GPU + nvidia-container-toolkit，约 2.2G 权重）
+#   --profile es    → Elasticsearch（RAG 关键词检索路，当前未使用，默认关闭以省内存）
+#
+# 示例：
+#   只启推荐链路所需中间件        docker compose --profile rec up -d
+#   启 RAG 向量检索               docker compose --profile rag --profile gpu up -d
+#   启全部                        docker compose --profile rec --profile rag --profile gpu --profile es up -d
+#
+# 后端 Spring Boot 保持本地运行；根目录 .env 提供 REDIS_PASSWORD、BGE_M3_MODEL_PATH 等（已 gitignore）
+# 说明：编排细节见 docs/README.md；设计稿已归档不随仓库分发
 services:
   # ====== Redis（仅本机可达，含密码）======
   redis:
@@ -35,6 +45,9 @@ services:
     image: qdrant/qdrant
     container_name: shop-qdrant
     restart: unless-stopped
+    # 归入 rag profile：仅在需要 RAG 向量检索时启动，默认不随 up 启动（省内存）
+    # 启用：docker compose --profile rag up -d
+    profiles: ["rag"]
     ports:
       - "127.0.0.1:6333:6333"            # REST API，仅本机可达（后端 ProductIndexer / RagSearchService 使用）
       - "127.0.0.1:6334:6334"            # gRPC，仅本机可达（langchain4j QdrantEmbeddingStore 使用）
@@ -80,6 +93,9 @@ services:
     image: shop-elasticsearch:8.11.4     # 构建产物打本地标签：up -d 命中即复用，不会每次重建
     container_name: shop-es
     restart: unless-stopped
+    # 归入 es profile：当前 RAG 关键词检索未使用，默认关闭以省内存（约 1GB 堆 + 系统开销）
+    # 启用：docker compose --profile es up -d
+    profiles: ["es"]
     ports:
       - "127.0.0.1:9200:9200"            # REST API，仅本机可达（后端 ES 关键词检索使用）
     environment:
@@ -139,6 +155,75 @@ services:
     depends_on:
       - rocketmq-namesrv
 
+  # ====== Kafka（推荐子系统行为事件流，KRaft 单节点，无 ZooKeeper）======
+  # 说明：推荐链路使用 Kafka（对事件时间语义与 Flink 集成更成熟），
+  #       商城原有订单/消息链路继续使用 RocketMQ，两套并存互不影响。
+  # 归入 rec profile：需要推荐链路时显式启动 —— docker compose --profile rec up -d
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: shop-kafka
+    restart: unless-stopped
+    profiles: ["rec"]
+    ports:
+      - "127.0.0.1:9092:9092"            # 仅本机可达：客户端（商城后端）跑在宿主机
+    environment:
+      # KRaft 单节点：同一进程同时承担 controller 与 broker 角色
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      # 双 listener（必须）：advertised 地址会被回传给客户端，单值无法同时服务两类调用方。
+      #   EXTERNAL 9092 → 宿主机客户端（商城后端、Flink 作业），通告为 127.0.0.1:9092
+      #   INTERNAL 9093 → compose 网络内客户端（kafka-init、将来的容器化 Flink），通告为 kafka:9093
+      # 若只配单 listener，容器内客户端连上后会拿到 127.0.0.1:9092（指向它自己）而连接失败。
+      KAFKA_LISTENERS: EXTERNAL://:9092,INTERNAL://:9093,CONTROLLER://:9094
+      KAFKA_ADVERTISED_LISTENERS: EXTERNAL://127.0.0.1:9092,INTERNAL://kafka:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: EXTERNAL:PLAINTEXT,INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9094
+      # 单节点：副本因子统一为 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      # 开发便利：允许自动创建主题，默认 3 分区（与 Flink 并行度对齐）
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: true
+      KAFKA_NUM_PARTITIONS: 3
+      # 保留策略兜底值：具体主题在 kafka-init 中单独指定（行为 7 天 / 商品变更 3 天）
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824   # 日志段 1GB
+    volumes:
+      - kafka-data:/opt/kafka/data
+
+  # ====== Kafka 主题初始化（一次性容器，幂等：--if-not-exists）======
+  # 主题约定见《详细设计说明书》4.3：user-behavior 3 分区 / 保留 7 天，item-change 1 分区 / 保留 3 天
+  kafka-init:
+    image: apache/kafka:3.7.0
+    container_name: shop-kafka-init
+    profiles: ["rec"]
+    depends_on:
+      - kafka
+    entrypoint: [ "/bin/bash", "-c" ]
+    command:
+      - |
+        set -e
+        KAFKA_BIN=/opt/kafka/bin
+        # 容器内客户端走 INTERNAL listener（通告地址为 kafka:9093）
+        BOOTSTRAP=kafka:9093
+        echo "等待 Kafka 就绪..."
+        for i in $$(seq 1 30); do
+          if $$KAFKA_BIN/kafka-topics.sh --bootstrap-server $$BOOTSTRAP --list >/dev/null 2>&1; then
+            echo "Kafka 已就绪"; break
+          fi
+          sleep 2
+        done
+        $$KAFKA_BIN/kafka-topics.sh --bootstrap-server $$BOOTSTRAP --create --if-not-exists \
+          --topic user-behavior --partitions 3 --replication-factor 1 --config retention.ms=604800000
+        $$KAFKA_BIN/kafka-topics.sh --bootstrap-server $$BOOTSTRAP --create --if-not-exists \
+          --topic item-change --partitions 1 --replication-factor 1 --config retention.ms=259200000
+        echo "当前主题列表："
+        $$KAFKA_BIN/kafka-topics.sh --bootstrap-server $$BOOTSTRAP --list
+    restart: "no"
+
   # ====== Nginx（静态三端 + 反代后端，容器内经 host.docker.internal 访问宿主机 :8080）======
   nginx:
     image: nginx:1.20.2-alpine
@@ -162,3 +247,4 @@ volumes:
   es-data: {}
   rmq-logs: {}
   rmq-store: {}
+  kafka-data: {}

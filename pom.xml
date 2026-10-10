@@ -31,6 +31,7 @@
         <sa-token.version>1.45.0</sa-token.version>
         <springdoc.version>2.3.0</springdoc.version>
         <langchain4j.version>1.19.0</langchain4j.version>
+        <kafka.version>3.7.0</kafka.version>
     </properties>
 
     <dependencies>
@@ -111,6 +112,18 @@
             <artifactId>lombok</artifactId>
             <version>${lombok.version}</version>
             <optional>true</optional>
+        </dependency>
+
+        <!--
+            Kafka 客户端（推荐子系统行为事件流的生产端）
+            选型说明：使用原生 kafka-clients 而非 spring-kafka —— 后者会引入 KafkaAutoConfiguration，
+            与商城现网的 RocketMQ 并存时徒增自动配置干扰面；行为采集只需生产者，原生客户端足够且可控
+            （可精确设置 acks、幂等、投递超时）。消费端在独立 Flink 作业中，不依赖本模块。
+        -->
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+            <version>${kafka.version}</version>
         </dependency>
 
         <!-- LangChain4j -->

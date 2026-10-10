@@ -148,6 +148,21 @@ public class RecRedis {
     }
 
     /**
+     * 哈希字段自增
+     *
+     * <p>业务语义：按来源维度累计浏览总数与「已采集停留时长」的浏览数，用于爬虫判定的采集率统计。
+     *
+     * @param key   键名
+     * @param field 字段名
+     * @param delta 增量
+     * @return 自增后的值
+     */
+    public long hincrBy(String key, String field, long delta) {
+        Long value = redisTemplate.opsForHash().increment(key, field, delta);
+        return value == null ? 0L : value;
+    }
+
+    /**
      * 读取哈希单个字段
      *
      * @param key   键名

@@ -18,6 +18,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
@@ -25,6 +26,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -48,14 +50,19 @@ class RagSearchServiceTest {
     private KeywordSearchService keywordSearchService;
     @Mock
     private SynonymExpander synonymExpander;
+    @Mock
+    private SkuPriceResolver skuPriceResolver;
 
     private RagSearchService ragSearchService;
 
     @BeforeEach
     void setUp() {
-        ragSearchService = new RagSearchService(embeddingModel, embeddingStore,
-                keywordSearchService, synonymExpander, new RrfProperties(), new RagProperties());
+        ragSearchService = new RagSearchService(embeddingModel, embeddingStore, keywordSearchService,
+                synonymExpander, new RrfProperties(), new RagProperties(), skuPriceResolver);
         when(synonymExpander.expand(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
+        // 库存查询默认不可用（空 Map → 不做库存过滤），让既有用例聚焦候选池/入参兜底本身；
+        // 验证库存过滤的用例再单独覆盖该 stub
+        lenient().when(skuPriceResolver.resolveStock(anyList())).thenReturn(Map.of());
     }
 
     private static Embedding queryVector() {

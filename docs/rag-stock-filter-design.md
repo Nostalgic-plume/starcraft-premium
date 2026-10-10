@@ -175,3 +175,29 @@ RagSearchResult searchWithAvailability(String query, int topK,
 - `mvn clean compile` 通过；
 - 后端启动后调用 `/api/product/rag-search?q=手机`，返回结果中不含库存全零的商品；
 - 构造「某商品全部 SKU 库存置 0」的数据，确认其从检索结果中消失。
+
+## 九、验收记录（2026-10-10）
+
+### 已执行
+
+| 项 | 结果 |
+|----|------|
+| `mvn test -Dtest=RagStockFilterTest` | ✅ 8 用例全绿（售罄剔除 / 部分售罄 / 全部售罄标记 / 候选为空不误报 / 无 SKU 放行 / 查询异常放行 / 并集只查一次 / 合并前过滤） |
+| `mvn test -Dtest=RagSearchServiceTest,RagFallbackTest,KeywordSearchServiceTest,RrfMergerTest,SynonymExpanderTest` | ✅ 27 用例全绿（含构造器变更后的既有回归） |
+| `mvn test -Dtest=RagEvaluationTest`（真实 MySQL + Qdrant + TEI） | ✅ 3 用例通过，Spring 上下文装配正常（含 `ChatService` 新增依赖） |
+
+### 评估集零差异（无回归、无误杀）
+
+| 配置 | 本次实测 | 改动前基线（`rag-evaluation-report.md` §9.3） |
+|------|---------|---------------------------------------------|
+| 基础集 1.0/1.0 | 0.661 / 0.736 / 0.526 | 0.661 / 0.736 / 0.526 |
+| 基础集 1.0/1.5 | 0.678 / 0.753 / 0.488 | 0.678 / 0.753 / 0.488 |
+| 基础集 **1.0/2.0（生产档）** | **0.711 / 0.753 / 0.474** | **0.711 / 0.753 / 0.474** |
+| 同义词集 1.0/2.0 | 0.767 / 0.867 / 0.529 | 0.767 / 0.867 / 0.529 |
+
+指标逐项完全一致，说明评估集商品均有库存、未被误杀 —— 这是「误杀」风险的反向证据。
+
+### 待执行（需启动后端）
+
+- `/api/product/rag-search` 端到端调用；
+- 客服链路「全部售罄 → 缺货话术」实测（需先构造某商品全部 SKU 库存置 0 的数据）。

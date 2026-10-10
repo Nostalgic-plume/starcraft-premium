@@ -13,6 +13,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -20,6 +21,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -49,6 +51,8 @@ class RagFallbackTest {
     private KeywordSearchService keywordSearchService;
     @Mock
     private SynonymExpander synonymExpander;
+    @Mock
+    private SkuPriceResolver skuPriceResolver;
 
     private RagSearchService ragSearchService;
 
@@ -56,7 +60,9 @@ class RagFallbackTest {
     void setUp() {
         ragSearchService = new RagSearchService(
                 embeddingModel, embeddingStore, keywordSearchService, synonymExpander,
-                new RrfProperties(), new RagProperties());
+                new RrfProperties(), new RagProperties(), skuPriceResolver);
+        // 库存查询不可用（空 Map → 不过滤），聚焦降级链路本身
+        lenient().when(skuPriceResolver.resolveStock(anyList())).thenReturn(Map.of());
         // 同义词扩展原样返回，聚焦降级逻辑本身
         when(synonymExpander.expand(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
         // 关键词路固定命中 1 条，用于断言「降级后仍有结果」

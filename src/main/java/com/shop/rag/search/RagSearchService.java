@@ -15,8 +15,12 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * RAG 混合检索服务（Hybrid Search）
@@ -57,6 +61,8 @@ public class RagSearchService {
     private final SynonymExpander synonymExpander;
     private final RrfProperties rrfProperties;
     private final RagProperties ragProperties;
+    /** SKU 维度聚合：库存过滤需要「商品 → 总库存」，与索引侧/关键词侧共用同一聚合来源 */
+    private final SkuPriceResolver skuPriceResolver;
 
     private static final double MIN_RELEVANCE_SCORE = 0.3;
 
@@ -71,6 +77,9 @@ public class RagSearchService {
 
     /**
      * 混合搜索商品（向量 + 关键词双路 → 加权 RRF 合并）
+     * <p>
+     * 等价于 {@link #searchWithAvailability} 丢弃可售性信息的简化入口，
+     * 供只关心命中列表的调用方（公开检索接口）使用；签名与行为保持不变。
      *
      * @param query      用户查询
      * @param topK       返回条数（越界自动收敛到 [1, 100]）
@@ -81,8 +90,26 @@ public class RagSearchService {
      */
     public List<RagHitVO> search(String query, int topK,
                                   Long categoryId, BigDecimal minPrice, BigDecimal maxPrice) {
+        return searchWithAvailability(query, topK, categoryId, minPrice, maxPrice).hits();
+    }
+
+    /**
+     * 混合搜索商品（带可售性信息）
+     * <p>
+     * 检索逻辑与 {@link #search} 完全一致，额外返回「是否因全部售罄而被过滤空」，
+     * 供对话链路区分「缺货」与「没搜到」两种空结果。
+     *
+     * @param query      用户查询
+     * @param topK       返回条数（越界自动收敛到 [1, 100]）
+     * @param categoryId 分类过滤（可选，两路同语义：比对 firstCategoryId，缺失放行）
+     * @param minPrice   最低价（可选，两路同语义：商品最高价需 >= minPrice）
+     * @param maxPrice   最高价（可选，两路同语义：商品最低价需 <= maxPrice）
+     * @return 检索结果（命中列表按加权 RRF 分数降序 + 缺货标记）
+     */
+    public RagSearchResult searchWithAvailability(String query, int topK,
+                                  Long categoryId, BigDecimal minPrice, BigDecimal maxPrice) {
         if (query == null || query.isBlank()) {
-            return Collections.emptyList();
+            return new RagSearchResult(List.of(), false);
         }
         long startNanos = System.nanoTime();  // T4 可观测性埋点
 
@@ -113,17 +140,29 @@ public class RagSearchService {
         log.debug("混合检索: 向量命中 {}, 关键词命中 {}, 候选池 {}, 合并取 Top-{}",
                 vectorHits.size(), keywordHits.size(), queryLimit, safeTopK);
 
+        // 3.5 库存过滤：在 RRF 合并【前】剔除全部售罄的商品，保证候选池干净。
+        //     必须前置——合并后再过滤会导致返回条数不足 topK（客服链路 topK=3，滤掉 2 条就只剩 1 条）。
+        //     两路候选取并集只查一次库存；resolveStock 查询异常返回空 Map → 不过滤（放行全部，不丢结果）。
+        Set<Long> outOfStockIds = findOutOfStockIds(vectorHits, keywordHits);
+        List<RagHitVO> vectorCandidates = removeOutOfStock(vectorHits, outOfStockIds);
+        List<RagHitVO> keywordCandidates = removeOutOfStock(keywordHits, outOfStockIds);
+
         // 4. 加权 RRF 合并（默认等权，与改造前等价）
-        List<RagHitVO> merged = RrfMerger.merge(vectorHits, keywordHits, safeTopK,
+        List<RagHitVO> merged = RrfMerger.merge(vectorCandidates, keywordCandidates, safeTopK,
                 rrfProperties.getK(), rrfProperties.getWeightVector(), rrfProperties.getWeightKeyword());
 
-        // T4 可观测性埋点：query/耗时/命中数/权重/向量路状态（轻量，不记录对话内容）
-        log.info("[RAG指标] query={} topK={} 耗时{}ms 向量命中{} 关键词命中{} 合并{}条 RRF(k={},wv={},wk={}) 向量路={}",
+        // T4 可观测性埋点：query/耗时/命中数/库存剔除数/权重/向量路状态（轻量，不记录对话内容）
+        log.info("[RAG指标] query={} topK={} 耗时{}ms 向量命中{} 关键词命中{} 库存剔除{} 合并{}条 RRF(k={},wv={},wk={}) 向量路={}",
                 query, safeTopK, (System.nanoTime() - startNanos) / 1_000_000,
-                vectorHits.size(), keywordHits.size(), merged.size(),
+                vectorHits.size(), keywordHits.size(), outOfStockIds.size(), merged.size(),
                 rrfProperties.getK(), rrfProperties.getWeightVector(), rrfProperties.getWeightKeyword(),
                 queryVector == null ? "已降级(纯关键词)" : "正常");
-        return merged;
+
+        // 缺货标记：仅当「过滤前有候选」且「过滤后为空」时才为 true。
+        // 候选本身为空说明真的没搜到，不可误报为缺货——对话链路的两种话术据此分流。
+        boolean allOutOfStock = merged.isEmpty()
+                && (!vectorHits.isEmpty() || !keywordHits.isEmpty());
+        return new RagSearchResult(merged, allOutOfStock);
     }
 
     /**
@@ -144,6 +183,77 @@ public class RagSearchService {
      */
     private static int clampQueryLimit(int queryLimit) {
         return Math.min(Math.max(queryLimit, MIN_QUERY_LIMIT), MAX_QUERY_LIMIT);
+    }
+
+    /**
+     * 找出两路候选中「全部 SKU 售罄」的商品 ID 集合
+     * <p>
+     * 对两路候选的**并集**批量查询一次库存，避免两路各查一次 sku 表。
+     * <p>
+     * 判定规则（设计文档 §2.2）：总库存 {@code <= 0} 视为售罄。
+     * ⚠️ 必须区分两种缺失：
+     * 「在 Map 中 且 {@code <= 0}」= 明确售罄 → 剔除；
+     * 「不在 Map 中」= 无 SKU 商品（数据缺失）→ 按「缺失即放行」不剔除。
+     * 用 {@code getOrDefault(id, 0)} 会把后者误判为售罄。
+     *
+     * @param vectorHits  向量路候选
+     * @param keywordHits 关键词路候选
+     * @return 需剔除的售罄商品 ID 集合；无候选或库存查询不可用时返回空集合（不过滤）
+     */
+    private Set<Long> findOutOfStockIds(List<RagHitVO> vectorHits, List<RagHitVO> keywordHits) {
+        Set<Long> candidateIds = new LinkedHashSet<>();
+        collectProductIds(vectorHits, candidateIds);
+        collectProductIds(keywordHits, candidateIds);
+        if (candidateIds.isEmpty()) {
+            return Set.of();
+        }
+
+        Map<Long, Integer> stockMap = skuPriceResolver.resolveStock(new ArrayList<>(candidateIds));
+        if (stockMap.isEmpty()) {
+            // 查询异常（resolveStock 内部已 WARN）或候选商品均无 SKU —— 两种都按不过滤处理
+            return Set.of();
+        }
+
+        Set<Long> outOfStockIds = new HashSet<>();
+        for (Long productId : candidateIds) {
+            Integer totalStock = stockMap.get(productId);
+            if (totalStock != null && totalStock <= 0) {
+                outOfStockIds.add(productId);
+            }
+        }
+        return outOfStockIds;
+    }
+
+    /** 收集候选中的商品 ID（跳过 null；去重由目标 Set 保证） */
+    private static void collectProductIds(List<RagHitVO> hits, Set<Long> target) {
+        if (hits == null) {
+            return;
+        }
+        for (RagHitVO hit : hits) {
+            if (hit != null && hit.getProductId() != null) {
+                target.add(hit.getProductId());
+            }
+        }
+    }
+
+    /**
+     * 剔除售罄商品，保持原顺序
+     *
+     * @param hits          候选列表（可为 null）
+     * @param outOfStockIds 待剔除的商品 ID 集合（空集合时原样返回，避免无谓的流式开销）
+     * @return 过滤后的列表
+     */
+    private static List<RagHitVO> removeOutOfStock(List<RagHitVO> hits, Set<Long> outOfStockIds) {
+        if (hits == null || hits.isEmpty()) {
+            return List.of();
+        }
+        if (outOfStockIds.isEmpty()) {
+            return hits;
+        }
+        return hits.stream()
+                .filter(hit -> hit != null
+                        && (hit.getProductId() == null || !outOfStockIds.contains(hit.getProductId())))
+                .collect(Collectors.toList());
     }
 
     /**

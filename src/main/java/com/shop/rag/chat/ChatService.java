@@ -14,7 +14,9 @@ import com.shop.rag.resilience.CircuitBreaker;
 import com.shop.rag.resilience.ToolCallLogger;
 import com.shop.rag.search.QueryRewriter;
 import com.shop.rag.search.RagHitVO;
+import com.shop.rag.search.RagSearchResult;
 import com.shop.rag.search.RagSearchService;
+import com.shop.rag.search.SkuPriceResolver;
 import com.shop.service.OrderService;
 import dev.langchain4j.data.message.ChatMessage;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -74,6 +76,8 @@ public class ChatService {
     private final ProductMapper productMapper;
     private final MySqlChatMemoryStore mySqlChatMemoryStore;
     private final OrderService orderService;
+    /** 分类回退路径的库存过滤：与主检索链路共用「商品 → 总库存」聚合 */
+    private final SkuPriceResolver skuPriceResolver;
     private final ChatIntentResolver chatIntentResolver;
     private final CancelOrderWorkflow cancelOrderWorkflow;
     private final OrderQueryWorkflow orderQueryWorkflow;
@@ -121,6 +125,12 @@ public class ChatService {
             - 不要推荐商品、不要追问「您想找什么类型的东西」
             - 用户想进一步处理某笔订单时，引导他直接说出订单号
 
+            ## 当有库存提示时
+            下方内容若包含「===== 商品库存提示 =====」段落，说明用户问的商品目前全部缺货：
+            - 如实告知「这款商品暂时缺货」，不要推荐其他商品
+            - 不要说「没有这个商品」，也不要用「没搜到，您具体想找什么」这类引导话术
+            - 语气自然，可以顺带说一句补货后可以再来看看
+
             ## 当没有商品信息时
             （若下方已给出「用户订单信息」段落，本节不适用，按上一节的订单规则回答）
             下面商品列表为空，说明目前没有匹配到具体商品，你需要：
@@ -149,6 +159,19 @@ public class ChatService {
             - 不要推荐商品、不要罗列商品、不要追问「您想找什么类型的东西」
             - 回答简洁，两三句即可，别啰嗦
             - 用户后面主动问商品时，再切回导购模式
+            """;
+
+    /**
+     * 全部售罄时注入的库存提示段落，替代商品列表占位文本。
+     * <p>
+     * 与「（未找到相关商品信息）」的区别：那个是「真的没搜到」，这个是「有商品但买不到」。
+     * 二者若共用同一段占位文本，模型会对着「有货但缺货」的情况说「没搜到您说的这个」，
+     * 用户会误以为系统不认识该商品。
+     */
+    private static final String OUT_OF_STOCK_CONTEXT = """
+            ===== 商品库存提示 =====
+            用户询问的商品目前全部缺货，请如实告知「这款商品暂时缺货」。
+            ========================
             """;
 
     /**
@@ -210,15 +233,16 @@ public class ChatService {
 
                 // 4. 混合 RAG 检索 TOP-3（使用改写后的 Query）；闲聊与订单意图不检索商品：
                 //    闲聊整句会被当作检索词搜一圈货架；问订单同样不该塞回一堆不相关商品
-                List<RagHitVO> hits = skipRetrieval
-                        ? List.of()
-                        : ragSearchService.search(searchQuery, 3, null, null, null);
+                RagSearchResult searchResult = skipRetrieval
+                        ? new RagSearchResult(List.of(), false)
+                        : ragSearchService.searchWithAvailability(searchQuery, 3, null, null, null);
+                List<RagHitVO> hits = searchResult.hits();
                 if (chitchat) {
                     log.info("[客服意图] 闲聊，跳过商品检索: {}", userMessage);
                 }
 
                 // 5. RAG 无结果时，尝试按分类名回退查询数据库（使用原始消息）；不检索的意图同样跳过
-                if (!skipRetrieval && (hits == null || hits.isEmpty())) {
+                if (!skipRetrieval && hits.isEmpty()) {
                     List<RagHitVO> categoryHits = fallbackSearchByCategory(userMessage);
                     if (categoryHits != null && !categoryHits.isEmpty()) {
                         hits = categoryHits;
@@ -228,6 +252,11 @@ public class ChatService {
 
                 // 6. 构建模型上下文：商品检索结果；订单域额外注入 Java 侧实时查回的订单数据
                 String productContext = buildProductContext(hits);
+                // 两种「空结果」必须分流：候选非空但全部售罄 → 注入缺货提示，走「暂时缺货」话术；
+                // 真正没搜到 → 保持原占位文本，走「没找到，您具体想找什么」的引导话术
+                if (hits.isEmpty() && searchResult.allOutOfStock()) {
+                    productContext = OUT_OF_STOCK_CONTEXT;
+                }
                 if (orderIntent) {
                     String orderContext = buildOrderContext(userId);
                     if (!orderContext.isBlank()) {
@@ -543,8 +572,17 @@ public class ChatService {
 
             if (products == null || products.isEmpty()) return null;
 
+            // 同步剔除售罄商品：与主检索链路的库存过滤语义一致（缺失即放行）。
+            // 漏掉这一步，主链路刚过滤掉的「全售罄」商品会被这条回退路径重新捞回来推给用户
+            Map<Long, Integer> stockMap = skuPriceResolver.resolveStock(
+                    products.stream().map(ProductDO::getId).toList());
+
             List<RagHitVO> hits = new ArrayList<>();
             for (ProductDO p : products) {
+                Integer totalStock = stockMap.get(p.getId());
+                if (totalStock != null && totalStock <= 0) {
+                    continue;
+                }
                 hits.add(RagHitVO.builder()
                         .score(1.0)
                         .productId(p.getId())

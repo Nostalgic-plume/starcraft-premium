@@ -57,6 +57,25 @@ spring:
   mvc:
     throw-exception-if-no-handler-found: true   # 无匹配 Handler 时抛异常而非回退到静态资源
 
+# 推荐库数据源（个性化推荐子系统专用）
+# 与商城业务库物理分离：推荐服务对推荐库读写，对商城业务库只读。
+# 单机部署下与商城库共用同一 MySQL 实例；账号密码支持独立环境变量注入（未设置时回退到商城库账号），
+# 生产环境建议为推荐库单独配置读写账号，防止越权访问商城业务数据。
+rec:
+  datasource:
+    url: jdbc:mysql://localhost:3306/shop_rec?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${REC_DB_USERNAME:${DB_USERNAME:root}}
+    password: ${REC_DB_PASSWORD:${DB_PASSWORD}}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    initial-size: 2                 # 推荐库并发量低于商城库，连接池规模相应收敛
+    min-idle: 2
+    max-active: 10
+    max-wait: 60000
+    validation-query: SELECT 1
+    test-while-idle: true
+    test-on-borrow: false
+    test-on-return: false
+
 mybatis-plus:
   mapper-locations: classpath:mapper/**/*.xml
   type-aliases-package: com.shop.model.entity

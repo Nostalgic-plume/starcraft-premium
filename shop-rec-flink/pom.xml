@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.shop</groupId>
+    <artifactId>shop-rec-flink</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+
+    <name>shop-rec-flink</name>
+    <description>个性化实时推荐子系统 - 实时特征计算与商品热度作业（M-02 / M-04）</description>
+
+    <!--
+      独立工程说明：
+      1. 本工程与商城工程（shop）在 Maven 上完全独立，不被商城根 pom 引用，也不引用商城任何模块。
+      2. 编译目标固定为 Java 11 —— Flink 1.17.2 官方仅支持 Java 8/11（17 为实验特性），
+         与商城工程（Java 22）不兼容，因此必须独立构建。
+      3. 与推荐服务仅共享「分桶键格式」与「行为权值默认值」两项约定，以常量在两侧各自定义，
+         不做代码共享。
+      4. 打包产物为自包含 fat jar，提交至 Flink 集群运行。
+    -->
+
+    <properties>
+        <maven.compiler.release>11</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+        <flink.version>1.17.2</flink.version>
+        <!-- Flink 1.17 起 Kafka 连接器采用外部化版本号，与 Flink 版本解耦 -->
+        <flink.kafka.connector.version>3.0.2-1.17</flink.kafka.connector.version>
+        <jedis.version>5.1.2</jedis.version>
+        <junit.version>5.10.2</junit.version>
+    </properties>
+
+    <dependencies>
+        <!-- Flink 核心由集群提供（flink:1.17.2 镜像的 lib 目录已包含），作业 jar 不打入 -->
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-streaming-java</artifactId>
+            <version>${flink.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-clients</artifactId>
+            <version>${flink.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Kafka 连接器由作业 jar 自带：Flink 1.17 镜像将其放在 /opt 目录而非 lib，默认不加载 -->
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-connector-kafka</artifactId>
+            <version>${flink.kafka.connector.version}</version>
+        </dependency>
+
+        <!-- 内存库客户端：用于写入偏好特征、特征元信息与商品热度榜 -->
+        <dependency>
+            <groupId>redis.clients</groupId>
+            <artifactId>jedis</artifactId>
+            <version>${jedis.version}</version>
+        </dependency>
+
+        <!-- 日志门面由 Flink 提供，作业内只依赖 API -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>1.7.36</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+            </plugin>
+
+            <!-- 打 fat jar：合并 Kafka 连接器与 Jedis，供直接提交至 Flink 集群 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.1</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <artifactSet>
+                                <excludes>
+                                    <!-- 日志实现由 Flink 运行时提供，避免与集群 log4j2 配置冲突 -->
+                                    <exclude>org.slf4j:*</exclude>
+                                    <exclude>org.apache.logging.log4j:*</exclude>
+                                </excludes>
+                            </artifactSet>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

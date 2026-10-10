@@ -258,9 +258,11 @@ public class ChatService {
                 // 真正没搜到 → 保持原占位文本，走「没找到，您具体想找什么」的引导话术
                 if (hits.isEmpty() && searchResult.allOutOfStock()) {
                     productContext = OUT_OF_STOCK_CONTEXT;
-                    log.info("[客服意图] 候选全部售罄 → 注入缺货提示, query={}", searchQuery);
+                    // 刻意不记录 query：用户输入可能含 PII，且本轮 query 已由 RagSearchService
+                    // 的 [RAG指标] 日志覆盖，此处再记一遍既重复又扩大暴露面
+                    log.info("[客服意图] 候选全部售罄 → 注入缺货提示");
                 } else if (hits.isEmpty()) {
-                    log.info("[客服意图] 未命中商品 → 走「没找到」引导话术, query={}", searchQuery);
+                    log.info("[客服意图] 未命中商品 → 走「没找到」引导话术");
                 }
                 if (orderIntent) {
                     String orderContext = buildOrderContext(userId);

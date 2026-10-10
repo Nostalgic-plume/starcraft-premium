@@ -211,6 +211,17 @@
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <version>3.2.12</version>
                 <configuration>
+                    <!--
+                        spring-boot:run 的默认主类。工程内含两个启动类
+                        （商城后端 ShopApplication / 推荐服务 RecApplication），插件无法自动推断，
+                        不显式指定时 run 会报 "Unable to find a single main class from the following
+                        candidates [com.shop.ShopApplication, com.shop.rec.RecApplication]"。
+                        默认指向商城后端；临时跑推荐服务用：
+                        mvn spring-boot:run -Dspring-boot.run.main-class=com.shop.rec.RecApplication
+                        注意：下面两个 repackage execution 各自声明了 mainClass（execution 级优先），
+                        打包产物 shop-1.0.0.jar / shop-1.0.0-rec.jar 的入口不受此处影响。
+                    -->
+                    <mainClass>com.shop.ShopApplication</mainClass>
                     <excludes>
                         <exclude>
                             <groupId>org.projectlombok</groupId>

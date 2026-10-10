@@ -76,6 +76,15 @@ rec:
     test-on-borrow: false
     test-on-return: false
 
+  # 消息队列（推荐子系统行为事件流）
+  # 说明：推荐链路使用 Kafka，商城原有订单/消息链路继续使用 RocketMQ，两套并存互不影响。
+  # 生产端由商城后端（M-01 行为采集）使用；消费端在独立 Flink 作业中，不在本工程。
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:127.0.0.1:9092}
+    user-behavior-topic: user-behavior
+    delivery-timeout-ms: 50        # 单条事件投递超时（毫秒），对应详细设计 3.1 步骤 8
+    retries: 3                     # 生产者重试次数，对应详细设计 3.1「重试 3 次」
+
 mybatis-plus:
   mapper-locations: classpath:mapper/**/*.xml
   type-aliases-package: com.shop.model.entity

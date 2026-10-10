@@ -220,4 +220,92 @@ public final class RecRedisKeys {
 
     /** 已购已加购排除清单有效期：7 天（默认值，可由配置项 exclude.recent.days 覆盖） */
     public static final long TTL_EXCLUDE = 7 * 24 * 3600L;
+
+    // ==================== 9. 采集防护运行时状态（实现补充） ====================
+    // 说明：详细设计 4.2 的键表聚焦业务数据与限流键；以下为 M-01 采集防护所需的运行时状态，
+    // 均带短有效期自动清理，不对外提供查询能力，属实现细节。
+
+    /** 单用户单商品单行为类型的分钟级上报计数（第二级限频） */
+    private static final String LIMIT_ITEM_TEMPLATE = PREFIX + "limit:item:%d:%d:%s";
+
+    /** 用户最近一次浏览某商品的时间标记（无效行为识别用） */
+    private static final String RECENT_VIEW_TEMPLATE = PREFIX + "recent:view:%d:%d";
+
+    /** 来源对单个商品的分钟级浏览计数（爬虫判定用） */
+    private static final String CRAWLER_CNT_TEMPLATE = PREFIX + "crawler:cnt:%s:%d";
+
+    /** 来源维度统计哈希（爬虫判定前置校验用）：total 浏览总数 / withDuration 已采集停留时长数 */
+    private static final String CRAWLER_STAT_TEMPLATE = PREFIX + "crawler:stat:%s";
+
+    /** 来源封禁标记：命中爬虫后该来源浏览事件在封禁期内全部丢弃 */
+    private static final String CRAWLER_BAN_TEMPLATE = PREFIX + "crawler:ban:%s";
+
+    /**
+     * 单用户单商品单行为类型上报计数键
+     *
+     * @param userId    用户标识
+     * @param itemId    商品标识
+     * @param eventType 行为类型
+     * @return 键名
+     */
+    public static String limitItem(Long userId, Long itemId, String eventType) {
+        return String.format(LIMIT_ITEM_TEMPLATE, userId, itemId, eventType);
+    }
+
+    /**
+     * 用户最近浏览标记键
+     *
+     * @param userId 用户标识
+     * @param itemId 商品标识
+     * @return 键名
+     */
+    public static String recentView(Long userId, Long itemId) {
+        return String.format(RECENT_VIEW_TEMPLATE, userId, itemId);
+    }
+
+    /**
+     * 来源对单个商品的浏览计数键
+     *
+     * @param source 来源标识
+     * @param itemId 商品标识
+     * @return 键名
+     */
+    public static String crawlerCount(String source, Long itemId) {
+        return String.format(CRAWLER_CNT_TEMPLATE, source, itemId);
+    }
+
+    /**
+     * 来源统计哈希键
+     *
+     * @param source 来源标识
+     * @return 键名
+     */
+    public static String crawlerStat(String source) {
+        return String.format(CRAWLER_STAT_TEMPLATE, source);
+    }
+
+    /**
+     * 来源封禁标记键
+     *
+     * @param source 来源标识
+     * @return 键名
+     */
+    public static String crawlerBan(String source) {
+        return String.format(CRAWLER_BAN_TEMPLATE, source);
+    }
+
+    /** 最近浏览标记有效期：5 秒（无效行为识别的时间窗口） */
+    public static final long TTL_RECENT_VIEW = 5L;
+
+    /** 爬虫计数与来源统计有效期：60 秒（判定窗口） */
+    public static final long TTL_CRAWLER_WINDOW = 60L;
+
+    /** 爬虫封禁有效期：5 分钟（命中后丢弃该来源浏览事件的时长） */
+    public static final long TTL_CRAWLER_BAN = 5 * 60L;
+
+    /** 来源统计哈希字段：浏览总数 */
+    public static final String CRAWLER_FIELD_TOTAL = "total";
+
+    /** 来源统计哈希字段：已采集停留时长的浏览数 */
+    public static final String CRAWLER_FIELD_WITH_DURATION = "withDuration";
 }

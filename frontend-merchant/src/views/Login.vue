@@ -47,7 +47,11 @@ const store = useMerchantStore()
 
 const formRef = ref<FormInst | null>(null)
 const loading = ref(false)
-const form = reactive({ username: 'merchant1', password: '123456' })
+// 测试账号仅在开发环境预填：生产构建留空，避免部署后登录页直接奉上可用的商家端凭证
+const form = reactive({
+  username: import.meta.env.DEV ? 'merchant1' : '',
+  password: import.meta.env.DEV ? '123456' : ''
+})
 
 const rules: FormRules = {
   username: {

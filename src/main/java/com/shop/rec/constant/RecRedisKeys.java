@@ -1,0 +1,223 @@
+package com.shop.rec.constant;
+
+/**
+ * 推荐子系统内存库键定义与有效期常量
+ *
+ * <p>
+ * 严格对应《详细设计说明书》4.2 Redis 键详细定义。键名在实现中直接拼接，
+ * 不引入键前缀配置（口径见详细设计 4.2 键设计约定）。
+ *
+ * <p>
+ * <b>分桶状态不在本类中</b>：分钟桶、小时桶、天桶的分桶累加值存放于 Flink 作业的托管状态，
+ * 由状态 TTL 与检查点保障，不写入内存库（该调整见详细设计 3.2 与 4.2）。
+ *
+ * @author shop
+ */
+public final class RecRedisKeys {
+
+    private RecRedisKeys() {
+    }
+
+    // ==================== 键前缀 ====================
+
+    /** 全局键前缀 */
+    public static final String PREFIX = "rec:";
+
+    // ==================== 1. 用户偏好特征 ====================
+
+    /** 用户类目偏好特征（有序集合，8 天） */
+    private static final String USER_CAT_PREF_TEMPLATE = PREFIX + "feat:user:%d:cat";
+
+    /** 用户品牌偏好特征（有序集合，8 天） */
+    private static final String USER_BRAND_PREF_TEMPLATE = PREFIX + "feat:user:%d:brand";
+
+    /** 用户特征元信息（哈希，8 天） */
+    private static final String USER_FEAT_META_TEMPLATE = PREFIX + "feat:user:%d:meta";
+
+    /**
+     * 用户类目偏好特征键
+     *
+     * @param userId 用户标识
+     * @return 键名 rec:feat:user:{userId}:cat
+     */
+    public static String userCatPref(Long userId) {
+        return String.format(USER_CAT_PREF_TEMPLATE, userId);
+    }
+
+    /**
+     * 用户品牌偏好特征键
+     *
+     * @param userId 用户标识
+     * @return 键名 rec:feat:user:{userId}:brand
+     */
+    public static String userBrandPref(Long userId) {
+        return String.format(USER_BRAND_PREF_TEMPLATE, userId);
+    }
+
+    /**
+     * 用户特征元信息键
+     *
+     * @param userId 用户标识
+     * @return 键名 rec:feat:user:{userId}:meta
+     */
+    public static String userFeatMeta(Long userId) {
+        return String.format(USER_FEAT_META_TEMPLATE, userId);
+    }
+
+    // ==================== 2. 商品热度与索引 ====================
+
+    /** 商品热度榜（有序集合，1 天） */
+    public static final String HOT_ITEM = PREFIX + "hot:item";
+
+    /** 类目候选索引（有序集合，1 天）：各二级类目下的候选商品及类目内热度分 */
+    private static final String CAT_ITEMS_TEMPLATE = PREFIX + "cat:items:%d";
+
+    /** 商品可售状态（哈希，1 天，变更时主动删除） */
+    private static final String ITEM_STATE_TEMPLATE = PREFIX + "item:state:%d";
+
+    /**
+     * 类目候选索引键
+     *
+     * @param categoryId 二级类目标识
+     * @return 键名 rec:cat:items:{categoryId}
+     */
+    public static String catItems(Long categoryId) {
+        return String.format(CAT_ITEMS_TEMPLATE, categoryId);
+    }
+
+    /**
+     * 商品可售状态键
+     *
+     * @param itemId 商品标识
+     * @return 键名 rec:item:state:{itemId}
+     */
+    public static String itemState(Long itemId) {
+        return String.format(ITEM_STATE_TEMPLATE, itemId);
+    }
+
+    // ==================== 3. 过滤与排除清单 ====================
+
+    /** 过滤清单（集合，随规则同步）：命中该规则的商品标识 */
+    private static final String FILTER_TEMPLATE = PREFIX + "filter:%s";
+
+    /** 用户已购与已加购排除清单（集合，7 天） */
+    private static final String EXCLUDE_TEMPLATE = PREFIX + "exclude:user:%d";
+
+    /**
+     * 过滤清单键
+     *
+     * @param ruleType 规则类型（blacklist / member_only / region_limit / low_quality）
+     * @return 键名 rec:filter:{ruleType}
+     */
+    public static String filter(String ruleType) {
+        return String.format(FILTER_TEMPLATE, ruleType);
+    }
+
+    /**
+     * 用户排除清单键
+     *
+     * @param userId 用户标识
+     * @return 键名 rec:exclude:user:{userId}
+     */
+    public static String exclude(Long userId) {
+        return String.format(EXCLUDE_TEMPLATE, userId);
+    }
+
+    // ==================== 4. 榜单快照 ====================
+
+    /** 榜单快照（字符串 JSON，300 秒）：供同一用户翻页复用 */
+    private static final String RESULT_TEMPLATE = PREFIX + "result:user:%d";
+
+    /**
+     * 榜单快照键
+     *
+     * @param userId 用户标识
+     * @return 键名 rec:result:user:{userId}
+     */
+    public static String result(Long userId) {
+        return String.format(RESULT_TEMPLATE, userId);
+    }
+
+    // ==================== 5. 上报防护 ====================
+
+    /** 上报去重标识（字符串，3600 秒） */
+    private static final String DEDUP_TEMPLATE = PREFIX + "dedup:event:%s";
+
+    /** 上报限频计数（字符串计数，60 秒） */
+    private static final String LIMIT_REPORT_TEMPLATE = PREFIX + "limit:report:%d";
+
+    /**
+     * 上报去重标识键
+     *
+     * @param eventId 事件幂等标识
+     * @return 键名 rec:dedup:event:{eventId}
+     */
+    public static String dedup(String eventId) {
+        return String.format(DEDUP_TEMPLATE, eventId);
+    }
+
+    /**
+     * 上报限频计数键
+     *
+     * @param userId 用户标识
+     * @return 键名 rec:limit:report:{userId}
+     */
+    public static String limitReport(Long userId) {
+        return String.format(LIMIT_REPORT_TEMPLATE, userId);
+    }
+
+    // ==================== 6. 配置副本 ====================
+
+    /** 配置热更新副本（字符串，长期，主动更新） */
+    private static final String CFG_TEMPLATE = PREFIX + "cfg:%s";
+
+    /** 配置版本号键：各模块每 30 秒比对一次，发现变化后重新加载 */
+    public static final String CFG_VERSION = PREFIX + "cfg:version";
+
+    /**
+     * 配置副本键
+     *
+     * @param configKey 配置键
+     * @return 键名 rec:cfg:{configKey}
+     */
+    public static String cfg(String configKey) {
+        return String.format(CFG_TEMPLATE, configKey);
+    }
+
+    // ==================== 7. 特征元信息字段名 ====================
+
+    /** 元信息字段：最近事件时间 */
+    public static final String META_FIELD_LAST_EVENT_TIME = "lastEventTime";
+
+    /** 元信息字段：最近计算时间 */
+    public static final String META_FIELD_CALC_TIME = "calcTime";
+
+    /** 元信息字段：窗口档位标记 */
+    public static final String META_FIELD_WINDOW_FLAG = "windowFlag";
+
+    // ==================== 8. 有效期（秒） ====================
+
+    /** 偏好特征有效期：8 天 */
+    public static final long TTL_USER_FEAT = 8 * 24 * 3600L;
+
+    /** 商品热度榜有效期：1 天 */
+    public static final long TTL_HOT_ITEM = 24 * 3600L;
+
+    /** 类目候选索引有效期：1 天 */
+    public static final long TTL_CAT_ITEMS = 24 * 3600L;
+
+    /** 商品可售状态有效期：1 天（商品变更时主动删除，不等待过期） */
+    public static final long TTL_ITEM_STATE = 24 * 3600L;
+
+    /** 榜单快照有效期：300 秒（默认值，可由配置项 cache.result.ttl 覆盖） */
+    public static final long TTL_RESULT = 300L;
+
+    /** 上报去重标识有效期：3600 秒 */
+    public static final long TTL_DEDUP = 3600L;
+
+    /** 上报限频计数有效期：60 秒 */
+    public static final long TTL_LIMIT_REPORT = 60L;
+
+    /** 已购已加购排除清单有效期：7 天（默认值，可由配置项 exclude.recent.days 覆盖） */
+    public static final long TTL_EXCLUDE = 7 * 24 * 3600L;
+}

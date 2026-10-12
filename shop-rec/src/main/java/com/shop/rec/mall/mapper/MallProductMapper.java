@@ -2,6 +2,7 @@ package com.shop.rec.mall.mapper;
 
 import com.shop.rec.mall.model.MallCategoryDO;
 import com.shop.rec.mall.model.MallProductDO;
+import com.shop.rec.mall.model.MallProductDisplayDO;
 import com.shop.rec.mall.model.MallSkuStatDO;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -97,4 +98,21 @@ public interface MallProductMapper {
             + "<if test='limit > 0'>LIMIT #{limit}</if>"
             + "</script>")
     List<MallProductDO> selectSellableProducts(@Param("limit") int limit);
+
+    /**
+     * 批量查询商品展示信息（榜单渲染用）
+     *
+     * <p>价格取最低规格价格，与商城列表页口径一致。由 M-08 在切片返回前批量查询，
+     * 避免逐商品查询造成的 N+1 问题。
+     *
+     * @param productIds 商品标识列表（非空）
+     * @return 展示信息列表
+     */
+    @Select("<script>"
+            + "SELECT p.id, p.name, p.main_image, "
+            + "(SELECT MIN(s.price) FROM sku s WHERE s.product_id = p.id AND s.deleted = 0) AS min_price "
+            + "FROM product p WHERE p.deleted = 0 AND p.id IN "
+            + "<foreach collection='productIds' item='id' open='(' separator=',' close=')'>#{id}</foreach>"
+            + "</script>")
+    List<MallProductDisplayDO> selectDisplayInfo(@Param("productIds") List<Long> productIds);
 }

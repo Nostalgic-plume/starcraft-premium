@@ -22,10 +22,6 @@ CLAUDE.md
 *.zip
 docs/db-backup/
 bash.exe.stackdump
-deploy/html/
-deploy/nginx.exe
-deploy/mime.types
-deploy/logs/
 logs/
 # 编辑器/助手本地配置（含本机绝对路径与用户名，不入库）
 .claude/

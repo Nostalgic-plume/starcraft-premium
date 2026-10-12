@@ -308,4 +308,25 @@ public final class RecRedisKeys {
 
     /** 来源统计哈希字段：已采集停留时长的浏览数 */
     public static final String CRAWLER_FIELD_WITH_DURATION = "withDuration";
+
+    // ==================== 10. 商品可售状态字段名 ====================
+    // 对应详细设计 4.2 键 6「商品可售状态（rec:item:state:{itemId}）」的哈希字段，由 M-04 写入。
+
+    /** 商品状态字段：上下架状态 */
+    public static final String ITEM_STATE_FIELD_STATUS = "status";
+
+    /** 商品状态字段：库存 */
+    public static final String ITEM_STATE_FIELD_STOCK = "stock";
+
+    /** 商品状态字段：二级类目标识 */
+    public static final String ITEM_STATE_FIELD_CATEGORY = "categoryId";
+
+    /** 商品状态字段：品牌标识 */
+    public static final String ITEM_STATE_FIELD_BRAND = "brandId";
+
+    /** 商品状态字段：店铺标识 */
+    public static final String ITEM_STATE_FIELD_SHOP = "shopId";
+
+    /** 商品上架状态取值 */
+    public static final String ITEM_STATUS_ON_SALE = "1";
 }

@@ -29,7 +29,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  *
  * @author shop
  */
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = { "com.shop.rec", "com.shop.web" })
 @EnableScheduling
 public class RecApplication {
 

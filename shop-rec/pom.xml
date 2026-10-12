@@ -101,6 +101,18 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!--
+            离线评测脚本（OfflineEvaluator）直连 Redis 读取热度榜与类目索引。
+            该脚本不运行在 Spring 容器内，无法使用 RecRedis，故单独引入 Jedis；
+            仅测试期使用，不进入运行时产物。
+        -->
+        <dependency>
+            <groupId>redis.clients</groupId>
+            <artifactId>jedis</artifactId>
+            <version>5.1.2</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

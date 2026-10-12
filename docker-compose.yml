@@ -3,7 +3,7 @@
 # 默认启动（docker compose up -d）：Redis / RocketMQ / Nginx —— 商城核心运行必需
 #
 # 可选分组（默认不启动，用 --profile 显式启用）：
-#   --profile rec   → Kafka（推荐子系统行为事件流，KRaft 单节点，约 1GB 内存）
+#   --profile rec   → Kafka（行为事件流，KRaft 单节点）+ Flink（实时计算集群，JM 1G + TM 2G）
 #   --profile rag   → Qdrant（RAG 向量库）
 #   --profile gpu   → TEI（本地 BGE-M3 向量化，需 NVIDIA GPU + nvidia-container-toolkit，约 2.2G 权重）
 #   --profile es    → Elasticsearch（RAG 关键词检索路，当前未使用，默认关闭以省内存）
@@ -223,6 +223,58 @@ services:
         echo "当前主题列表："
         $$KAFKA_BIN/kafka-topics.sh --bootstrap-server $$BOOTSTRAP --list
     restart: "no"
+
+  # ====== Flink 集群（推荐子系统实时特征计算作业 M-02 与商品热度算子 M-04）======
+  # 说明：作业以独立工程 shop-rec-flink（编译目标 Java 11）打包后提交至本集群；
+  #       内存按单机 16GB 约束收敛（JM 1G + TM 2G），并行度与槽位均取 3（与 Kafka 分区数对齐）。
+  # 归属 rec profile：docker compose --profile rec up -d
+  flink-jobmanager:
+    image: flink:1.17.2
+    container_name: shop-flink-jm
+    restart: unless-stopped
+    profiles: ["rec"]
+    # named volume 默认 root:root，而镜像 USER=flink 无法写入检查点卷，故以 root 运行
+    user: root
+    ports:
+      - "127.0.0.1:8081:8081"            # 作业管理界面，仅本机可达
+      - "127.0.0.1:6123:6123"            # JobManager RPC，供作业提交使用，仅本机可达
+    command: jobmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        jobmanager.memory.process.size: 1024m
+        taskmanager.numberOfTaskSlots: 3
+        parallelism.default: 3
+        state.backend: rocksdb
+        state.checkpoints.dir: file:///opt/flink/checkpoints
+        execution.checkpointing.interval: 60s
+        execution.checkpointing.mode: EXACTLY_ONCE
+        execution.checkpointing.min-pause: 30s
+    # 检查点目录不挂载 named volume：实测 Docker Desktop 的 named volume 与 Flink
+    # LocalFileSystem 交互异常（JobManager 创建 {jobId}/shared 目录失败，而手工 mkdir 正常）。
+    # 容器内路径可正常工作，检查点随容器生命周期存在——容器不销毁即可正常恢复；
+    # 若需跨容器重建持久化，改用宿主机目录 bind mount 并把作业参数 checkpoint.storage 指向该路径。
+
+  flink-taskmanager:
+    image: flink:1.17.2
+    container_name: shop-flink-tm
+    restart: unless-stopped
+    profiles: ["rec"]
+    # 同 JobManager：需写入检查点卷，故以 root 运行
+    user: root
+    depends_on:
+      - flink-jobmanager
+    command: taskmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.memory.process.size: 2048m
+        taskmanager.numberOfTaskSlots: 3
+        parallelism.default: 3
+        state.backend: rocksdb
+        state.checkpoints.dir: file:///opt/flink/checkpoints
 
   # ====== Nginx（静态三端 + 反代后端，容器内经 host.docker.internal 访问宿主机 :8080）======
   nginx:

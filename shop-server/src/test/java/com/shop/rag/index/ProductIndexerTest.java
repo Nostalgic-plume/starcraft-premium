@@ -141,6 +141,39 @@ class ProductIndexerTest {
     }
 
     @Test
+    @DisplayName("payload 瘦身：向量化输入仍是五段式全文本，写入 payload 的文本仅为商品名")
+    void rebuild_shouldEmbedFullTextButStoreNameOnlyInPayload() {
+        ProductDO product = onShelfProduct(11L, "测试商品十一");
+        product.setDescription("搭载测试芯片的旗舰描述");
+        product.setFirstCategoryId(1L);
+        when(productMapper.selectList(any())).thenReturn(List.of(product));
+        when(embeddingModel.embedAll(anyList())).thenReturn(Response.from(List.of(vector(0.1f, 0.2f))));
+
+        indexer.forceRebuildAll();
+
+        // ① 向量化输入：必须是五段式拼接（改这里会让召回质量断崖式下跌）
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<TextSegment>> embeddingCaptor = ArgumentCaptor.forClass(List.class);
+        verify(embeddingModel).embedAll(embeddingCaptor.capture());
+        String embeddingText = embeddingCaptor.getValue().get(0).text();
+        assertTrue(embeddingText.contains("名称：测试商品十一"), "向量化输入应含名称段，实际=" + embeddingText);
+        assertTrue(embeddingText.contains("描述：搭载测试芯片的旗舰描述"), "向量化输入应含描述段，实际=" + embeddingText);
+        assertTrue(embeddingText.contains("品牌："), "向量化输入应含品牌段，实际=" + embeddingText);
+        assertTrue(embeddingText.contains("分类："), "向量化输入应含分类段，实际=" + embeddingText);
+        assertTrue(embeddingText.contains("详情："), "向量化输入应含详情段，实际=" + embeddingText);
+
+        // ② payload 文本：仅商品名，不含任何标签前缀；过滤字段仍在元数据中（下推过滤依赖它们）
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<TextSegment>> payloadCaptor = ArgumentCaptor.forClass(List.class);
+        verify(embeddingStore).addAll(anyList(), anyList(), payloadCaptor.capture());
+        TextSegment payloadSegment = payloadCaptor.getValue().get(0);
+        assertEquals("测试商品十一", payloadSegment.text());
+        Map<String, Object> meta = payloadSegment.metadata().toMap();
+        assertEquals(11L, meta.get("productId"));
+        assertEquals(1L, meta.get("firstCategoryId"));
+    }
+
+    @Test
     @DisplayName("元数据字段为空的商品：仍能成功写入索引，不会因空值导致整批失败")
     void addOrUpdate_shouldTolerateNullMetadataFields() {
         ProductDO product = onShelfProduct(8L, "无主图商品");

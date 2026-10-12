@@ -107,6 +107,32 @@ Kafka 的幂等生产者**强制要求 `acks=all`**，配置为 `acks=1` 会在�
 
 | 项 | 说明 |
 |---|---|
-| 编译 JDK | Maven 默认 `JAVA_HOME` 为 JDK 21，而工程编译目标为 Java 22；构建时需显式指定 `JAVA_HOME=<jdk-22 路径>` |
-| Flink 工程 | `shop-rec-flink` 编译目标 **Java 11**（Flink 1.17.2 不支持 Java 22），不可与商城工程合并构建 |
-| 依赖坐标 | Flink 1.17 起 Kafka 连接器采用外部化版本号：`flink-connector-kafka:3.0.2-1.17`（已验证可解析） |
+| 编译目标 | 根 pom 设 `java.version=22` 但 `maven.compiler.release=21`（为启用虚拟线程 API），实际用 JDK 21 编译即可，无需切换 JDK |
+| 构建命令 | `mvn clean package`（聚合构建，Reactor 顺序 common → rec → server）；`-DskipTests` 仍会编译测试，需完全跳过用 `-Dmaven.test.skip=true` |
+| Flink 工程 | `shop-rec-flink` 编译目标 **Java 11**（Flink 1.17.2 不支持 Java 22），独立构建，不在聚合 pom 的 modules 中 |
+| 依赖坐标 | Flink 1.17 起 Kafka 连接器采用外部化版本号：`flink-connector-kafka:3.0.2-1.17` |
+| Flink 作业依赖 | 需显式引入 lombok（provided）与 jackson-databind（随作业 jar 打包）；RocksDB 状态后端用 `flink-statebackend-rocksdb`（provided，由集群 lib 提供） |
+
+### 5.1 Windows / Docker 环境踩坑
+
+| 坑 | 现象 | 处理 |
+|---|---|---|
+| Git Bash 路径转换 | `docker exec xxx /opt/kafka/bin/...` 被改写成 `C:/Program Files/Git/opt/...` | 命令前 `export MSYS_NO_PATHCONV=1` |
+| `pkill` 不生效 | `pkill -f xxx.jar` 杀不掉 Java 进程，导致后续 `mvn clean` 报 `Failed to delete ...jar` | 用 `jps -l` 查 PID，再 `taskkill //PID <pid> //F` |
+| named volume 与 Flink 冲突 | JobManager 创建 `{检查点目录}/{jobId}/shared` 失败，而容器内手工 `mkdir` 正常 | Flink 检查点目录不挂 named volume，改用容器内路径；如需跨容器持久化改用 bind mount |
+| 容器内访问中间件 | Flink 容器连不上宿主机的 `127.0.0.1:9092` | Kafka 配双 listener：容器内客户端走 `kafka:9093`（INTERNAL 通告地址），宿主机客户端走 `127.0.0.1:9092`；Redis 用 compose 服务名 `redis:6379` |
+
+### 5.2 Flink 作业提交命令
+
+```bash
+# 1) 打包作业（在 shop-rec-flink 目录）
+mvn package -DskipTests
+
+# 2) 复制作业 jar 到 JobManager（Git Bash 下需 MSYS_NO_PATHCONV）
+docker cp target/shop-rec-flink-1.0.0.jar shop-flink-jm:/tmp/shop-rec-flink.jar
+
+# 3) 提交（容器内地址用 compose 服务名）
+docker exec shop-flink-jm flink run -d -c com.shop.rec.flink.FeatureJob /tmp/shop-rec-flink.jar \
+  --kafka.bootstrap kafka:9093 \
+  --redis.host redis --redis.port 6379 --redis.password "$REDIS_PASSWORD"
+```

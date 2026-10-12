@@ -225,3 +225,94 @@ Map<Long, SkuSnapshot> resolveSnapshot(List<Long> productIds)
 ### 索引重建
 
 全量重建成功，`indexedCount = 278`，且重建后检索结果与重建前一致（商品集合不变）。
+
+## 九、验收记录（2026-10-12）
+
+三批次全部落地，实测结论如下。
+
+### 9.1 单元测试
+
+| 范围 | 结果 |
+|------|------|
+| 批次二链路测试（RrfMerger / KeywordSearchService / RagSearchService / RagStockFilter / RagFallback / **ProductIndexerRebuild** 等 7 类） | **44 用例全绿** |
+| 批次三 `ProductIndexerTest`（含新增 payload 瘦身用例） | **6 用例全绿** |
+| 全量 RAG 相关回归（11 个测试类） | **63 用例全绿** |
+
+新增用例锁定两条关键不变量：
+
+- `ProductIndexerTest#rebuild_shouldEmbedFullTextButStoreNameOnlyInPayload`：
+  **向量化输入仍是五段式**（名称/描述/品牌/分类/详情），写入 payload 的文本仅为商品名；
+  同时校验 `productId`/`firstCategoryId` 仍在 payload 元数据中（下推过滤依赖）。
+- `RagSearchExcerptContractTest`：经完整 MVC 栈（含 Jackson 序列化）调真实 `/api/product/rag-search`，
+  断言所有命中的 `excerpt` 不含「名称：/描述：/品牌：/分类：/详情：」任一标签，
+  且 `name`/`productId` 为独立字段。Qdrant 不可用时自动跳过（与 `RagEvaluationTest` 同策略）。
+
+### 9.2 评估回归（零回归）
+
+`mvn test -Dtest=RagEvaluationTest`，重建**前后**各跑一次，逐项比对：
+
+| 指标 | 基线（重建前） | 重建后 | 结论 |
+|------|--------------|--------|------|
+| 基础集 Recall@3（wv=1.0 wk=2.0 生产档） | 0.711 | 0.711 | 一致 |
+| 基础集 Recall@5 | 0.753 | 0.753 | 一致 |
+| 基础集 MRR | 0.474 | 0.474 | 一致 |
+| 同义词集 Recall@5 | 0.867 | 0.867 | 一致 |
+| 同义词集 MRR | 0.529 | 0.529 | 一致 |
+
+**这是本次改动最关键的一道证据**：payload 文本从「五段式全文」瘦身为「仅商品名」后指标一字未动，
+反证了「向量化输入未被误改」与「payload 文本不参与召回」两点同时成立。
+
+### 9.3 索引重建
+
+`ProductIndexerRebuildTest`（走 `forceRebuildAll()`，与 `POST /api/admin/rag/rebuild`
+同一代码路径 —— 该接口在 `IndexAdminController` 中异步调用同一方法）：
+
+```
+===== 商品向量索引完成: 278 条, 耗时 2602ms =====
+```
+
+断言「索引条数 = 在售商品数」通过，`indexedCount = 278` 与计划书预期一致。
+
+### 9.4 端到端（excerpt 标签前缀消失）
+
+实测响应（`GET /api/product/rag-search?q=手机&topK=3`，节选一条）：
+
+```json
+{"productId":"1","name":"华为 Mate 60 Pro 12GB+512GB 雅丹黑 手机",
+ "image":"https://picsum.photos/seed/3331/400/400",
+ "minPrice":6999.00,"maxPrice":7999.00,"score":0.05,
+ "excerpt":"搭载麒麟芯片与卫星通话功能，超可靠玄武架构，全焦段影像旗舰。"}
+```
+
+与改造前同一条商品的 `excerpt` 对比：
+
+| | excerpt |
+|---|---|
+| 改造前（向量路） | `名称：华为 Mate 60 Pro 12GB+512GB 雅丹黑 手机\n描述：搭载麒麟芯片与卫星通话功能，…` |
+| 改造后 | `搭载麒麟芯片与卫星通话功能，超可靠玄武架构，全焦段影像旗舰。` |
+
+`name` / `image` / `minPrice` / `maxPrice` 均为独立字段且取自回查结果，标签前缀彻底消失，
+客服卡片 40 字配额不再被标签与标题挤占。查询 `vivo` 的响应同样为纯描述，两路格式已一致。
+
+### 9.5 环境备注（多模块重构带来的连带影响）
+
+多模块化后 `surefire` 与 `spring-boot:run` 的工作目录变为模块目录（`shop-server/`），
+而 `.env` 仍在仓库根目录，**`spring-dotenv` 读不到**，`@SpringBootTest` 会因
+`Access denied for user 'root'@'localhost'` 加载上下文失败。本次验证采用临时注入规避：
+
+```bash
+set -a; . <(tr -d '\r' < .env); set +a   # 再跑 mvn test
+```
+
+**属未修复的环境问题**（根因是多模块重构尚未收尾，见 §9.6），不是本次改动的缺陷。
+彻底的修法是给 `shop-server` 的 surefire 配 `workingDirectory` 指向仓库根，
+或把 `.env` 纳入构建期资源解析 —— 待多模块重构收尾时一并处理。
+
+### 9.6 遗留
+
+- **多模块重构改动尚未提交**（暂存区 255 个文件的 rename/新增）。本次批次三的文件位于
+  `shop-server/` 新路径，其提交**依赖**该重构先落地 —— 否则 HEAD 中旧路径
+  `src/main/java/com/shop/rag/**` 与新路径并存，同一 FQCN 会编译冲突。
+- `ChatController./clear` 缺 `@SaCheckLogin`：当前 `clearConversation` 为空实现故无实际危害，
+  但 V2 实现后会变成越权删除漏洞，建议届时补注解。
+

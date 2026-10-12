@@ -163,26 +163,32 @@ public class ProductIndexer {
         // DB 往返（商品数百时线性放大；同方法内 SKU 价格已用 loadPriceMap 批量预加载，保持一致）
         IndexLookup lookup = loadIndexLookup(products);
 
-        // 批量构建 TextSegment（携元数据）
-        List<TextSegment> segments = products.stream()
-                .map(p -> buildTextSegment(p, priceMap.get(p.getId()), lookup))
+        // 批量构建索引片段：每条商品产出「向量化片段」与「payload 片段」两个同元数据的 TextSegment
+        List<IndexedSegments> indexedSegments = products.stream()
+                .map(p -> buildSegments(p, priceMap.get(p.getId()), lookup))
                 .collect(Collectors.toList());
 
-        // 批量生成 embedding（分批，text-embedding-v1 单次最多 25 条）
+        // 向量化只吃 forEmbedding 的文本（五段式），payload 存的是 forPayload（仅商品名）
+        List<TextSegment> embeddingSegments = indexedSegments.stream()
+                .map(IndexedSegments::forEmbedding)
+                .collect(Collectors.toList());
+
+        // 批量生成 embedding（分批，嵌入服务单次请求条数上限 25）
         List<Embedding> embeddings = new ArrayList<>();
         int batchSize = 25;
-        for (int i = 0; i < segments.size(); i += batchSize) {
-            int end = Math.min(i + batchSize, segments.size());
-            List<TextSegment> batch = segments.subList(i, end);
+        for (int i = 0; i < embeddingSegments.size(); i += batchSize) {
+            int end = Math.min(i + batchSize, embeddingSegments.size());
+            List<TextSegment> batch = embeddingSegments.subList(i, end);
             List<Embedding> batchResult = embeddingModel.embedAll(batch).content();
             if (batchResult != null) {
                 embeddings.addAll(batchResult);
             }
-            log.debug("向量化进度: {}/{}", end, segments.size());
+            log.debug("向量化进度: {}/{}", end, embeddingSegments.size());
         }
 
         // 校验：跳过空向量（嵌入服务未就绪时可能返回 0 维向量）
         // 注意：ids / embeddings / segments 必须严格一一对应，过滤后不可再回查 products 下标
+        // （写出的是 payload 片段，其文本与 embeddingSegments 同下标、同元数据）
         List<String> validIds = new ArrayList<>();
         List<Embedding> validEmbeddings = new ArrayList<>();
         List<TextSegment> validSegments = new ArrayList<>();
@@ -191,7 +197,7 @@ public class ProductIndexer {
             if (embedding.vector() != null && embedding.vector().length > 0) {
                 validIds.add(pointIdOf(products.get(i).getId()));
                 validEmbeddings.add(embedding);
-                validSegments.add(segments.get(i));
+                validSegments.add(indexedSegments.get(i).forPayload());
             } else {
                 log.warn("商品 '{}' 向量化为空，跳过索引", products.get(i).getName());
             }
@@ -280,13 +286,15 @@ public class ProductIndexer {
 
         // 构建 embedding 并以确定性 point id 写入：同 id 覆盖，天然幂等，无需先删旧点
         // 单条路径不预加载（传 null → 内部逐条回退查询），避免为一条商品建 Map 的开销
-        TextSegment segment = buildTextSegment(product, prices, null);
-        Embedding embedding = embeddingModel.embed(segment.text()).content();
+        IndexedSegments segments = buildSegments(product, prices, null);
+        // 注意：向量化吃的是 forEmbedding（五段式全文本），写库的是 forPayload（仅商品名）
+        Embedding embedding = embeddingModel.embed(segments.forEmbedding().text()).content();
         if (embedding.vector() == null || embedding.vector().length == 0) {
             log.warn("商品 '{}' 向量化为空，跳过索引更新", product.getName());
             return;
         }
-        embeddingStore.addAll(List.of(pointIdOf(product.getId())), List.of(embedding), List.of(segment));
+        embeddingStore.addAll(List.of(pointIdOf(product.getId())), List.of(embedding),
+                List.of(segments.forPayload()));
         log.debug("商品索引更新完成, productId: {}", product.getId());
     }
 
@@ -339,14 +347,52 @@ public class ProductIndexer {
     }
 
     /**
-     * 构建索引文本（供 embedding 用）
+     * 一条商品对应的两个索引片段：{@code forEmbedding} 送向量化，{@code forPayload} 写进 Qdrant payload。
+     * <p>
+     * ⚠️ 二者**必须成对构造**（同一个 metadata，只差文本），这是「只召回 ID + 回查」改造后
+     * 唯一允许二者分家的地方；散落构造会有让 payload 文本被误当作向量化输入的隐患。
+     *
+     * @param forEmbedding 向量化输入：五段式拼接文本（**严禁改动**，见 {@link #buildEmbeddingText}）
+     * @param forPayload   写入 payload 的文本：仅商品名（仅供排查时认点，检索侧不消费）
+     */
+    private record IndexedSegments(TextSegment forEmbedding, TextSegment forPayload) {
+    }
+
+    /**
+     * 构建商品的索引片段对（向量化文本 + payload 文本，共享同一份元数据）
+     *
+     * @param product 商品
+     * @param prices  SKU 价格区间
+     * @param lookup  批量预加载上下文；null 时逐条回退查询
+     * @return 索引片段对
+     */
+    private IndexedSegments buildSegments(ProductDO product, BigDecimal[] prices, IndexLookup lookup) {
+        Map<String, Object> metadata = toMetadataMap(product, prices);
+        return new IndexedSegments(
+                TextSegment.from(buildEmbeddingText(product, lookup), Metadata.from(metadata)),
+                TextSegment.from(safe(product.getName()), Metadata.from(metadata)));
+    }
+
+    /**
+     * 构建**向量化输入**文本（五段式拼接：名称/描述/品牌/分类/详情）
+     * <p>
+     * ⚠️⚠️ <b>此方法的输出直接决定语义召回质量，严禁改动拼接内容与顺序。</b>
+     * <p>
+     * 它与「写入 payload 的文本」（{@link #buildSegments} 中的 {@code forPayload}，仅商品名）
+     * 是**两件不同的事**，2026-10 的「只召回 ID + 回查」改造把二者拆开了：
+     * <ul>
+     *   <li>本方法 → 送 {@code embeddingModel.embedAll()} 算向量（语义检索的全部依据）</li>
+     *   <li>payload 文本 → 只写进 Qdrant payload 的 {@code text_content}，检索侧不消费，仅供排查认点</li>
+     * </ul>
+     * 若把本方法也改成「仅商品名」，召回质量会**断崖式下跌**，且评估指标不会立刻报警（劣化是渐进的）。
+     * 改这里之前先确认调用方。
      *
      * @param product 商品
      * @param lookup  批量预加载上下文；传 null 时逐条回退查询
      *                （单条增量索引路径 {@link #addOrUpdate(ProductDO)} 用）
-     * @return 索引文本
+     * @return 五段式索引文本
      */
-    private String buildIndexText(ProductDO product, IndexLookup lookup) {
+    private String buildEmbeddingText(ProductDO product, IndexLookup lookup) {
         String categoryName = lookup != null
                 ? nameOf(lookup.categoryNames(), product.getCategoryId())
                 : resolveCategoryName(product.getCategoryId());
@@ -371,19 +417,6 @@ public class ProductIndexer {
      */
     private static String nameOf(Map<Long, String> nameMap, Long id) {
         return id == null ? "" : nameMap.getOrDefault(id, "");
-    }
-
-    /**
-     * 构建带元数据的 TextSegment
-     *
-     * @param product 商品
-     * @param prices  SKU 价格区间
-     * @param lookup  批量预加载上下文；null 时逐条回退查询
-     * @return TextSegment
-     */
-    private TextSegment buildTextSegment(ProductDO product, BigDecimal[] prices, IndexLookup lookup) {
-        return TextSegment.from(buildIndexText(product, lookup),
-                Metadata.from(toMetadataMap(product, prices)));
     }
 
     /**

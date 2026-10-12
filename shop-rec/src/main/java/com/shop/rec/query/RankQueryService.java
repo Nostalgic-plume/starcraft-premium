@@ -195,7 +195,11 @@ public class RankQueryService {
         List<RankedItem> hotItems = hotRankItems();
         RankVO vo = new RankVO();
         vo.setSnapshotId(null);
-        vo.setDegraded(DegradeState.GUEST.getText());
+        // 热门榜单也为空（热度榜与兜底名单均不可用，如计算侧尚未产出热度）时标记上游兜底，
+        // 由商城后端切换到原生热销榜——本系统不允许对外返回空列表
+        vo.setDegraded(hotItems.isEmpty()
+                ? DegradeState.UPSTREAM_FALLBACK.getText()
+                : DegradeState.GUEST.getText());
         vo.setPageNum(query.normalizePageNum());
         vo.setPageSize(query.normalizePageSize());
         vo.setTotal(hotItems.size());

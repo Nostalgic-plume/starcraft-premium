@@ -85,6 +85,14 @@ rec:
     delivery-timeout-ms: 50        # 单条事件投递超时（毫秒），对应详细设计 3.1 步骤 8
     retries: 3                     # 生产者重试次数，对应详细设计 3.1「重试 3 次」
 
+  # 推荐服务调用参数（商城后端作为唯一调用方）
+  # internal-token 必须与推荐服务侧的 rec.internal-token 一致，双方均从环境变量注入；
+  # 未配置时推荐服务会拒绝内部调用，首页榜单自动降级为商城原生热销榜。
+  proxy:
+    base-url: ${REC_SERVICE_URL:http://127.0.0.1:8082}
+    internal-token: ${REC_INTERNAL_TOKEN:}
+    timeout-millis: 1000           # 比推荐服务自身 800ms 预算略宽，留出网络与序列化开销
+
 mybatis-plus:
   mapper-locations: classpath:mapper/**/*.xml
   type-aliases-package: com.shop.model.entity

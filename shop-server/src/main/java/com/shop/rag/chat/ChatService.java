@@ -2,9 +2,11 @@ package com.shop.rag.chat;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.shop.common.BusinessException;
 import com.shop.mapper.CategoryMapper;
 import com.shop.mapper.ProductMapper;
 import com.shop.model.entity.CategoryDO;
+import com.shop.model.entity.ChatConversationDO;
 import com.shop.model.entity.ChatMessageDO;
 import com.shop.model.entity.ProductDO;
 import com.shop.model.vo.OrderVO;
@@ -460,10 +462,48 @@ public class ChatService {
 
     /**
      * 清理会话（对话结束或超时后调用）
-     * V1 无内存记忆缓存（每轮从 MySQL store 重建窗口），清空会话历史留待 V2
+     * <p>
+     * ⚠️ {@code userId} 必须由调用方从**登录态**传入，不可取自请求参数。
+     * {@code conversationId} 由前端生成并随请求传入，若不比对归属，
+     * 任何持有（或猜到）该 ID 的请求方都能清空他人的对话历史（IDOR）。
+     * 校验放在本方法入口而非 Controller：签名强制要求 userId，
+     * 后续实现「真正清空历史」时无法绕过这道校验。
+     * <p>
+     * V1 无内存记忆缓存（每轮从 MySQL store 重建窗口），清空会话历史留待 V2。
+     *
+     * @param conversationId 会话 ID（前端生成）
+     * @param userId         当前登录用户 ID（服务端从登录态取得）
+     * @throws BusinessException 会话不存在或不属于该用户
      */
-    public void clearConversation(String conversationId) {
-        // 保留方法签名兼容 ChatController 调用，V1 无内存态可清
+    public void clearConversation(String conversationId, Long userId) {
+        Long convId = parseConversationId(conversationId);
+        ChatConversationDO conv = convId == null ? null : chatHistoryService.getConversation(convId);
+        // 非法 ID 与「会话不存在/不属于你」统一按同一句拒绝 ——
+        // 不让请求方通过响应差异探测某个会话 ID 是否存在、格式是否合法
+        if (conv == null || !conv.getUserId().equals(userId)) {
+            throw new BusinessException("无权访问该会话");
+        }
+        // V1 无内存态可清；V2 在此清空会话历史（归属已校验）
+    }
+
+    /**
+     * 解析会话 ID 文本
+     * <p>
+     * conversationId 由前端生成，可能不是数字串（如前端兜底值 {@code "default"}）；
+     * 解析失败返回 null，由调用方按「会话不存在」处理，避免抛出 NumberFormatException 变成 500。
+     *
+     * @param conversationId 前端传入的会话 ID 文本
+     * @return 会话 ID；格式非法时返回 null
+     */
+    private static Long parseConversationId(String conversationId) {
+        if (conversationId == null || conversationId.isBlank()) {
+            return null;
+        }
+        try {
+            return Long.valueOf(conversationId);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /**

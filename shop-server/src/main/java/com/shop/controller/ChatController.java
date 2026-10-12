@@ -76,6 +76,9 @@ public class ChatController {
     /**
      * 清除指定会话的对话记忆
      * 用于重置聊天上下文，之后提问不再携带历史信息
+     * <p>
+     * 会话归属校验在 {@link ChatService#clearConversation} 内强制：conversationId 由前端传入，
+     * 必须先比对登录用户再操作，否则任何请求方拿到该 ID 即可清空他人的对话历史。
      *
      * @param body 请求体：conversationId 为会话ID（可空，默认 default）
      * @return 操作成功提示
@@ -83,8 +86,10 @@ public class ChatController {
     @PostMapping("/clear")
     @Operation(summary = "清除对话记忆")
     public Result<Void> clearConversation(@RequestBody Map<String, String> body) {
+        // AI 客服为登录后功能：未登录抛 NotLoginException（GlobalExceptionHandler 统一返回 401）
+        long userId = StpUserUtil.INSTANCE.getLoginIdAsLong();
         String conversationId = body.getOrDefault("conversationId", "default");
-        chatService.clearConversation(conversationId);
+        chatService.clearConversation(conversationId, userId);
         return Result.success();
     }
 

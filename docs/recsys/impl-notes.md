@@ -122,7 +122,16 @@ Kafka 的幂等生产者**强制要求 `acks=all`**，配置为 `acks=1` 会在�
 | named volume 与 Flink 冲突 | JobManager 创建 `{检查点目录}/{jobId}/shared` 失败，而容器内手工 `mkdir` 正常 | Flink 检查点目录不挂 named volume，改用容器内路径；如需跨容器持久化改用 bind mount |
 | 容器内访问中间件 | Flink 容器连不上宿主机的 `127.0.0.1:9092` | Kafka 配双 listener：容器内客户端走 `kafka:9093`（INTERNAL 通告地址），宿主机客户端走 `127.0.0.1:9092`；Redis 用 compose 服务名 `redis:6379` |
 
-### 5.2 Flink 作业提交命令
+### 5.2 MyBatis-Plus 使用陷阱
+
+| 坑 | 现象 | 处理 |
+|---|---|---|
+| 自定义 `@Select` 不应用 `autoResultMap` | 画像表的 `category_pref` / `brand_pref` 是 JSON 列，用 `@Select` 查出恒为 null（数据库里其实有值，导致「画像有无偏好」判断得出错误结论） | `@TableName(autoResultMap = true)` 与 `typeHandler` **只对 BaseMapper 的内置方法生效，自定义 `@Select` 不应用它**。解法：要么用 `@Results` 显式指定 typeHandler，要么改用 Wrapper 查询。本工程采用后者 |
+| 缺 `MetaObjectHandler` 导致插入 null | 实体 `createTime` 标了 `@TableField(fill = INSERT)`，MyBatis-Plus 会**强制把该字段写进 INSERT 语句**；推荐服务进程加载不到商城的 `MyMetaObjectHandler`（它在 `com.shop.config`），于是插入 null 覆盖了表上的 `DEFAULT CURRENT_TIMESTAMP`，报 `Column 'create_time' cannot be null` | 推荐模块自带 `RecMetaObjectHandler`。**必须用 `@Profile("rec")` 隔离**：商城后端进程会加载推荐模块（为启用 M-01），若不加 profile 容器内会同时存在两个同类型 Bean，`RecDataSourceConfig` 的可选注入在多个候选时会抛 `NoUniqueBeanDefinitionException` |
+
+> 教训：**「数据库有 DEFAULT 兜底」不成立**——只要实体字段带了 `fill` 注解，插入语句就会显式包含该列。
+
+### 5.3 Flink 作业提交命令
 
 ```bash
 # 1) 打包作业（在 shop-rec-flink 目录）

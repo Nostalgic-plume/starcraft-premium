@@ -139,4 +139,66 @@ public class SkuPriceResolver {
             return Map.of();
         }
     }
+
+    /**
+     * 批量解析商品快照（价格区间 + 总库存，一次查询取全）
+     * <p>
+     * 用于「检索结果富化」：既需要价格区间展示，又需要总库存判定可售性，
+     * 若分成 {@link #resolve} + {@link #resolveStock} 两次调用会重复查一次 sku 表。
+     * <p>
+     * ⚠️ 与 {@link #resolve} 的语义差异（易踩）：本方法**只要查到 SKU 就放进 Map**，
+     * {@code minPrice}/{@code maxPrice} 允许为 null；而 {@code resolve} 要求价格非空才放入。
+     * 售罄判定依赖「查得到的 SKU 才可能售罄」这一语义，若沿用 {@code resolve} 的过滤条件，
+     * 「有 SKU 但无价格」的商品会被漏判成「无 SKU」而被放行。
+     * <p>
+     * 异常处理与 {@link #resolveStock} 一致：内部消化并返回空 Map，调用方无需 try/catch。
+     *
+     * @param productIds 商品 ID 列表（可为 null / 空）
+     * @return productId → 聚合快照；无 SKU 的商品不在 Map 中；查询异常时返回空 Map
+     */
+    public Map<Long, SkuSnapshot> resolveSnapshot(List<Long> productIds) {
+        if (CollUtil.isEmpty(productIds)) {
+            return Map.of();
+        }
+
+        try {
+            List<SkuDO> skus = skuMapper.selectList(
+                    new LambdaQueryWrapper<SkuDO>()
+                            .in(SkuDO::getProductId, productIds)
+                            .select(SkuDO::getProductId, SkuDO::getPrice, SkuDO::getStock));
+            if (CollUtil.isEmpty(skus)) {
+                return Map.of();
+            }
+
+            Map<Long, List<SkuDO>> grouped = skus.stream()
+                    .filter(Objects::nonNull)
+                    .filter(sku -> sku.getProductId() != null)
+                    .collect(Collectors.groupingBy(SkuDO::getProductId));
+
+            Map<Long, SkuSnapshot> snapshotMap = new HashMap<>();
+            for (Map.Entry<Long, List<SkuDO>> entry : grouped.entrySet()) {
+                List<SkuDO> group = entry.getValue();
+                BigDecimal min = group.stream()
+                        .map(SkuDO::getPrice)
+                        .filter(Objects::nonNull)
+                        .min(BigDecimal::compareTo)
+                        .orElse(null);
+                BigDecimal max = group.stream()
+                        .map(SkuDO::getPrice)
+                        .filter(Objects::nonNull)
+                        .max(BigDecimal::compareTo)
+                        .orElse(null);
+                int totalStock = group.stream()
+                        .map(SkuDO::getStock)
+                        .filter(Objects::nonNull)
+                        .mapToInt(Integer::intValue)
+                        .sum();
+                snapshotMap.put(entry.getKey(), new SkuSnapshot(min, max, totalStock));
+            }
+            return snapshotMap;
+        } catch (Exception e) {
+            log.warn("SKU 快照查询异常，本次不做价格与库存富化: {}", e.getMessage());
+            return Map.of();
+        }
+    }
 }

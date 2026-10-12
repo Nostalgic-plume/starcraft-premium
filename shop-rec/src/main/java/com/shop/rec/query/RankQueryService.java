@@ -8,6 +8,7 @@ import com.shop.rec.fusion.model.FilterResult;
 import com.shop.rec.item.ItemDataService;
 import com.shop.rec.mall.mapper.MallProductMapper;
 import com.shop.rec.mall.model.MallProductDisplayDO;
+import com.shop.rec.metric.MetricService;
 import com.shop.rec.query.model.RankItemVO;
 import com.shop.rec.query.model.RankQuery;
 import com.shop.rec.query.model.RankSnapshot;
@@ -79,6 +80,8 @@ public class RankQueryService {
 
     private final RecRedis recRedis;
 
+    private final MetricService metricService;
+
     /**
      * 查询个性化榜单
      *
@@ -87,6 +90,22 @@ public class RankQueryService {
      * @return 榜单结果（任何情况下 items 均尽量非空）
      */
     public RankVO query(Long userId, RankQuery query) {
+        long start = System.currentTimeMillis();
+        RankVO result = doQuery(userId, query);
+        // 指标埋点（M-10）：记录请求总耗时与最终降级状态，失败不影响业务
+        metricService.recordStageCost("total", System.currentTimeMillis() - start);
+        metricService.recordDegrade(result.getDegraded());
+        return result;
+    }
+
+    /**
+     * 榜单查询主体
+     *
+     * @param userId 用户标识；为 null 表示游客
+     * @param query  查询参数
+     * @return 榜单结果
+     */
+    private RankVO doQuery(Long userId, RankQuery query) {
         long start = System.currentTimeMillis();
 
         // 身份判定：游客直接返回热门榜单，不进入个性化流程

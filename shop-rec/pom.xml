@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.shop</groupId>
+        <artifactId>shop</artifactId>
+        <version>1.0.0</version>
+    </parent>
+
+    <artifactId>shop-rec</artifactId>
+    <name>shop-rec</name>
+    <description>推荐子系统：行为采集、实时特征、召回排序、策略配置（可独立启动为推荐服务进程 8082）</description>
+
+    <!--
+        双重身份说明：
+        1. 作为库被 shop-server 依赖 —— 使 M-01 行为上报入口（com.shop.rec.collect 下的 Controller）
+           能在商城后端进程中被组件扫描到，其内嵌部署符合设计（概要设计 2.3「M-01 内嵌商城后端」）；
+        2. 作为独立服务启动 —— RecApplication 仅扫描 com.shop.rec 包，承载 M-03~M-10。
+
+        因此 spring-boot-maven-plugin 使用 classifier=exec：
+          - 默认 jar（shop-rec-1.0.0.jar）    —— 普通库 jar，可被 shop-server 正常依赖；
+          - exec jar（shop-rec-1.0.0-exec.jar）—— 可执行 jar，用于启动推荐服务。
+        若不加 classifier，repackage 会把默认 jar 替换为可执行 jar，导致它无法作为依赖使用。
+
+        注意：本模块不依赖 shop-server，与商城之间只通过「商城业务库只读」与消息队列交互。
+    -->
+    <dependencies>
+        <!-- 共享组件 -->
+        <dependency>
+            <groupId>com.shop</groupId>
+            <artifactId>shop-common</artifactId>
+        </dependency>
+
+        <!-- Spring Boot -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
+        <!-- 推荐库（shop_rec）读写 -->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba</groupId>
+            <artifactId>druid-spring-boot-3-starter</artifactId>
+        </dependency>
+
+        <!-- 管理后台接口鉴权（E-03 / E-04 / E-08） -->
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-spring-boot3-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-redis-jackson</artifactId>
+        </dependency>
+
+        <!-- 行为事件生产 -->
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+        </dependency>
+
+        <!-- 接口文档 -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+        </dependency>
+
+        <!-- 工具 -->
+        <dependency>
+            <groupId>cn.hutool</groupId>
+            <artifactId>hutool-all</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+        </dependency>
+
+        <!-- Test -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <version>3.2.12</version>
+                <configuration>
+                    <mainClass>com.shop.rec.RecApplication</mainClass>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+                <executions>
+                    <!--
+                        必须沿用父级预定义的 execution id（repackage）来覆盖它。
+                        spring-boot-starter-parent 已默认绑定一次 repackage 且不带 classifier，
+                        其行为是把「默认 jar」直接替换为可执行 jar —— 那样本模块就无法再被
+                        shop-server 依赖（fat jar 的类位于 BOOT-INF/classes，不可直接引用）。
+                        此处改为带 exec 分类器产出可执行 jar，默认 jar 保持为普通库 jar。
+                    -->
+                    <execution>
+                        <id>repackage</id>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                        <configuration>
+                            <classifier>exec</classifier>
+                            <mainClass>com.shop.rec.RecApplication</mainClass>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

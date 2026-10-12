@@ -2,7 +2,6 @@ package com.shop.rec.collect;
 
 import com.shop.common.BusinessException;
 import com.shop.common.StpUserUtil;
-import com.shop.mapper.ProductMapper;
 import com.shop.rec.common.RecRedis;
 import com.shop.rec.constant.BehaviorTypes;
 import com.shop.rec.constant.RecConfigKeys;
@@ -23,6 +22,7 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
+import java.util.Map;
 
 /**
  * 行为采集编排（M-01）
@@ -52,8 +52,6 @@ public class BehaviorCollectService {
     private final BehaviorEventProducer eventProducer;
 
     private final BehaviorLogService behaviorLogService;
-
-    private final ProductMapper productMapper;
 
     private final RecRedis recRedis;
 
@@ -129,14 +127,27 @@ public class BehaviorCollectService {
     }
 
     /**
-     * 商品存在性校验
+     * 商品可售性校验
+     *
+     * <p>读取推荐库的商品可售状态缓存（{@code rec:item:state:{itemId}}，由 M-04 维护）。
+     *
+     * <p><b>缓存未命中时放行</b>：该键随商品变更主动失效且有 1 天有效期，缓存缺失属正常状态
+     * （M-04 刷新周期内或键刚过期）。此时放行可避免误杀正常行为；下架与售罄商品的最终拦截
+     * 由融合过滤环节（M-06）承担，不依赖本环节。这样也让行为采集不耦合商城业务库——
+     * 推荐模块与商城模块之间只保留「只读商城库」这一条数据通道。
      *
      * @param itemId 商品标识
-     * @throws BusinessException 商品不存在或已删除时抛出（错误码 1003）
+     * @throws BusinessException 缓存命中且确认不可售时抛出（错误码 1003）
      */
     private void checkItemExists(Long itemId) {
-        if (productMapper.selectById(itemId) == null) {
-            throw new BusinessException(RecErrorCode.ITEM_NOT_FOUND, "商品不存在或已删除");
+        Map<Object, Object> itemState = recRedis.hgetAll(RecRedisKeys.itemState(itemId));
+        if (itemState.isEmpty()) {
+            return;
+        }
+        String status = String.valueOf(itemState.get(RecRedisKeys.ITEM_STATE_FIELD_STATUS));
+        String stock = String.valueOf(itemState.get(RecRedisKeys.ITEM_STATE_FIELD_STOCK));
+        if (!RecRedisKeys.ITEM_STATUS_ON_SALE.equals(status) || "0".equals(stock)) {
+            throw new BusinessException(RecErrorCode.ITEM_NOT_FOUND, "商品已下架或售罄");
         }
     }
 

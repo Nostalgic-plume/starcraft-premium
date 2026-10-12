@@ -58,8 +58,7 @@ cd frontend            && npm run build
 cd frontend-admin      && npm run build
 cd frontend-merchant   && npm run build
 
-# 3. Nginx：已由步骤 0 的 compose 提供（shop-nginx 容器，监听 80）
-#    不用 Docker 时可改本地 nginx.exe：cd shop/deploy && nginx.exe -c conf/nginx.conf -p .
+# 3. Nginx：已由步骤 0 的 compose 提供（shop-nginx 容器，监听 80，配置 docker/nginx/nginx.conf）
 ```
 
 | 地址 | 页面 | 默认账号 |
@@ -92,7 +91,7 @@ shop/
 ├── frontend/                   # 用户端 Vue 3
 ├── frontend-admin/             # 管理后台 Vue 3
 ├── frontend-merchant/          # 商家中心 Vue 3
-└── deploy/                     # Nginx + 静态资源
+└── docker/                     # Nginx / ES / RocketMQ 容器配置
 
 独立项目：shop-data-mocker（Mock 数据工具）
 ```

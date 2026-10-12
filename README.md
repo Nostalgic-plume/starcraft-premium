@@ -7,7 +7,7 @@
 | 后端 | 数据库 & 中间件 | 前端 | AI / 大数据 |
 |------|---------------|------|------------|
 | Spring Boot 3.2.12 | MySQL 8 + Redis | Vue 3 + Vite | LangChain4j + Qdrant |
-| MyBatis-Plus 3.5.5 | Nginx 1.20.2 | Naive UI + Pinia | DashScope qwen-plus |
+| MyBatis-Plus 3.5.5 | Nginx 1.20.2 (Docker) | Naive UI + Pinia | DashScope qwen-plus |
 | Sa-Token 1.45.0 | — | ECharts | Hive + Sqoop + Azkaban |
 
 ## 功能概览
@@ -44,8 +44,8 @@ cd frontend-merchant && npm run build
 # 启动后端
 mvn spring-boot:run
 
-# 启动 Nginx（部署用）
-cd deploy && nginx.exe -c conf/nginx.conf -p .
+# 启动 Nginx（Docker 容器 shop-nginx，监听 :80，配置取 docker/nginx/nginx.conf）
+docker compose up -d nginx
 ```
 
 ## 访问地址
@@ -74,6 +74,7 @@ shop/
 ├── frontend/          # 用户端（Vue 3）
 ├── frontend-admin/    # 管理后台（Vue 3）
 ├── frontend-merchant/ # 商家中心（Vue 3）
+├── docker/            # Nginx / ES / RocketMQ 容器配置
 └── azkaban/           # 离线数仓调度
 ```
 

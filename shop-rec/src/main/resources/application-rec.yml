@@ -1,0 +1,105 @@
+# 推荐服务（M-03~M-10）专属配置
+#
+# 命名遵循 Spring Boot profile 约定：仅当 rec profile 激活时加载，即由
+# com.shop.rec.RecApplication 启动时读取（该启动类内部强制 setAdditionalProfiles("rec")）；
+# 商城后端 ShopApplication 不激活 rec profile，故不会加载本文件。
+#
+# ⚠️ 本模块刻意不提供 application.yml：shop-server 依赖 shop-rec 时会把本模块的
+#    resources 一并带入其 classpath，若此处存在 application.yml 会与商城后端的同名文件
+#    冲突（Spring Boot 只加载 classpath 上命中的第一个，结果不确定）。
+#    故推荐服务的全部配置统一收敛在本 profile 文件内。
+#
+# 部署约定见《详细设计说明书》8.1：推荐服务为独立进程，端口 8082，仅绑定回环地址。
+
+server:
+  port: 8082
+  address: 127.0.0.1          # 仅绑定回环地址：身份判定依赖请求头透传，必须限制来源
+  shutdown: graceful          # 优雅停机，避免批任务被强杀导致状态不一致
+
+spring:
+  application:
+    name: shop-rec
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+  # 推荐服务同为纯 API 服务，无静态资源（前端由 Nginx 托管）
+  web:
+    resources:
+      add-mappings: false
+  mvc:
+    throw-exception-if-no-handler-found: true
+
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+
+  # 缓存/会话（RecRedis 使用）；与商城后端共用同一 Redis 实例
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 0
+      timeout: 3000ms
+      password: ${REDIS_PASSWORD:}
+
+# ====== 推荐子系统运行参数（rec.*）======
+rec:
+  # 内部调用凭证：商城后端调用推荐服务时通过请求头 X-Internal-Token 携带。
+  # 必须通过环境变量注入，无默认值；未配置时内部调用一律被拒绝并记录告警（防呆）。
+  internal-token: ${REC_INTERNAL_TOKEN:}
+  # 商城后端基础地址（推荐服务回查商城数据时使用）
+  shop-base-url: ${SHOP_BASE_URL:http://127.0.0.1:8080}
+
+  # 推荐库数据源（shop_rec）：与商城业务库物理分离，账号密码支持独立环境变量注入。
+  # ⚠️ 同一份配置在 shop-server/src/main/resources/application.yml 中也有一份：
+  #    RecDataSourceConfig 未标注 @Profile，商城后端进程（内嵌 M-01 行为采集）同样会加载它，
+  #    故两个进程各自需要一份。修改任一处时请同步另一处。
+  datasource:
+    url: jdbc:mysql://localhost:3306/shop_rec?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${REC_DB_USERNAME:${DB_USERNAME:root}}
+    password: ${REC_DB_PASSWORD:${DB_PASSWORD}}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    initial-size: 2                 # 推荐库并发量低于商城库，连接池规模相应收敛
+    min-idle: 2
+    max-active: 10
+    max-wait: 60000
+    validation-query: SELECT 1
+    test-while-idle: true
+    test-on-borrow: false
+    test-on-return: false
+
+  # 行为事件流（Kafka，KRaft 单节点）；订单链路仍走 RocketMQ，两套并存互不影响
+  # 同上：商城后端（M-01 生产端）也需要这份配置
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:127.0.0.1:9092}
+    user-behavior-topic: user-behavior
+    delivery-timeout-ms: 50        # 单条事件投递超时（毫秒），对应详细设计 3.1 步骤 8
+    retries: 3                     # 生产者重试次数，对应详细设计 3.1「重试 3 次」
+
+mybatis-plus:
+  mapper-locations: classpath:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+# 管理后台鉴权（E-03 / E-04 / E-08）与商城后端保持同一套 Sa-Token 约定
+sa-token:
+  token-name: token
+  is-read-cookie: false
+  is-write-cookie: false
+  dao-type: redis
+  timeout: 2592000
+  active-timeout: -1
+  is-concurrent: true
+  is-share: true
+  token-style: uuid
+  is-log: false
+
+logging:
+  level:
+    com.shop.rec: info

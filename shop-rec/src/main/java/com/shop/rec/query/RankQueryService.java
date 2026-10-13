@@ -249,8 +249,9 @@ public class RankQueryService {
                 if (tuple.getValue() == null) {
                     continue;
                 }
+                // 走热度榜的是热门召回结果，标 HOT；只有退到兜底名单时才标 FALLBACK
                 items.add(new RankedItem(parseLong(tuple.getValue()),
-                        RecallCandidate.SOURCE_FALLBACK,
+                        RecallCandidate.SOURCE_HOT,
                         tuple.getScore() == null ? 0D : tuple.getScore(),
                         false));
             }

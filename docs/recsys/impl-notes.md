@@ -145,3 +145,92 @@ docker exec shop-flink-jm flink run -d -c com.shop.rec.flink.FeatureJob /tmp/sho
   --kafka.bootstrap kafka:9093 \
   --redis.host redis --redis.port 6379 --redis.password "$REDIS_PASSWORD"
 ```
+
+---
+
+## 6 前端接入与管理后台（T7）
+
+### 6.1 用户端：榜单区块与行为埋点
+
+**榜单区块的位置**：作为独立区块插在 Hero 与「分类 + 商品」之间，而不是替换原有商品网格。
+商品网格承载分类筛选与搜索（走 `/api/product/page`），而榜单接口不支持按分类筛选，
+直接替换会让这两条功能一起失效。
+
+**埋点的四条硬约束**（`frontend/src/utils/behaviorTracker.ts`）：
+
+1. **必须绕开统一请求封装**。`shared/js/createRequest` 的响应拦截器会对任何失败弹全局错误提示，
+   并在 401 时清除登录态、跳转登录页。埋点走这条通道会出现「用户正在浏览商品却被登出」。
+   故埋点用原生 fetch 自建请求——与 Home.vue 既有的 `traceClick` 做法一致。
+2. **重试必须复用同一份载荷**。`eventId` 与 `eventTime` 只能构造一次；若在递归重试时重新生成，
+   服务端会把它当作新事件，幂等去重失效并产生重复数据。
+3. **4xx 不重试**。参数非法、未登录这类失败重试不会成功；只有 5xx 与网络异常才按上限重试。
+4. **详情页要监听路由参数**。`/product/1 → /product/2` 时组件实例被复用、不触发 `onUnmounted`，
+   不补 `watch` 的话上一个商品的浏览时长永远不会结算。
+
+**快照语义**（`RecRankList.vue`）：首屏与「换一批」不传 `snapshotId`，由服务端按当前实时特征重算；
+仅「加载更多」回传首屏返回的 `snapshotId`。首屏若也复用旧快照，「行为产生后 5 秒影响推荐」
+会在快照有效期内失效。
+
+### 6.2 商城后端代理
+
+`nativeRank`（上游兜底）原先只返回商品标识、名称与主图，**缺 `price`**——降级期间首页会出现
+整屏 ¥0，违背「降级结果与正常结果结构一致」的约定。已复用 RAG 侧的 `SkuPriceResolver`
+（SKU 维度聚合的唯一来源）批量补齐最低价。
+
+### 6.3 管理后台：5 页与路由打通
+
+**管理接口的进程归属**：策略配置、坑位、过滤规则、画像版本、运行指标这些 Controller 全部是
+`@Profile("rec")`，只存在于推荐服务进程（8082）；商城后端没有这些 Bean。而管理后台的 vite 代理
+原先只有 `/api → 8080`，直接请求会全部 404。
+
+解决办法是在 `frontend-admin/vite.config.ts` 增加 `/api/rec → 8082`，**且必须声明在 `/api` 之前**
+——vite 按声明顺序做前缀匹配，顺序颠倒会被前缀更短的规则全部截走。
+
+鉴权无需额外透传：两个进程共用同一 Redis 实例与同一套 Sa-Token 约定
+（见 `shop-rec/src/main/resources/application-rec.yml`），管理后台登录态在 8082 同样可验证。
+⚠️ **生产环境 Nginx 需配同样的转发规则**。
+
+### 6.4 补上的两处后端缺口
+
+- **画像版本列表**：原先只有 `POST /{userId}/rollback`，没有任何查询接口——运营无从得知有哪些版本
+  可回滚，「支持回滚」在界面上根本落不了地。补 `GET /{userId}/versions`。
+- **指标查询**：M-10 原先只写不读，运行看板没有数据来源。补 `RecMetricController`
+  （`/catalog` 返回指标定义，`/metrics` 返回明细）。
+
+### 6.5 三个真实缺陷
+
+**① 推荐服务缺 Long → String 序列化（高危）**
+
+各表主键用雪花算法（`IdType.ASSIGN_ID`，19 位），超出 JS 的 `Number.MAX_SAFE_INTEGER`（2^53-1）。
+以 JSON number 下发时前端 `JSON.parse` 会丢末尾精度——榜单里的商品标识一旦失真，
+用户点击卡片跳详情页**必然 404**，且浏览器控制台不报任何异常，排查成本极高。
+
+商城后端早在 `WebConfig` 配了 `ToStringSerializer`；推荐服务是独立进程、不加载那套 Bean，
+故新增 `RecJacksonConfig` 单独声明一份。
+
+顺带修正：`application-rec.yml` 里的 `spring.jackson.date-format` 只作用于 `java.util.Date`，
+对 `LocalDateTime` 无效，改为显式注册 `LocalDateTimeSerializer`。
+
+**② 比率类指标不可求和**
+
+指标明细是「每次请求写一条」（`stat_time` 截到整点），同一小时内同一指标会有多条。
+若按求和展示，特征覆盖率会得出「85% + 90% = 175%」这类荒谬值。
+已在指标定义中增加 `aggregation`（sum/avg），由后端声明聚合方式，前端照做。
+
+> ⚠️ **遗留**：`MetricService.aggregateHourly` 的每小时汇总任务对**所有**指标一律 `SUM`，
+> 比率类同样受影响。本轮未动——修正它涉及汇总口径的设计（需要样本数才能还原比率），
+> 不是简单换个函数。
+
+**③ 埋点 `eventId` 的随机源**
+
+原用 `Math.random()`，改用 `crypto.randomUUID()`（非安全上下文时回退）。
+该标识只用于幂等去重、不是安全凭证，但原生 API 更可靠且改造成本为零。
+
+### 6.6 已知限制（未修复，已在界面如实标注）
+
+- **过滤规则的 `target_type` 只存不用**：`SlotRuleManageService.syncFilterList` 只按 `rule_type`
+  把 `target_value` 写入过滤集，而 `FusionFilterService` 一律按商品标识匹配。
+  因此配「排除类目 X」不会排除该类别下的任何商品。管理后台据此只提供「商品」维度并写明原因。
+- **`region_limit` / `member_only` / `low_quality` 三条规则无实际效果**：过滤判断已接入链路，
+  但其依赖的业务数据（地域、会员等级、质量分）商城侧未提供，属设计文档中「只保留通路」的范围。
+

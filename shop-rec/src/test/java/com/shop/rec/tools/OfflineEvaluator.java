@@ -184,8 +184,12 @@ public final class OfflineEvaluator {
      */
     private static Set<Long> loadItemUniverse(Connection connection) throws Exception {
         Set<Long> items = new HashSet<>();
+        // ⚠️ 必须用 shop. 限定库名：本脚本的 JDBC 连接指向推荐库 shop_rec，
+        //    而 product 表归属商城库 shop——不加前缀会报 Table 'shop_rec.product' doesn't exist。
+        //    两库当前位于同一 MySQL 实例（均为 localhost:3306），跨库限定即可；
+        //    若将来拆到不同实例，本方法需改为使用独立的商城库连接。
         try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT id FROM product WHERE deleted = 0 AND status = 1");
+                "SELECT id FROM shop.product WHERE deleted = 0 AND status = 1");
              ResultSet resultSet = statement.executeQuery()) {
             while (resultSet.next()) {
                 items.add(resultSet.getLong(1));

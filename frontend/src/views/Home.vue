@@ -162,6 +162,9 @@
       </div>
     </section>
 
+    <!-- ====== 推荐榜单（个性化，来自推荐子系统；不可达时后端返回原生热销榜） ====== -->
+    <RecRankList @add-cart="addToCart" />
+
     <!-- ====== 分类 + 商品区域 ====== -->
     <div class="shop-layout">
       <!-- 左侧分类 -->
@@ -301,8 +304,10 @@ import { categoryApi } from '@/api/category'
 import { useCartStore } from '@/stores/cart'
 import { useUserStore } from '@/stores/user'
 import ProductCard from '@/components/ProductCard.vue'
+import RecRankList from '@/components/RecRankList.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import SvgIcon from '@/components/SvgIcon.vue'
+import { trackAddCart } from '@/utils/behaviorTracker'
 import type { CategoryVO, ProductPageQuery, ProductVO } from '@/api/types'
 
 const cartStore = useCartStore()
@@ -567,6 +572,8 @@ async function addToCart(product: ProductVO) {
   try {
     await cartStore.addItem({ skuId: sku.id, quantity: 1 })
     message.success('已加入购物车')
+    // 加购行为埋点（静默旁路，失败不影响主流程；仅在真正加购成功后上报）
+    trackAddCart(product.id)
   } catch {
     // 错误提示由 axios 拦截器统一处理
   }

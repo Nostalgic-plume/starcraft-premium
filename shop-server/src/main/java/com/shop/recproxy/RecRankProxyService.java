@@ -9,15 +9,18 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.shop.mapper.ProductMapper;
 import com.shop.model.entity.ProductDO;
+import com.shop.rag.search.SkuPriceResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 榜单查询代理（商城后端侧）
@@ -58,6 +61,15 @@ public class RecRankProxyService {
     private final ProductMapper productMapper;
 
     private final ObjectMapper objectMapper;
+
+    /**
+     * SKU 维度聚合器（价格区间/库存的唯一来源）
+     *
+     * <p>原生兜底榜必须补齐价格：正常路径的价格由推荐服务从商城商品数据回填，兜底路径若不补，
+     * 降级期间首页会出现整屏 ¥0，违背「降级结果与正常结果结构一致」的约定（详细设计 3.2）。
+     * 此处复用 RAG 侧已提取的聚合器，避免再写一份「商品 → 最低价」的聚合逻辑造成两处漂移。
+     */
+    private final SkuPriceResolver skuPriceResolver;
 
     /**
      * 查询首页榜单
@@ -159,11 +171,18 @@ public class RecRankProxyService {
                     new LambdaQueryWrapper<ProductDO>()
                             .eq(ProductDO::getStatus, PRODUCT_STATUS_ON_SALE)
                             .orderByAsc(ProductDO::getId));
-            for (ProductDO product : productPage.getRecords()) {
+            List<ProductDO> records = productPage.getRecords();
+            // 批量补齐价格（一次查询，避免逐商品查询）
+            Map<Long, BigDecimal[]> priceMap = skuPriceResolver.resolve(
+                    records.stream().map(ProductDO::getId).collect(Collectors.toList()));
+            for (ProductDO product : records) {
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("itemId", product.getId());
                 item.put("itemName", product.getName());
                 item.put("mainImage", product.getMainImage());
+                BigDecimal[] range = priceMap.get(product.getId());
+                // 无 SKU 的商品取 0：与正常路径字段齐备的约定保持一致，前端按 ¥0 渲染而非留空
+                item.put("price", range == null ? BigDecimal.ZERO : range[0]);
                 item.put("recallSource", "NATIVE");
                 item.put("score", 0.0D);
                 items.add(item);

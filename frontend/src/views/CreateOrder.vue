@@ -167,6 +167,7 @@ import { orderApi } from '@/api/order'
 import { useCartStore } from '@/stores/cart'
 import BackBar from '@/components/BackBar.vue'
 import SvgIcon from '@/components/SvgIcon.vue'
+import { trackPurchase } from '@/utils/behaviorTracker'
 
 const route = useRoute()
 const router = useRouter()
@@ -204,6 +205,8 @@ function selectAddress(addr: AddressVO) {
 /** 确认订单商品行 */
 interface OrderLineItem {
   skuId: string
+  /** 商品标识：仅用于下单成功后的购买行为埋点（订单提交本身只需要 skuId） */
+  productId: string
   quantity: number
   productName: string
   skuName: string
@@ -259,6 +262,7 @@ function loadItems() {
       if (cart) {
         return {
           skuId: p.skuId,
+          productId: String(cart.productId || ''),
           quantity: p.quantity,
           productName: cart.productName,
           skuName: cart.skuName,
@@ -268,6 +272,7 @@ function loadItems() {
       }
       return {
         skuId: p.skuId,
+        productId: String(route.query.productId || ''),
         quantity: p.quantity,
         productName: String(route.query.productName || '商品'),
         skuName: String(route.query.skuName || '默认规格'),
@@ -281,6 +286,7 @@ function loadItems() {
   // 无 items query（直接进入本页兜底）：使用购物车勾选项
   orderItems.value = cartStore.selectedItems().map(i => ({
     skuId: String(i.skuId),
+    productId: String(i.productId || ''),
     quantity: i.quantity,
     productName: i.productName,
     skuName: i.skuName,
@@ -368,6 +374,13 @@ async function submitOrder() {
     // ③ 轮询直到拿到订单ID
     const orderId = await waitForOrderId(processingId)
     message.success('下单成功！请尽快支付')
+    // 购买行为埋点：下单成功即上报（购买是权重最高的兴趣信号）。
+    // 每行按商品上报一次；缺 productId 的行（如历史链接未携带）跳过，不阻塞跳转。
+    orderItems.value.forEach(i => {
+      if (i.productId) {
+        trackPurchase(i.productId)
+      }
+    })
     router.push('/order/' + orderId)
   } catch (e) {
     const err = e as Error

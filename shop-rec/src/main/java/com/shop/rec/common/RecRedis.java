@@ -1,10 +1,13 @@
 package com.shop.rec.common;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -28,6 +31,12 @@ import java.util.concurrent.TimeUnit;
 @Component
 @RequiredArgsConstructor
 public class RecRedis {
+
+    /** SCAN 单次返回键数量的提示值（Redis 仅作参考，不保证精确） */
+    private static final long SCAN_COUNT_HINT = 500L;
+
+    /** 单批删除的键数量：分批提交，避免一次构造过大的删除命令 */
+    private static final int DELETE_BATCH_SIZE = 500;
 
     private final StringRedisTemplate redisTemplate;
 
@@ -325,5 +334,48 @@ public class RecRedis {
      */
     public boolean delete(String key) {
         return Boolean.TRUE.equals(redisTemplate.delete(key));
+    }
+
+    /**
+     * 按模式批量删除键
+     *
+     * <p><b>用 SCAN 游标遍历而非 KEYS</b>：Redis 是单线程的，{@code KEYS} 会一次性遍历整个
+     * 键空间并在遍历期间阻塞所有其它命令——键多了就是把整个服务卡住。
+     * SCAN 分批返回、可与其他命令交错执行，代价是<b>不保证同一时刻的完整快照</b>：
+     * 遍历期间新增的键可能被漏掉。本方法的用途是「重建前清空旧的状态缓存」，
+     * 个别漏网之键随即被全量重写覆盖，语义上可接受。
+     *
+     * @param pattern 键模式，如 rec:item:state:*
+     * @return 实际删除的键数量
+     */
+    public long deleteByPattern(String pattern) {
+        long deleted = 0L;
+        List<String> batch = new ArrayList<>(DELETE_BATCH_SIZE);
+        ScanOptions options = ScanOptions.scanOptions().match(pattern).count(SCAN_COUNT_HINT).build();
+        try (Cursor<String> cursor = redisTemplate.scan(options)) {
+            while (cursor.hasNext()) {
+                batch.add(cursor.next());
+                if (batch.size() >= DELETE_BATCH_SIZE) {
+                    deleted += deleteBatch(batch);
+                }
+            }
+        }
+        deleted += deleteBatch(batch);
+        return deleted;
+    }
+
+    /**
+     * 批量删除一批键并清空列表
+     *
+     * @param keys 待删除的键（方法内会清空该列表）
+     * @return 删除的键数量
+     */
+    private long deleteBatch(List<String> keys) {
+        if (keys.isEmpty()) {
+            return 0L;
+        }
+        Long removed = redisTemplate.delete(keys);
+        keys.clear();
+        return removed == null ? 0L : removed;
     }
 }

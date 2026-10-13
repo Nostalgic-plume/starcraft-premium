@@ -19,6 +19,12 @@ const routes: RouteRecordRaw[] = [
       { path: 'users', name: 'Users', component: () => import('@/views/Users.vue'), meta: { title: '用户管理' } },
       { path: 'categories', name: 'Categories', component: () => import('@/views/Categories.vue'), meta: { title: '分类管理' } },
       { path: 'rag-index', name: 'RagIndex', component: () => import('@/views/RagIndex.vue'), meta: { title: '索引管理' } },
+      // ====== 推荐子系统（接口由推荐服务进程 8082 提供，vite 以 '/api/rec' 代理直达）======
+      { path: 'rec-config', name: 'RecConfig', component: () => import('@/views/RecConfig.vue'), meta: { title: '推荐策略配置' } },
+      { path: 'rec-slots', name: 'RecSlots', component: () => import('@/views/RecSlots.vue'), meta: { title: '固定坑位' } },
+      { path: 'rec-rules', name: 'RecRules', component: () => import('@/views/RecRules.vue'), meta: { title: '过滤规则' } },
+      { path: 'rec-profiles', name: 'RecProfiles', component: () => import('@/views/RecProfiles.vue'), meta: { title: '画像版本' } },
+      { path: 'rec-metrics', name: 'RecMetrics', component: () => import('@/views/RecMetrics.vue'), meta: { title: '运行看板' } },
       { path: 'settings', name: 'Settings', component: () => import('@/views/Settings.vue'), meta: { title: '系统设置' } },
       // 旧「数据看板」入口兼容：并入控制台 Dashboard，避免旧链接 404
       { path: 'report', redirect: '/dashboard' }

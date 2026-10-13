@@ -97,6 +97,70 @@ public class MetricService {
 
     private static final long THRESHOLD_TOTAL_COST_MS = 800L;
 
+    // ==================== 指标定义（运行看板渲染用） ====================
+
+    /**
+     * 指标定义项
+     *
+     * <p>把「指标标识 → 中文名 / 单位 / 预警阈值 / 好坏方向」的映射放在后端：看板按此清单自动
+     * 渲染卡片并按阈值标色，新增指标时前端无需改动，也避免两端各写一份阈值导致漂移。
+     *
+     * @param name           指标标识，与库中 metric_name 一致
+     * @param label          中文名
+     * @param unit           单位
+     * @param threshold      预警阈值；null 表示该指标不设阈值
+     * @param higherIsBetter true = 越大越好（低于阈值告警）；false = 越小越好（高于阈值告警）
+     */
+    public record MetricDefinition(String name, String label, String unit,
+                                   Double threshold, boolean higherIsBetter,
+                                   String aggregation) {
+    }
+
+    /** 聚合方式：求和，适用于计数类指标（同一时段内多次发生应累计） */
+    private static final String AGG_SUM = "sum";
+
+    /** 聚合方式：取平均，适用于比率类与耗时类指标 */
+    private static final String AGG_AVG = "avg";
+
+    /**
+     * 看板指标清单：与详细设计 3.10 的指标清单及预警阈值一一对应
+     *
+     * <p>⚠️ 本常量的声明位置必须在各 THRESHOLD_* 常量<b>之后</b>——静态字段按声明顺序初始化，
+     * 若写在阈值之前，这里读到的是尚未赋值的默认值 0，阈值判定会全部失效且不报错。
+     *
+     * <p>⚠️ aggregation 不可省：明细是「每次请求写一条」，同一小时内同一指标会有多条。
+     * 比率类（覆盖率、命中率）若按求和展示，会出现「85% + 90% = 175%」这类荒谬值——
+     * 必须按 avg 聚合，计数类才用 sum。
+     */
+    private static final List<MetricDefinition> CATALOG = List.of(
+            new MetricDefinition(FEATURE_COVERAGE, "特征覆盖率", "%",
+                    THRESHOLD_FEATURE_COVERAGE, true, AGG_AVG),
+            new MetricDefinition(FEATURE_FRESHNESS, "特征新鲜度", "ms",
+                    (double) THRESHOLD_FEATURE_FRESHNESS_MS, false, AGG_AVG),
+            new MetricDefinition(RECALL_CATEGORY_HIT_RATE, "类目偏好召回命中率", "%",
+                    THRESHOLD_CATEGORY_HIT_RATE, true, AGG_AVG),
+            new MetricDefinition(RECALL_HOT_HIT_RATE, "热门召回命中率", "%",
+                    THRESHOLD_HOT_HIT_RATE, true, AGG_AVG),
+            new MetricDefinition(DEGRADE_COUNT, "降级触发次数", "次", null, false, AGG_SUM),
+            new MetricDefinition(SNAPSHOT_HIT_RATE, "快照命中率", "%", null, true, AGG_AVG),
+            new MetricDefinition(PROFILE_TASK_SUCCESS_RATE, "画像任务成功率", "%", null, true, AGG_AVG),
+            new MetricDefinition(INVALID_EVENT_COUNT, "无效事件数", "条", null, false, AGG_SUM),
+            new MetricDefinition(STAGE_COST_PREFIX + "recall", "召回耗时", "ms",
+                    (double) THRESHOLD_RECALL_COST_MS, false, AGG_AVG),
+            new MetricDefinition(STAGE_COST_PREFIX + "filter", "过滤耗时", "ms", null, false, AGG_AVG),
+            new MetricDefinition(STAGE_COST_PREFIX + "rank", "打分耗时", "ms", null, false, AGG_AVG),
+            new MetricDefinition(STAGE_COST_PREFIX + "total", "榜单总耗时", "ms",
+                    (double) THRESHOLD_TOTAL_COST_MS, false, AGG_AVG));
+
+    /**
+     * 取看板指标清单
+     *
+     * @return 指标定义列表
+     */
+    public static List<MetricDefinition> catalog() {
+        return CATALOG;
+    }
+
     private final PipelineMetricMapper pipelineMetricMapper;
 
     /**
@@ -227,5 +291,19 @@ public class MetricService {
         } catch (Exception e) {
             log.error("指标汇总失败，由下一周期补偿", e);
         }
+    }
+
+    /**
+     * 查询指标明细（运行看板）
+     *
+     * @param from       起始时间（含）
+     * @param to         结束时间（不含）
+     * @param metricName 指标名，为空表示不限
+     * @param limit      返回条数上限（由 Mapper 钳制）
+     * @return 指标明细列表（按统计时间降序）
+     */
+    public List<PipelineMetricDO> listMetrics(LocalDateTime from, LocalDateTime to,
+                                              String metricName, int limit) {
+        return pipelineMetricMapper.selectByRange(from, to, metricName, limit);
     }
 }

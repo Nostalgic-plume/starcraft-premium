@@ -75,11 +75,28 @@ const menuOptions: MenuOption[] = [
   { label: '用户管理', key: '/dashboard/users', icon: renderIcon('M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75') },
   { label: '分类管理', key: '/dashboard/categories', icon: renderIcon('M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82zM7 7h.01') },
   { label: '索引管理', key: '/dashboard/rag-index', icon: renderIcon('M12 2C7.58 2 4 3.79 4 6s3.58 4 8 4 8-1.79 8-4-3.58-4-8-4zM4 6v6c0 2.21 3.58 4 8 4s8-1.79 8-4V6M4 12v6c0 2.21 3.58 4 8 4s8-1.79 8-4v-6') },
+  {
+    // 推荐子系统的 5 个页面收进一个分组：平铺会让侧栏过长，且这几页都属于同一子系统的运营配置
+    label: '推荐系统',
+    key: 'rec',
+    icon: renderIcon('M13 2L3 14h9l-1 8 10-12h-9l1-8z'),
+    children: [
+      { label: '策略配置', key: '/dashboard/rec-config' },
+      { label: '固定坑位', key: '/dashboard/rec-slots' },
+      { label: '过滤规则', key: '/dashboard/rec-rules' },
+      { label: '画像版本', key: '/dashboard/rec-profiles' },
+      { label: '运行看板', key: '/dashboard/rec-metrics' }
+    ]
+  },
   { label: '系统设置', key: '/dashboard/settings', icon: renderIcon('M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6') }
 ]
 
 function handleMenuSelect(key: string) {
-  if (key !== route.path) router.push(key)
+  // 分组项（如「推荐系统」）的 key 不是路径，点击它只应展开/收起分组，不触发跳转
+  if (!key.startsWith('/') || key === route.path) {
+    return
+  }
+  router.push(key)
 }
 
 const userName = computed(() => {

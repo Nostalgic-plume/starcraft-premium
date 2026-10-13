@@ -359,3 +359,119 @@ export interface RagIndexStatus {
 export interface RagRebuildResult {
   message: string
 }
+
+/* ==================== 推荐子系统（/api/rec/**） ==================== */
+
+/**
+ * 说明：以下接口由推荐服务进程（8082）提供，经 vite 的 '/api/rec' 代理直达，
+ * 商城后端并没有这些 Bean。
+ *
+ * ⚠️ 长整型标识（主键、商品标识、用户标识）一律为字符串：推荐服务与商城后端一样配置了
+ *    Long → String 序列化。雪花 ID 是 19 位，超出 JS 安全整数范围，以数字下发会在前端丢精度。
+ */
+
+/** 推荐策略配置项（GET /api/rec/config） */
+export interface RecConfigItem {
+  id: string
+  /** 配置键，如 rank.weight.cat */
+  configKey: string
+  configValue: string
+  /** 值类型：int / decimal / string / json */
+  valueType: string
+  /** 配置分组：行为权值、窗口权值、召回、打分、缓存、开关 */
+  groupName: string
+  /** 配置说明 */
+  remark: string
+  /** 最后修改人 */
+  operator: string
+  updateTime: string
+}
+
+/** 固定坑位（GET /api/rec/slots） */
+export interface RecFixedSlot {
+  /** 主键；新增时不传 */
+  id?: string
+  /** 坑位位置，从 1 开始 */
+  slotPosition: number | null
+  /** 坑位商品标识 */
+  itemId: string | null
+  /** 生效开始时间 */
+  startTime: string | null
+  /** 生效结束时间 */
+  endTime: string | null
+  /** 状态：0 停用，1 启用 */
+  status: number
+  operator?: string
+  createTime?: string
+  updateTime?: string
+}
+
+/** 过滤规则（GET /api/rec/rules） */
+export interface RecFilterRule {
+  id?: string
+  /** 规则类型：blacklist / member_only / region_limit / low_quality */
+  ruleType: string
+  /** 作用对象：item / category */
+  targetType: string
+  /** 对象取值：商品标识、类目标识或地区编码 */
+  targetValue: string
+  /** 状态：0 停用，1 启用 */
+  status: number
+  /** 规则说明 */
+  remark: string
+  operator?: string
+  updateTime?: string
+}
+
+/** 画像偏好项 */
+export interface RecPrefItem {
+  /** 维度标识：类目标识或品牌标识 */
+  dimId: string
+  /** 偏好分 */
+  score: number
+}
+
+/** 用户画像版本（GET /api/rec/profiles/{userId}/versions） */
+export interface RecProfileVersion {
+  id: string
+  userId: string
+  /** 版本号，取日期 yyyyMMdd */
+  version: number
+  /** 类目偏好列表 */
+  categoryPref: RecPrefItem[]
+  /** 品牌偏好列表 */
+  brandPref: RecPrefItem[]
+  /** 参与归纳的行为条数 */
+  behaviorCount: number
+  /** 状态：0 有效，1 历史版本 */
+  status: number
+  createTime: string
+}
+
+/** 指标定义（GET /api/rec/metrics/catalog） */
+export interface RecMetricDefinition {
+  name: string
+  label: string
+  unit: string
+  /** 预警阈值；null 表示该指标不设阈值 */
+  threshold: number | null
+  /** true = 越大越好（低于阈值告警）；false = 越小越好（高于阈值告警） */
+  higherIsBetter: boolean
+  /**
+   * 同一统计时段内多条明细的聚合方式
+   *
+   * ⚠️ 不可默认按求和展示：明细是「每次请求写一条」，同一小时内同一指标会有多条。
+   * 比率类（覆盖率、命中率）求和会得出「85% + 90% = 175%」这类荒谬值，必须按 avg 聚合。
+   */
+  aggregation: 'sum' | 'avg'
+}
+
+/** 指标明细（GET /api/rec/metrics） */
+export interface RecMetricRecord {
+  id: string
+  metricName: string
+  metricDim: string | null
+  metricValue: number
+  /** 统计时间（写入时截到整点） */
+  statTime: string
+}

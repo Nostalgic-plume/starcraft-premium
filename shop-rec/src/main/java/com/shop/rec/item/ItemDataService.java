@@ -11,6 +11,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -18,6 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -73,9 +75,29 @@ public class ItemDataService {
     /** 对账时单次比对的商品数上限，避免单轮任务耗时过长 */
     private static final int RECONCILE_SAMPLE_SIZE = 2000;
 
+    /** 未执行过重建时的状态说明（与前端约定：该文案表示「从未重建」，而非「失败」） */
+    public static final String NOT_REBUILT = "尚未执行重建";
+
     private final MallProductMapper mallProductMapper;
 
     private final RecRedis recRedis;
+
+    /**
+     * 重建进行中标记
+     *
+     * <p>手动触发与定时任务共用：全量重建会清空并重写商品状态缓存，
+     * 两次重建交叠会把彼此的写入互相覆盖，必须串行。
+     */
+    private final AtomicBoolean rebuilding = new AtomicBoolean(false);
+
+    /** 最近一次重建的结束时间；从未重建时为 null */
+    private volatile LocalDateTime lastRebuildTime;
+
+    /** 最近一次重建是否成功 */
+    private volatile boolean lastRebuildSuccess;
+
+    /** 最近一次重建的结果说明 */
+    private volatile String lastRebuildMessage = NOT_REBUILT;
 
     /** 兜底名单：热度榜前 N 名的进程内副本 */
     private volatile List<Long> fallbackItems = Collections.emptyList();
@@ -90,16 +112,115 @@ public class ItemDataService {
      */
     @Scheduled(cron = "0 0 1 * * ?")
     public void fullReloadDaily() {
+        executeRebuild();
+    }
+
+    /**
+     * 手动触发全量重建（管理后台用）
+     *
+     * <p><b>为什么需要这个入口</b>：商品索引此前完全依赖 {@code @Scheduled}（全量每日 01:00、
+     * 增量每 10 分钟），换完商品数据只能干等——手动重建补齐了这个缺口。
+     *
+     * <p><b>异步执行</b>：全量加载上万商品并重写索引耗时可达数秒至数十秒，同步执行会让
+     * 管理后台请求超时。触发后由调用方轮询 {@link #rebuildStatus()} 获知结果。
+     *
+     * @return 已触发返回 true；已有重建在执行中返回 false
+     */
+    public boolean triggerRebuild() {
+        return executeRebuild();
+    }
+
+    /**
+     * 查询最近一次重建状态
+     *
+     * @return 重建状态快照
+     */
+    public RebuildStatus rebuildStatus() {
+        return new RebuildStatus(rebuilding.get(), lastRebuildTime,
+                lastRebuildSuccess, lastRebuildMessage);
+    }
+
+    /**
+     * 执行一次全量重建（异步）
+     *
+     * @return 已触发返回 true；已有重建在执行中返回 false
+     */
+    private boolean executeRebuild() {
+        if (!rebuilding.compareAndSet(false, true)) {
+            log.warn("已有商品索引重建在执行中，本次触发被忽略");
+            return false;
+        }
+        Thread worker = new Thread(() -> {
+            try {
+                rebuildAll();
+            } finally {
+                rebuilding.set(false);
+            }
+        }, "rec-item-rebuild");
+        // 守护线程：重建不应阻止进程退出
+        worker.setDaemon(true);
+        worker.start();
+        return true;
+    }
+
+    /**
+     * 全量重建商品状态缓存、类目候选索引与兜底名单
+     *
+     * <p>手动触发与定时任务共用本方法，保证两条路径产出一致。
+     *
+     * <p><b>与纯定时重建的差别在开头的清理</b>：定时任务面对的是商品的小幅变动，
+     * 分页遍历写入即可覆盖；而手动重建的典型场景是商品数据被整体替换，此时
+     * <b>已被物理删除的商品不会出现在分页查询结果中</b>——它们的状态缓存键既不会被写入语句
+     * 覆盖，也不会被对账任务清掉（对账只遍历「当前可售商品」），会永久残留，
+     * 使推荐结果里出现「已不存在但仍在售」的悬空商品。故先按模式清空状态缓存，再全量重写。
+     *
+     * <p>⚠️ 清理与重写之间存在短暂空窗，期间榜单可能因查不到商品状态而降级到兜底名单，
+     * 属预期行为（重建是低频运维操作）。
+     */
+    private void rebuildAll() {
         long start = System.currentTimeMillis();
+
+        // 清空前先探测商城库可达性：若库不可达却已把状态缓存清空，重建随即失败，
+        // 榜单会在下一次重建成功之前持续降级。宁可不动缓存、直接放弃本轮。
         try {
+            mallProductMapper.selectSellableProducts(1);
+        } catch (Exception e) {
+            lastRebuildSuccess = false;
+            lastRebuildMessage = "重建中止：商城商品库不可达，未改动任何缓存";
+            lastRebuildTime = LocalDateTime.now();
+            log.error("商品索引重建中止：商城库不可达，未改动缓存", e);
+            return;
+        }
+
+        try {
+            long cleared = recRedis.deleteByPattern(RecRedisKeys.itemStatePattern());
             int loaded = fullReloadProducts();
             int indexed = refreshCategoryIndex();
             refreshFallbackList();
-            log.info("商品全量重建完成, 加载商品: {}, 类目索引写入: {}, 耗时: {}ms",
-                    loaded, indexed, System.currentTimeMillis() - start);
+            lastRebuildSuccess = true;
+            lastRebuildMessage = String.format(
+                    "清理残留状态 %d 个，加载商品 %d 件，重建类目索引 %d 个", cleared, loaded, indexed);
+            log.info("商品索引全量重建完成, {}，耗时: {}ms", lastRebuildMessage,
+                    System.currentTimeMillis() - start);
         } catch (Exception e) {
-            log.error("商品全量重建失败，沿用上一版数据与索引", e);
+            lastRebuildSuccess = false;
+            lastRebuildMessage = "重建失败：" + e.getMessage();
+            log.error("商品索引全量重建失败", e);
+        } finally {
+            lastRebuildTime = LocalDateTime.now();
         }
+    }
+
+    /**
+     * 重建状态快照（管理后台轮询用）
+     *
+     * @param rebuilding         是否正在重建
+     * @param lastRebuildTime    最近一次重建的结束时间；从未重建时为 null
+     * @param lastRebuildSuccess 最近一次重建是否成功
+     * @param lastRebuildMessage 结果说明；从未重建时为「尚未执行重建」
+     */
+    public record RebuildStatus(boolean rebuilding, LocalDateTime lastRebuildTime,
+                                boolean lastRebuildSuccess, String lastRebuildMessage) {
     }
 
     /**

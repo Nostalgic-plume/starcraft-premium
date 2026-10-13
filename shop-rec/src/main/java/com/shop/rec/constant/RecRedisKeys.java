@@ -95,6 +95,20 @@ public final class RecRedisKeys {
         return String.format(ITEM_STATE_TEMPLATE, itemId);
     }
 
+    /**
+     * 商品可售状态键的匹配模式
+     *
+     * <p>供「全量重建前清空旧状态缓存」使用（SCAN 匹配）。必须按模式清理的原因：
+     * 重建的分页遍历只会返回<b>当前仍存在</b>的商品，已被物理删除的商品不在其中，
+     * 其状态键不会被写入语句覆盖，也不会被对账任务清掉（对账只遍历可售商品），
+     * 最终导致推荐结果里出现「已不存在但仍在售」的悬空商品。
+     *
+     * @return 键模式 rec:item:state:*
+     */
+    public static String itemStatePattern() {
+        return PREFIX + "item:state:*";
+    }
+
     // ==================== 3. 过滤与排除清单 ====================
 
     /** 过滤清单（集合，随规则同步）：命中该规则的商品标识 */

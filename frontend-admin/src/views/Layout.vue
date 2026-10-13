@@ -85,7 +85,8 @@ const menuOptions: MenuOption[] = [
       { label: '固定坑位', key: '/dashboard/rec-slots' },
       { label: '过滤规则', key: '/dashboard/rec-rules' },
       { label: '画像版本', key: '/dashboard/rec-profiles' },
-      { label: '运行看板', key: '/dashboard/rec-metrics' }
+      { label: '运行看板', key: '/dashboard/rec-metrics' },
+      { label: '商品索引', key: '/dashboard/rec-item-index' }
     ]
   },
   { label: '系统设置', key: '/dashboard/settings', icon: renderIcon('M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6') }

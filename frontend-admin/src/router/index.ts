@@ -25,6 +25,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'rec-rules', name: 'RecRules', component: () => import('@/views/RecRules.vue'), meta: { title: '过滤规则' } },
       { path: 'rec-profiles', name: 'RecProfiles', component: () => import('@/views/RecProfiles.vue'), meta: { title: '画像版本' } },
       { path: 'rec-metrics', name: 'RecMetrics', component: () => import('@/views/RecMetrics.vue'), meta: { title: '运行看板' } },
+      { path: 'rec-item-index', name: 'RecItemIndex', component: () => import('@/views/RecItemIndex.vue'), meta: { title: '商品索引' } },
       { path: 'settings', name: 'Settings', component: () => import('@/views/Settings.vue'), meta: { title: '系统设置' } },
       // 旧「数据看板」入口兼容：并入控制台 Dashboard，避免旧链接 404
       { path: 'report', redirect: '/dashboard' }

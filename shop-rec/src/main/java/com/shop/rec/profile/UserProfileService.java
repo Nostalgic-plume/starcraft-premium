@@ -7,7 +7,9 @@ import com.shop.rec.constant.RecRedisKeys;
 import com.shop.rec.mall.mapper.MallProductMapper;
 import com.shop.rec.mall.model.MallProductDO;
 import com.shop.rec.mapper.UserBehaviorLogMapper;
+import com.shop.rec.mapper.UserProfileMapper;
 import com.shop.rec.model.entity.UserBehaviorLogDO;
+import com.shop.rec.model.entity.UserProfileDO;
 import com.shop.rec.model.vo.PrefItemVO;
 import com.shop.rec.service.RecConfigService;
 import lombok.RequiredArgsConstructor;
@@ -71,6 +73,8 @@ public class UserProfileService {
     private static final DateTimeFormatter VERSION_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd");
 
     private final UserBehaviorLogMapper behaviorLogMapper;
+
+    private final UserProfileMapper userProfileMapper;
 
     private final MallProductMapper mallProductMapper;
 
@@ -157,6 +161,22 @@ public class UserProfileService {
         // 清理画像缓存：本工程画像直接从推荐库读取，此处清理为预留（后续若加画像缓存键需同步清理）
         recRedis.delete(RecRedisKeys.userFeatMeta(userId));
         log.info("画像版本回滚完成, userId: {}, targetVersion: {}", userId, targetVersion);
+    }
+
+    /**
+     * 查询指定用户的全部画像版本（外部接口 E-08 的列表入口）
+     *
+     * <p>回滚必须先能看到有哪些版本可选：只有回滚接口而无列表接口时，运营无从得知目标版本号，
+     * 「支持回滚」这一要求在界面上根本落不了地。
+     *
+     * @param userId 用户标识
+     * @return 画像版本列表（按版本号降序，含各版本的偏好内容）；无版本时返回空列表
+     */
+    public List<UserProfileDO> listVersions(Long userId) {
+        if (userId == null) {
+            return List.of();
+        }
+        return userProfileMapper.selectVersionsByUserId(userId);
     }
 
     /**

@@ -52,8 +52,15 @@ interface BehaviorPayload {
  * 生成事件唯一标识
  *
  * 服务端以它做幂等去重，因此重试时必须复用同一个标识。
+ *
+ * 优先用 {@code crypto.randomUUID()}——浏览器原生的密码学随机源，碰撞概率可忽略；
+ * 非安全上下文或旧浏览器下回退到「时间戳 + 随机数」。该标识只用于去重、不作为安全凭证，
+ * 回退方案在语义上同样成立。
  */
 function generateEventId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `evt_${crypto.randomUUID()}`
+  }
   return `evt_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
 }
 

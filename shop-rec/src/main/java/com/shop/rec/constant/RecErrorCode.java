@@ -116,4 +116,7 @@ public final class RecErrorCode {
 
     /** 回滚目标版本不可用：目标版本不在保留范围内，保持当前有效版本不变 */
     public static final int PROFILE_VERSION_UNAVAILABLE = 4004;
+
+    /** 重建任务冲突：已有同类重建在执行中，拒绝重复触发 */
+    public static final int REBUILD_CONFLICT = 4005;
 }

@@ -202,7 +202,7 @@ public final class OfflineEvaluator {
      */
     private static Set<Long> loadHotHead(JedisPool jedisPool) {
         try (Jedis jedis = jedisPool.getResource()) {
-            Set<String> members = jedis.zrevrange(KEY_HOT_ITEM, 0, HEAD_ITEM_RANK - 1L);
+            List<String> members = jedis.zrevrange(KEY_HOT_ITEM, 0, HEAD_ITEM_RANK - 1L);
             return members.stream().map(Long::parseLong).collect(Collectors.toSet());
         } catch (Exception e) {
             return new HashSet<>();
@@ -316,7 +316,7 @@ public final class OfflineEvaluator {
                     .map(Map.Entry::getKey)
                     .collect(Collectors.toList());
             for (Long categoryId : topCategories) {
-                Set<String> items = jedis.zrevrange(KEY_CAT_ITEMS_PREFIX + categoryId, 0, strategy.poolSize - 1L);
+                List<String> items = jedis.zrevrange(KEY_CAT_ITEMS_PREFIX + categoryId, 0, strategy.poolSize - 1L);
                 for (String item : items) {
                     candidates.merge(Long.parseLong(item), categoryPreference.get(categoryId), Double::sum);
                 }

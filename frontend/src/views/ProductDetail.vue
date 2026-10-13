@@ -222,7 +222,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NInputNumber, NSpin, useMessage } from 'naive-ui'
 import * as echarts from 'echarts'
@@ -235,6 +235,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import SvgIcon from '@/components/SvgIcon.vue'
 import { CHART_LINE, CHART_TEXT, CHART_ACCENT } from '@shared/js/echarts-theme'
+import { startViewTimer, trackAddCart, trackFavorite } from '@/utils/behaviorTracker'
 import type { ProductVO, SkuVO } from '@/api/types'
 
 const route = useRoute()
@@ -253,6 +254,14 @@ const trendChartRef = ref<HTMLDivElement | null>(null)
 let trendChart: echarts.ECharts | null = null
 const pageRef = ref<HTMLElement | null>(null)
 let ctx: gsap.Context | null = null
+
+/**
+ * 浏览行为上报回调
+ *
+ * 进入详情页开始计时，组件卸载时上报停留时长。详情页浏览是用户画像最主要的信号来源，
+ * 停留时长用于服务端识别「误点即走」的无效浏览。
+ */
+let reportView: (() => void) | null = null
 
 /* ====== 收藏（P0 占位：后端接口未就绪，前端存 localStorage） ====== */
 const FAV_KEY = 'shop_fav_products'
@@ -289,6 +298,10 @@ function toggleFav() {
   }
   persistFavs()
   message.success(nowFav ? '已收藏' : '已取消收藏')
+  // 收藏行为埋点：仅收藏时上报，取消收藏不作为正向兴趣信号
+  if (nowFav) {
+    trackFavorite(id)
+  }
 }
 
 /* ====== 价格 / 规格 ====== */
@@ -366,6 +379,10 @@ async function loadProduct() {
   try {
     const res = await productApi.detail(String(route.params.id))
     product.value = res.data
+    // 浏览行为埋点：商品确认存在后才开始计时（加载失败不产生浏览样本）
+    if (product.value && !reportView) {
+      reportView = startViewTimer(product.value.id)
+    }
     const list = res.data?.skuList || []
     if (list.length) {
       selectedSku.value = list.find(s => s.stock > 0) || list[0]
@@ -402,6 +419,10 @@ async function addToCart() {
       await cartStore.addItem({ skuId, quantity: qty })
       message.success('已加入购物车')
     }
+    // 加购行为埋点（静默旁路，失败不影响主流程）
+    if (product.value) {
+      trackAddCart(product.value.id)
+    }
   } catch {
     /* 错误提示由 axios 拦截器统一处理 */
   }
@@ -425,7 +446,9 @@ function buyNow() {
       productName: product.value?.name || '',
       skuName: sku.name,
       price: String(sku.price),
-      image: product.value?.mainImage || ''
+      image: product.value?.mainImage || '',
+      // 供下单成功后的购买行为埋点使用：订单行只携带 skuId，前端无法由 sku 反推商品
+      productId: product.value?.id || ''
     }
   })
 }
@@ -521,7 +544,17 @@ onMounted(() => {
   window.addEventListener('resize', handleResize)
 })
 
+// 同路由切换商品（/product/1 → /product/2）时组件实例被复用、不会触发卸载：
+// 需手动结算上一个商品的浏览，再由 loadProduct 为新商品重新计时
+watch(() => route.params.id, () => {
+  reportView?.()
+  reportView = null
+  loadProduct()
+})
+
 onUnmounted(() => {
+  // 结算浏览行为并上报停留时长（内部有重复上报保护，与路由切换的结算不会叠加）
+  reportView?.()
   window.removeEventListener('resize', handleResize)
   trendChart?.dispose()
   ctx?.revert()

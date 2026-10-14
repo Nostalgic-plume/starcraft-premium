@@ -21,11 +21,16 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * 画像版本回滚接口（外部接口 E-08，由 M-03 承载）
+ * 画像管理接口（外部接口 E-08，由 M-03 承载）
  *
  * <p>
- * 落实需求分析 3.3「用户画像至少保留最近 3 个历史版本，支持回滚」。
- * 接口与界面入口缺一不可——仅有流程描述而无调用入口时，该要求无法验收。
+ * 两类职责：
+ * <ol>
+ *     <li><b>版本回滚</b>：落实需求分析 3.3「用户画像至少保留最近 3 个历史版本，支持回滚」。
+ *         接口与界面入口缺一不可——仅有流程描述而无调用入口时，该要求无法验收；</li>
+ *     <li><b>全量重建</b>：触发一次画像生成任务，用于用户与行为数据整体替换后的立即生效。
+ *         原先画像只依赖 {@code @Scheduled}（每日 02:00），换完数据只能干等次日凌晨。</li>
+ * </ol>
  *
  * <p>
  * <b>失败语义</b>：目标版本不在保留范围内时拒绝回滚并返回错误码 4004，
@@ -41,6 +46,41 @@ import java.util.List;
 public class RecProfileController {
 
     private final UserProfileService userProfileService;
+
+    /**
+     * 触发画像全量重建（异步）
+     *
+     * <p><b>为什么需要这个入口</b>：画像原先只依赖 {@code @Scheduled}（每日 02:00），
+     * 换完用户与行为数据只能干等次日凌晨，没有任何办法立即生效。手动重建补齐了这个缺口。
+     *
+     * <p>异步执行，已有任务在执行中时拒绝重复触发（错误码 4005）；调用方按
+     * {@code /rebuild-status} 轮询，以 {@code rebuilding} 变为 false 作为结束信号，
+     * 再按 {@code lastRebuildSuccess} 判断成败——只看结束时间会把「跑完但一条没生成」
+     * 误判为成功。
+     *
+     * @return 受理结果
+     */
+    @PostMapping("/rebuild")
+    @Operation(summary = "触发画像全量重建（异步）")
+    public Result<Void> rebuild() {
+        checkAdminLogin();
+        if (!userProfileService.triggerRebuild()) {
+            throw new BusinessException(RecErrorCode.REBUILD_CONFLICT, "已有画像任务在执行中，请稍后再试");
+        }
+        return Result.success("已触发画像重建", null);
+    }
+
+    /**
+     * 查询最近一次画像任务的状态
+     *
+     * @return 任务状态（是否进行中、结束时间、成败、结果说明）
+     */
+    @GetMapping("/rebuild-status")
+    @Operation(summary = "查询画像重建状态")
+    public Result<UserProfileService.RebuildStatus> rebuildStatus() {
+        checkAdminLogin();
+        return Result.success(userProfileService.rebuildStatus());
+    }
 
     /**
      * 查询指定用户的画像版本列表

@@ -169,6 +169,22 @@ public class RedisWriter implements Serializable {
     }
 
     /**
+     * 从商品热度榜摘除成员
+     *
+     * <p>
+     * 商品热度是 24 小时滑窗累加值，滑出窗口后应归零。热度归零时若不摘除成员，
+     * 该商品会永久滞留在热度榜上被热门召回当作热销商品返回——榜单里出现热度早已归零的商品。
+     * 这里不刷新整榜 TTL：摘除只是减少成员，不存在「成员留下但键过期」的不一致。
+     *
+     * @param itemId 商品标识
+     */
+    public void removeItemHeat(long itemId) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            jedis.zrem(KEY_HOT_ITEM, String.valueOf(itemId));
+        }
+    }
+
+    /**
      * 读取商品维度映射
      *
      * <p>数据源为内存库的商品可售状态键；键不存在（商品变更后已失效或尚未刷新）时返回空，

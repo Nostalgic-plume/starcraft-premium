@@ -55,6 +55,17 @@ public class FlinkJobConfig implements Serializable {
     /** 汇总节流间隔（毫秒）：同一用户在该间隔内的多条事件合并为一次汇总 */
     private long summarizeIntervalMs = 200L;
 
+    /**
+     * 商品热度榜刷写间隔（毫秒）
+     *
+     * <p>与 {@link #summarizeIntervalMs} 取同一档位（200 毫秒），使行为链路上「用户偏好特征」与
+     * 「商品热度」两条分支的时效口径一致，共同满足「行为发生后 5 秒内影响推荐结果」的要求。
+     *
+     * <p>该值只决定热度榜的**陈旧度**，不决定榜单的平滑程度——平滑来自 24 小时聚合窗口本身
+     * （分值是 24 小时累加，天然平滑）。调大它不会让榜单更稳，只会让它更旧。
+     */
+    private long heatFlushIntervalMs = 200L;
+
     // ==================== 容错 ====================
 
     /**
@@ -107,6 +118,7 @@ public class FlinkJobConfig implements Serializable {
         config.setOutOfOrdernessSeconds(params.getLong("time.outOfOrdernessSeconds", config.getOutOfOrdernessSeconds()));
         config.setLateToleranceMinutes(params.getLong("time.lateToleranceMinutes", config.getLateToleranceMinutes()));
         config.setSummarizeIntervalMs(params.getLong("time.summarizeIntervalMs", config.getSummarizeIntervalMs()));
+        config.setHeatFlushIntervalMs(params.getLong("heat.flushIntervalMs", config.getHeatFlushIntervalMs()));
         config.setCapThreshold(params.getDouble("feature.cap", config.getCapThreshold()));
         config.setCheckpointStorage(params.get("checkpoint.storage", config.getCheckpointStorage()));
         config.setCheckpointIntervalMs(params.getLong("checkpoint.intervalMs", config.getCheckpointIntervalMs()));

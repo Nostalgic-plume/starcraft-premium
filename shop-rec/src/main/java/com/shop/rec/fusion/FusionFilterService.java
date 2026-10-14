@@ -97,10 +97,10 @@ public class FusionFilterService {
             candidates.add(candidate);
         }
 
-        // 步骤 9：候选不足时用兜底名单补位
+        // 步骤 9：候选不足时用兜底名单补位（补位商品同样要过过滤规则，见方法注释）
         int targetSize = resolvePoolSize();
         if (candidates.size() < targetSize) {
-            supplementFromFallback(candidates, targetSize);
+            supplementFromFallback(candidates, targetSize, userId, stats);
         }
 
         // 步骤 10：候选池为空 → 标记兜底名单，由 M-08 统一裁决对外状态
@@ -248,10 +248,23 @@ public class FusionFilterService {
      *
      * <p>补位商品若已在候选池中则跳过，避免重复（详细设计 3.6 步骤 9）。
      *
+     * <p><b>补位商品必须与召回商品走同一套过滤规则</b>：过滤发生在补位之前，若这里不再过滤，
+     * 刚被剔除的商品会从兜底名单里被原样加回来——而兜底名单取自热度榜 TopN，与召回候选高度
+     * 重叠，被剔除的那个商品往往正是榜上第一名。<b>真实数据下候选池（约百条）恒小于目标规模
+     * （200），补位恒触发，六条过滤规则会因此全部失效</b>：黑名单、已购已加购、地域限制、
+     * 会员限定、低质商品、下架无库存的商品都会被塞回候选池尾部。它们分值为 0 排在末尾，
+     * 首页看不出来，翻页或候选池不足时才露出来。
+     *
+     * <p>补位仍可能补不满目标规模（兜底名单里的商品也可能全部不可推荐），这是可接受的：
+     * 兜底的意义是「任何情况下都有结果可返回」，由步骤 10 的空池降级兜住，而不是靠放宽过滤来凑数。
+     *
      * @param candidates 当前候选池
      * @param targetSize 目标规模
+     * @param userId     用户标识（用户维度过滤规则使用）
+     * @param stats      过滤原因统计（补位商品的过滤同样计入）
      */
-    private void supplementFromFallback(List<FilteredCandidate> candidates, int targetSize) {
+    private void supplementFromFallback(List<FilteredCandidate> candidates, int targetSize,
+                                        Long userId, Map<String, Integer> stats) {
         List<Long> fallbackItems = itemDataService.getFallbackItems();
         if (fallbackItems.isEmpty()) {
             return;
@@ -271,6 +284,9 @@ public class FusionFilterService {
             supplement.setItemId(itemId);
             supplement.setNormalizedScore(0D);
             supplement.getSources().add(RecallCandidate.SOURCE_FALLBACK);
+            if (shouldFilter(supplement, userId, stats)) {
+                continue;
+            }
             candidates.add(supplement);
             existing.add(itemId);
         }

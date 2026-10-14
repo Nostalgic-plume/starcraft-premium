@@ -164,7 +164,7 @@ public final class BehaviorDataGenerator {
 
         int persisted = persistBehaviorLogs(jdbcUrl, username, password, events);
         System.out.printf("已写入 %s %d 条（画像数据源，source=1）。%n", BEHAVIOR_LOG_TABLE, persisted);
-        System.out.println("建议等待 60 秒让特征计算收敛后再做校验；热度榜每 10 分钟刷新一次。");
+        System.out.println("建议等待 60 秒让特征计算收敛后再做校验；热度榜按 heat.flushIntervalMs（默认 200 毫秒）刷新。");
     }
 
     /**

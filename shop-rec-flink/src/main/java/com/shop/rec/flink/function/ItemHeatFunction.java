@@ -218,19 +218,25 @@ public class ItemHeatFunction extends KeyedProcessFunction<Long, BehaviorEvent, 
             }
         }
 
-        pendingDelta.clear();
-        lastFlushHour.update(nowHour);
-
+        // ⚠️ 两个状态位必须在 Redis 副作用**成功之后**才更新：若先清标记再写 Redis，
+        // 写失败时标记已清、下一轮门控判定「无新行为且未跨小时」直接短路，本轮该写的
+        // 热度会被永久跳过（直到下一次行为或跨小时边界），与 onTimer 里「失败可自愈」的
+        // 意图相悖
         if (heat <= 0D) {
             // 热度已全部滑出 24 小时窗口：必须摘除成员。只 return 不摘除会让该商品
             // 永久留在热度榜上，被热门召回当作热销商品返回
             redisWriter.removeItemHeat(itemId);
+            pendingDelta.clear();
+            lastFlushHour.update(nowHour);
             return false;
         }
 
         Map<Long, Double> itemHeat = new HashMap<>(1);
         itemHeat.put(itemId, heat);
         redisWriter.writeItemHeat(itemHeat, config.getHotItemTtlSeconds());
+
+        pendingDelta.clear();
+        lastFlushHour.update(nowHour);
         return true;
     }
 

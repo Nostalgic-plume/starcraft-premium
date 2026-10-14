@@ -116,12 +116,22 @@ public class UserProfileService {
      * <p>每日 02:00 执行（对应详细设计 8.2 任务 1），与商品全量重建（01:00）分时执行避免重叠。
      * 单用户失败跳过并计数，整体超时中断并保留旧版本——旧版本在写入新版本前始终有效。
      *
-     * <p>与手动触发（{@link #triggerRebuild()}）走同一条执行路径，保证两者产出一致。
+     * <p><b>同步执行（勿改为异步）</b>：定时任务与集成测试都直接调用本方法并<b>紧接着断言</b>
+     * 结果——{@code ItemAndProfileIntegrationTest} 的类注释写明「定时任务 cron 位于凌晨低峰期，
+     * 无法在测试中等待，故直接调用其入口方法」。改成起线程后立即返回会让断言读不到本轮画像，
+     * 测试必失败。需要异步的是管理后台手动触发（{@link #triggerRebuild()}），
+     * 两者共用 {@link #doGenerate()} 保证产出一致。
      */
     @Scheduled(cron = "0 0 2 * * ?")
     public void generateDailyProfile() {
-        if (!triggerRebuild()) {
+        if (!rebuilding.compareAndSet(false, true)) {
             log.warn("已有画像任务在执行中，本次定时触发被忽略");
+            return;
+        }
+        try {
+            doGenerate();
+        } finally {
+            rebuilding.set(false);
         }
     }
 
@@ -171,65 +181,78 @@ public class UserProfileService {
         int version = Integer.parseInt(LocalDateTime.now().format(VERSION_FORMAT));
         LocalDateTime since = LocalDateTime.now().minusDays(PROFILE_DAYS);
 
-        Map<Long, MallProductDO> itemDimensions = loadItemDimensions();
-        if (itemDimensions.isEmpty()) {
-            log.warn("商品维度为空，画像任务终止并保留旧版本");
-            markFinished(false, "商品维度为空，任务终止并保留旧版本");
-            return;
-        }
-
-        int success = 0;
-        int coldStart = 0;
-        int failed = 0;
-        boolean timeout = false;
-
-        for (int shard = 0; shard < SHARDS; shard++) {
-            if (System.currentTimeMillis() - start > MAX_DURATION_MS) {
-                log.error("画像任务超时中断（已处理 {} 个分片），保留旧版本，已成功: {}, 冷启动: {}, 失败: {}",
-                        shard, success, coldStart, failed);
-                timeout = true;
-                break;
+        try {
+            Map<Long, MallProductDO> itemDimensions = loadItemDimensions();
+            if (itemDimensions.isEmpty()) {
+                log.warn("商品维度为空，画像任务终止并保留旧版本");
+                markFinished(false, "商品维度为空，任务终止并保留旧版本");
+                return;
             }
 
-            List<UserBehaviorLogDO> shardLogs = behaviorLogMapper.selectForProfile(since, SHARDS, shard);
-            Map<Long, List<UserBehaviorLogDO>> byUser = new LinkedHashMap<>();
-            for (UserBehaviorLogDO behaviorLog : shardLogs) {
-                if (behaviorLog.getUserId() == null) {
-                    continue;
+            int success = 0;
+            int coldStart = 0;
+            int failed = 0;
+            boolean timeout = false;
+
+            for (int shard = 0; shard < SHARDS; shard++) {
+                if (System.currentTimeMillis() - start > MAX_DURATION_MS) {
+                    log.error("画像任务超时中断（已处理 {} 个分片），保留旧版本，已成功: {}, 冷启动: {}, 失败: {}",
+                            shard, success, coldStart, failed);
+                    timeout = true;
+                    break;
                 }
-                byUser.computeIfAbsent(behaviorLog.getUserId(), k -> new ArrayList<>()).add(behaviorLog);
+
+                List<UserBehaviorLogDO> shardLogs = behaviorLogMapper.selectForProfile(since, SHARDS, shard);
+                Map<Long, List<UserBehaviorLogDO>> byUser = new LinkedHashMap<>();
+                for (UserBehaviorLogDO behaviorLog : shardLogs) {
+                    if (behaviorLog.getUserId() == null) {
+                        continue;
+                    }
+                    byUser.computeIfAbsent(behaviorLog.getUserId(), k -> new ArrayList<>()).add(behaviorLog);
+                }
+
+                for (Map.Entry<Long, List<UserBehaviorLogDO>> entry : byUser.entrySet()) {
+                    List<UserBehaviorLogDO> userLogs = entry.getValue();
+                    if (userLogs.size() < MIN_BEHAVIOR_COUNT) {
+                        coldStart++;
+                        continue;
+                    }
+                    try {
+                        saveUserProfile(entry.getKey(), userLogs, itemDimensions, version);
+                        success++;
+                    } catch (Exception e) {
+                        // 单用户失败不中断整体任务（详细设计 3.3 异常分支）
+                        failed++;
+                        log.warn("用户画像生成失败已跳过, userId: {}", entry.getKey(), e);
+                    }
+                }
             }
 
-            for (Map.Entry<Long, List<UserBehaviorLogDO>> entry : byUser.entrySet()) {
-                List<UserBehaviorLogDO> userLogs = entry.getValue();
-                if (userLogs.size() < MIN_BEHAVIOR_COUNT) {
-                    coldStart++;
-                    continue;
-                }
-                try {
-                    saveUserProfile(entry.getKey(), userLogs, itemDimensions, version);
-                    success++;
-                } catch (Exception e) {
-                    // 单用户失败不中断整体任务（详细设计 3.3 异常分支）
-                    failed++;
-                    log.warn("用户画像生成失败已跳过, userId: {}", entry.getKey(), e);
-                }
+            if (timeout) {
+                // 提前返回：超时路径已在循环内打过 error 日志，
+                // 若继续往下打「任务完成」，同一轮会出现「超时中断」与「完成」两条相反结论
+                markFinished(false, String.format("任务超时中断，已生成 %d 个（保留旧版本）", success));
+                return;
             }
-        }
 
-        log.info("画像任务完成, version: {}, 成功: {}, 冷启动跳过: {}, 失败: {}, 耗时: {}ms",
-                version, success, coldStart, failed, System.currentTimeMillis() - start);
+            log.info("画像任务完成, version: {}, 成功: {}, 冷启动跳过: {}, 失败: {}, 耗时: {}ms",
+                    version, success, coldStart, failed, System.currentTimeMillis() - start);
 
-        if (timeout) {
-            markFinished(false, String.format("任务超时中断，已生成 %d 个（保留旧版本）", success));
-        } else if (success == 0) {
-            // 跑完但一条都没生成，与「商品为空」同理属需要关注的失败态：
-            // 只看时间戳的调用方会以为「重建完成」，实际画像仍是空的
-            markFinished(false,
-                    String.format("未生成任何画像（行为数据不足 %d 条的用户）", MIN_BEHAVIOR_COUNT));
-        } else {
-            markFinished(true, String.format("画像生成完成：成功 %d，冷启动跳过 %d，失败 %d",
-                    success, coldStart, failed));
+            if (success == 0) {
+                // 跑完但一条都没生成，与「商品为空」同理属需要关注的失败态：
+                // 只看时间戳的调用方会以为「重建完成」，实际画像仍是空的
+                markFinished(false,
+                        String.format("未生成任何画像（行为数据不足 %d 条的用户）", MIN_BEHAVIOR_COUNT));
+            } else {
+                markFinished(true, String.format("画像生成完成：成功 %d，冷启动跳过 %d，失败 %d",
+                        success, coldStart, failed));
+            }
+        } catch (Exception e) {
+            // 顶层兜底：异常路径下若不调用 markFinished，lastRebuildSuccess/lastRebuildMessage
+            // 会停留在上一轮的值，而 rebuilding 已由调用方 finally 置回 false——按「rebuilding
+            // 由 true 变 false 即结束」判断的调用方会把上一轮结论当成本轮结果
+            log.error("画像任务异常终止，保留旧版本", e);
+            markFinished(false, "任务异常终止：" + e.getMessage());
         }
     }
 

@@ -66,8 +66,14 @@ public class ItemDataService {
     /** 兜底名单条数（对应详细设计 3.4 步骤 8） */
     private static final int FALLBACK_LIMIT = 100;
 
-    /** 兜底名单重建间隔（秒） */
-    private static final long FALLBACK_REBUILD_INTERVAL_SECONDS = 30L;
+    /**
+     * 兜底名单重建间隔（秒）
+     *
+     * <p>取 5 秒与需求分析 4.3「行为产生后 5 秒内特征生效」对齐：降级时对外返回的
+     * 就是这份兜底名单，若它比热度榜慢一个数量级，5 秒时效在降级路径上就不成立。
+     * 重建成本仅为一次「读热度榜前 100 名」并构造列表，5 秒一次可忽略。
+     */
+    private static final long FALLBACK_REBUILD_INTERVAL_SECONDS = 5L;
 
     /** 商品上架状态取值（product.status = 1） */
     private static final int PRODUCT_STATUS_ON_SALE = 1;

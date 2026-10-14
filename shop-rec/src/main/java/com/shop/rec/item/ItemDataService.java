@@ -115,10 +115,26 @@ public class ItemDataService {
      * 商品与索引全量重建
      *
      * <p>每日 01:00 执行（对应详细设计 8.2 任务 2），与画像任务（02:00）分时执行避免重叠。
+     *
+     * <p><b>同步执行（勿改为异步）</b>：定时任务与集成测试都直接调用本方法并
+     * <b>紧接着断言</b>结果——{@code ItemAndProfileIntegrationTest} 与
+     * {@code RecallFusionRankIntegrationTest} 的类注释写明「定时任务 cron 位于凌晨低峰期，
+     * 无法在测试中等待，故直接调用其入口方法」。改成起线程后立即返回会让断言读到
+     * {@link #rebuildAll()} 清空缓存之后、重写之前的中间态，测试必失败。
+     * 需要异步的是管理后台手动触发（{@link #triggerRebuild()}），两者共用
+     * {@link #rebuildAll()} 保证产出一致。
      */
     @Scheduled(cron = "0 0 1 * * ?")
     public void fullReloadDaily() {
-        executeRebuild();
+        if (!rebuilding.compareAndSet(false, true)) {
+            log.warn("已有商品索引重建在执行中，本次定时触发被忽略");
+            return;
+        }
+        try {
+            rebuildAll();
+        } finally {
+            rebuilding.set(false);
+        }
     }
 
     /**
@@ -127,31 +143,12 @@ public class ItemDataService {
      * <p><b>为什么需要这个入口</b>：商品索引此前完全依赖 {@code @Scheduled}（全量每日 01:00、
      * 增量每 10 分钟），换完商品数据只能干等——手动重建补齐了这个缺口。
      *
-     * <p><b>异步执行</b>：全量加载上万商品并重写索引耗时可达数秒至数十秒，同步执行会让
-     * 管理后台请求超时。触发后由调用方轮询 {@link #rebuildStatus()} 获知结果。
+     * <p><b>与定时入口的区别仅在异步</b>：全量加载上万商品并重写索引耗时可达数秒至数十秒，
+     * 同步执行会让管理后台请求超时。触发后由调用方轮询 {@link #rebuildStatus()} 获知结果。
      *
      * @return 已触发返回 true；已有重建在执行中返回 false
      */
     public boolean triggerRebuild() {
-        return executeRebuild();
-    }
-
-    /**
-     * 查询最近一次重建状态
-     *
-     * @return 重建状态快照
-     */
-    public RebuildStatus rebuildStatus() {
-        return new RebuildStatus(rebuilding.get(), lastRebuildTime,
-                lastRebuildSuccess, lastRebuildMessage);
-    }
-
-    /**
-     * 执行一次全量重建（异步）
-     *
-     * @return 已触发返回 true；已有重建在执行中返回 false
-     */
-    private boolean executeRebuild() {
         if (!rebuilding.compareAndSet(false, true)) {
             log.warn("已有商品索引重建在执行中，本次触发被忽略");
             return false;
@@ -167,6 +164,16 @@ public class ItemDataService {
         worker.setDaemon(true);
         worker.start();
         return true;
+    }
+
+    /**
+     * 查询最近一次重建状态
+     *
+     * @return 重建状态快照
+     */
+    public RebuildStatus rebuildStatus() {
+        return new RebuildStatus(rebuilding.get(), lastRebuildTime,
+                lastRebuildSuccess, lastRebuildMessage);
     }
 
     /**

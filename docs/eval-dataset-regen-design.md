@@ -162,6 +162,104 @@ for each table where policy == REPLACE:
 
 ---
 
+### 4.7 实现细节（评审用）
+
+#### 4.7.1 分派逻辑
+
+```java
+for (TableMeta t : tables) {
+    String policy = policies.getOrDefault(t.name(), "KEEP");
+    GeneratedData gd = data.get(t.name());
+    if (gd == null || gd.rows().isEmpty()) continue;
+
+    switch (policy) {
+        case "KEEP"   -> skipped.add(t.name());
+        case "APPEND" -> { insertRows(jdbc, targetSchema, t, gd); published++; }  // 与原实现逐字等价
+        case "REPLACE"-> { replaceTable(jdbc, targetSchema, t, gd, backups, errors); published++; }
+        default       -> errors.add(t.name() + ": 未知策略 " + policy);
+    }
+}
+```
+
+> `APPEND` 分支保持与现有代码**完全相同的调用**，这是回归红线——现有测试与行为不受影响。
+
+#### 4.7.2 replaceTable 实现
+
+```java
+private void replaceTable(MysqlJdbcDataSource jdbc, String schema, TableMeta t,
+                          GeneratedData gd, Map<String, String> backups, List<String> errors) {
+    String table = t.name();
+    // 标识符白名单：表名只允许字母数字下划线（防注入；表名本身来自 information_schema）
+    if (!table.matches("[A-Za-z0-9_]+")) {
+        errors.add(table + ": 表名非法，已跳过");
+        return;
+    }
+    String backup = "_dfbak_" + table + "_" + timestamp();   // yyyyMMddHHmmssSSS
+
+    // ① 备份 —— 失败则绝不进入清空流程（安全优先）
+    try {
+        jdbc.execute("CREATE TABLE " + q(schema) + "." + q(backup)
+                   + " AS SELECT * FROM " + q(schema) + "." + q(table));
+        backups.put(table, backup);
+    } catch (Exception e) {
+        errors.add(table + ": 备份失败，已跳过清空 — " + e.getMessage());
+        return;
+    }
+
+    // ② 清空 + ③ 写入
+    try {
+        jdbc.execute("TRUNCATE TABLE " + q(schema) + "." + q(table));
+        insertRows(jdbc, schema, t, gd);
+    } catch (Exception e) {
+        // ④ 恢复
+        try {
+            jdbc.execute("TRUNCATE TABLE " + q(schema) + "." + q(table));
+            jdbc.execute("INSERT INTO " + q(schema) + "." + q(table)
+                       + " SELECT * FROM " + q(schema) + "." + q(backup));
+            errors.add(table + ": 写入失败，已从备份恢复 — " + e.getMessage());
+        } catch (Exception re) {
+            errors.add(table + ": RECOVERY FAILED（备份表 " + backup + " 已保留，需人工恢复）"
+                       + " — " + re.getMessage());
+        }
+    }
+}
+```
+
+#### 4.7.3 事务边界（关键限制，必须理解）
+
+| 语句 | 类型 | 能否回滚 |
+|---|---|---|
+| `CREATE TABLE ... AS SELECT` | DDL | ❌ 隐式提交 |
+| `TRUNCATE TABLE` | DDL | ❌ 隐式提交 |
+| `INSERT` | DML | ✅ 可事务 |
+
+**结论：清空与写入无法放在同一个事务里**——TRUNCATE 一执行就隐式提交，数据库层面的事务回滚救不了。所以容错**只能靠备份表 + 补偿逻辑**，这是本方案唯一的恢复路径，不可省略。
+
+#### 4.7.4 Result 结构变更（影响调用点）
+
+```java
+// 旧
+public record Result(int published, List<String> skipped, List<String> errors) {}
+// 新：新增 backups
+public record Result(int published, List<String> skipped, List<String> errors,
+                     Map<String, String> backups) {}
+```
+
+调用点仅一处：[DataForgeApiController.java:225](file:///D:/claudecode/dataforge/src/main/java/com/dataforge/web/DataForgeApiController.java)，需同步加 `resp.put("backups", r.backups())`。`confirmed=false` 的拒绝分支构造 `Result` 处也要补空 Map。
+
+#### 4.7.5 落地风险（实施时逐条验证）
+
+| # | 风险 | 应对 |
+|---|---|---|
+| R1 | `MysqlJdbcDataSource.execute()` 走 `JdbcTemplate.update`（**PreparedStatement**），DDL 能否经 PreparedStatement 执行需实测 | MySQL 8 支持 `TRUNCATE` / `CREATE TABLE ... AS SELECT` 的 prepare；实施时先跑一次验证，若失败则加原生 `Statement.execute()` 通道 |
+| R2 | 备份表 = 目标表全量副本，占用磁盘 | `order_item` 1.6 万行量级可控；确认无误后清理 |
+| R3 | 备份表名冲突（同秒重复执行） | 时间戳精确到毫秒；并有 `CREATE TABLE` 重名报错兜底（该表记 error，安全） |
+| R4 | `TRUNCATE` 需要 DROP 权限（比 DELETE 高） | 当前用 root，满足；若换账号需确认权限 |
+| R5 | `TRUNCATE` 加元数据锁，可能阻塞在线查询 | 发布前停止 shop-server / shop-rec（T6 前置条件） |
+| R6 | 单表失败不应中断整批 | 沿用现有「失败表隔离」，逐表 try/catch，继续下一张 |
+
+---
+
 ## 五、容易踩的坑
 
 | # | 坑 | 后果 | 对策 |

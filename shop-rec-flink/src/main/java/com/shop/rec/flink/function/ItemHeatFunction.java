@@ -36,8 +36,17 @@ import java.util.Map;
  * 同作业可避免重复消费与口径分叉（见详细设计 3.4「运行形态」）。
  *
  * <p>
- * <b>热度口径</b>：取 24 小时窗口的加权累计值。热度用于召回与打分的全局基准，
- * 采用较长窗口可抑制瞬时抖动对榜单的影响。
+ * <b>热度口径</b>：取 24 小时窗口的加权累计值，热度用于召回与打分的全局基准。
+ *
+ * <p>
+ * <b>时效</b>：按 {@code heat.flushIntervalMs}（默认 200 毫秒）周期性写入热度榜，
+ * 与用户偏好特征取同一档位，共同满足需求分析 4.3「行为产生后 5 秒内特征生效」。
+ *
+ * <p>
+ * ⚠️ <b>不要用「拉长刷写周期」来抑制榜单抖动</b>：榜单的平滑来自 24 小时聚合窗口本身
+ * （分值是 24 小时累加，天然平滑），刷写周期只决定陈旧度。原实现取 10 分钟，既没有让
+ * 榜单更稳（平滑早已由窗口提供），又违背了 5 秒时效要求，还把下面两个缺陷藏了起来：
+ * 定时器不自续导致分值永久冻结、热度归零不摘除成员导致沉寂商品滞留榜上。
  *
  * @author shop
  */
@@ -47,14 +56,17 @@ public class ItemHeatFunction extends KeyedProcessFunction<Long, BehaviorEvent, 
 
     private static final long serialVersionUID = 1L;
 
-    /** 热度榜刷新间隔（毫秒）：对应详细设计 3.4「每 10 分钟刷新商品热度榜」 */
-    private static final long FLUSH_INTERVAL_MS = 10 * 60 * 1000L;
-
     private static final String STATE_HOUR_BUCKETS = "itemHourBuckets";
 
     private static final String STATE_DAY_BUCKETS = "itemDayBuckets";
 
     private static final String STATE_NEXT_FLUSH = "itemNextFlushTs";
+
+    /** 最近一次已刷写的小时桶编号：跨小时边界时 24 小时累加值会变小，必须重算 */
+    private static final String STATE_LAST_FLUSH_HOUR = "itemLastFlushHour";
+
+    /** 自上次刷写以来是否收到过行为：无新行为且未跨小时边界时累加值未变，可跳过重算 */
+    private static final String STATE_PENDING_DELTA = "itemPendingDelta";
 
     private final FlinkJobConfig config;
 
@@ -65,6 +77,12 @@ public class ItemHeatFunction extends KeyedProcessFunction<Long, BehaviorEvent, 
     private transient MapState<String, Double> dayBuckets;
 
     private transient ValueState<Long> nextFlushTs;
+
+    /** 最近一次刷写时的小时桶编号 */
+    private transient ValueState<Long> lastFlushHour;
+
+    /** 自上次刷写以来是否收到过行为 */
+    private transient ValueState<Boolean> pendingDelta;
 
     private transient RedisWriter redisWriter;
 
@@ -83,6 +101,8 @@ public class ItemHeatFunction extends KeyedProcessFunction<Long, BehaviorEvent, 
                 withTtl(new MapStateDescriptor<>(STATE_DAY_BUCKETS, String.class, Double.class),
                         config.getDayBucketTtlHours()));
         nextFlushTs = getRuntimeContext().getState(new ValueStateDescriptor<>(STATE_NEXT_FLUSH, Long.class));
+        lastFlushHour = getRuntimeContext().getState(new ValueStateDescriptor<>(STATE_LAST_FLUSH_HOUR, Long.class));
+        pendingDelta = getRuntimeContext().getState(new ValueStateDescriptor<>(STATE_PENDING_DELTA, Boolean.class));
 
         redisWriter = new RedisWriter(config);
         redisWriter.connect();
@@ -131,11 +151,19 @@ public class ItemHeatFunction extends KeyedProcessFunction<Long, BehaviorEvent, 
         Double dayValue = dayBuckets.get(dayKey);
         dayBuckets.put(dayKey, (dayValue == null ? 0D : dayValue) + eventScore);
 
+        pendingDelta.update(Boolean.TRUE);
         scheduleFlush(ctx);
     }
 
     /**
      * 定时刷新热度榜
+     *
+     * <p>
+     * <b>定时器为何必须自续</b>：热度分是 24 小时滑窗累加值，商品停止产生行为后，
+     * 其分值仍应随着小时桶滑出窗口而自然下降。若只在 {@code processElement} 中注册定时器
+     * （刷完即清标记、下次有行为才重注册），商品最后一次行为之后就不再重算，分值将
+     * <b>永久冻结</b>在最后一次刷写的值上——沉寂商品长期滞留榜单、活跃商品持续变动，
+     * 排序会逐渐失真。故本轮刷写完成后立即注册下一轮，直至热度归零。
      *
      * @param timestamp 定时器时间戳
      * @param ctx       上下文
@@ -145,14 +173,17 @@ public class ItemHeatFunction extends KeyedProcessFunction<Long, BehaviorEvent, 
     public void onTimer(long timestamp, OnTimerContext ctx, Collector<Void> out) {
         Long itemId = ctx.getCurrentKey();
         try {
-            flushHeat(itemId);
+            nextFlushTs.clear();
+            if (flushHeat(itemId)) {
+                registerNextFlush(ctx, ctx.timerService().currentProcessingTime());
+            }
         } catch (Exception e) {
             LOG.error("商品热度刷新失败, itemId: {}", itemId, e);
-        } finally {
+            // 刷写失败同样要自续，否则该商品热度会永久冻结在本轮失败前的值上
             try {
-                nextFlushTs.clear();
+                registerNextFlush(ctx, ctx.timerService().currentProcessingTime());
             } catch (Exception ignored) {
-                LOG.debug("清理热度定时器状态失败, itemId: {}", itemId);
+                LOG.debug("热度定时器重注册失败, itemId: {}", itemId);
             }
         }
     }
@@ -160,10 +191,25 @@ public class ItemHeatFunction extends KeyedProcessFunction<Long, BehaviorEvent, 
     /**
      * 汇总 24 小时窗口热度并写入热度榜
      *
+     * <p>
+     * <b>变更门控</b>：无新行为且未跨小时边界时，24 小时累加值不可能变化，直接跳过重算。
+     * 没有这道门控，每个商品每轮刷写都要读 24 个小时桶，商品数百时状态读取量会被刷写频率
+     * 线性放大（670 商品 × 5 次/秒 × 24 桶 ≈ 8 万次状态读/秒），而其中绝大多数轮次读到的
+     * 是同一个值。
+     *
      * @param itemId 商品标识
+     * @return true 表示仍有热度、需继续跟踪；false 表示热度已归零、已从榜上摘除
      */
-    private void flushHeat(Long itemId) throws Exception {
+    private boolean flushHeat(Long itemId) throws Exception {
         long nowHour = BucketKeys.hourBucket(Instant.now());
+        Long flushedHour = lastFlushHour.value();
+        boolean hourChanged = flushedHour == null || flushedHour != nowHour;
+        boolean hasPending = Boolean.TRUE.equals(pendingDelta.value());
+
+        if (!hourChanged && !hasPending) {
+            return true;
+        }
+
         double heat = 0D;
         for (long ts = nowHour - 23; ts <= nowHour; ts++) {
             Double value = hourBuckets.get(BucketKeys.of(BucketKeys.DIM_ITEM, itemId, ts));
@@ -171,12 +217,21 @@ public class ItemHeatFunction extends KeyedProcessFunction<Long, BehaviorEvent, 
                 heat += value;
             }
         }
+
+        pendingDelta.clear();
+        lastFlushHour.update(nowHour);
+
         if (heat <= 0D) {
-            return;
+            // 热度已全部滑出 24 小时窗口：必须摘除成员。只 return 不摘除会让该商品
+            // 永久留在热度榜上，被热门召回当作热销商品返回
+            redisWriter.removeItemHeat(itemId);
+            return false;
         }
+
         Map<Long, Double> itemHeat = new HashMap<>(1);
         itemHeat.put(itemId, heat);
         redisWriter.writeItemHeat(itemHeat, config.getHotItemTtlSeconds());
+        return true;
     }
 
     /**
@@ -190,7 +245,17 @@ public class ItemHeatFunction extends KeyedProcessFunction<Long, BehaviorEvent, 
         if (scheduled != null && scheduled > now) {
             return;
         }
-        long target = now + FLUSH_INTERVAL_MS;
+        registerNextFlush(ctx, now);
+    }
+
+    /**
+     * 注册下一轮刷写定时器
+     *
+     * @param ctx 上下文
+     * @param now 当前处理时间
+     */
+    private void registerNextFlush(Context ctx, long now) throws Exception {
+        long target = now + config.getHeatFlushIntervalMs();
         ctx.timerService().registerProcessingTimeTimer(target);
         nextFlushTs.update(target);
     }

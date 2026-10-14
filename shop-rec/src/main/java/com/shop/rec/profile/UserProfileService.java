@@ -26,6 +26,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 /**
@@ -42,6 +43,11 @@ import java.util.stream.Collectors;
  *
  * <p>
  * <b>冷启动</b>：行为条数少于 3 条的用户不生成画像，视为冷启动用户并计数。
+ *
+ * <p>
+ * <b>两条触发路径</b>：定时任务（每日 02:00）与管理后台手动触发，二者共用
+ * {@link #doGenerate()}，保证产出一致；执行期间由 {@link #rebuilding} 串行化，
+ * 避免两次任务交叠互相覆盖版本与有效性。
  *
  * @author shop
  */
@@ -84,14 +90,83 @@ public class UserProfileService {
 
     private final RecRedis recRedis;
 
+    /** 未执行过重建时的状态说明（与前端约定：该文案表示「从未重建」，而非「失败」） */
+    public static final String NOT_REBUILT = "尚未执行重建";
+
+    /**
+     * 画像任务进行中标记
+     *
+     * <p>手动触发与定时任务共用：两次任务交叠会互相覆盖写入的版本与有效性，
+     * 必须串行。
+     */
+    private final AtomicBoolean rebuilding = new AtomicBoolean(false);
+
+    /** 最近一次画像任务的结束时间；从未执行时为 null */
+    private volatile LocalDateTime lastRebuildTime;
+
+    /** 最近一次画像任务是否成功 */
+    private volatile boolean lastRebuildSuccess = false;
+
+    /** 最近一次画像任务的结果说明 */
+    private volatile String lastRebuildMessage = NOT_REBUILT;
+
     /**
      * 每日画像生成
      *
      * <p>每日 02:00 执行（对应详细设计 8.2 任务 1），与商品全量重建（01:00）分时执行避免重叠。
      * 单用户失败跳过并计数，整体超时中断并保留旧版本——旧版本在写入新版本前始终有效。
+     *
+     * <p>与手动触发（{@link #triggerRebuild()}）走同一条执行路径，保证两者产出一致。
      */
     @Scheduled(cron = "0 0 2 * * ?")
     public void generateDailyProfile() {
+        if (!triggerRebuild()) {
+            log.warn("已有画像任务在执行中，本次定时触发被忽略");
+        }
+    }
+
+    /**
+     * 手动触发画像重建（管理后台用）
+     *
+     * <p><b>为什么需要这个入口</b>：画像原先只依赖 {@code @Scheduled}（每日 02:00），
+     * 换完用户与行为数据只能干等次日凌晨；手动触发补齐了这个缺口。
+     *
+     * <p><b>异步执行</b>：全量行为归纳耗时可达数分钟，同步执行会让管理后台请求超时。
+     * 触发后由调用方轮询 {@link #rebuildStatus()} 获知结果。
+     *
+     * @return 已触发返回 true；已有任务在执行中返回 false
+     */
+    public boolean triggerRebuild() {
+        if (!rebuilding.compareAndSet(false, true)) {
+            return false;
+        }
+        Thread worker = new Thread(() -> {
+            try {
+                doGenerate();
+            } finally {
+                rebuilding.set(false);
+            }
+        }, "rec-profile-rebuild");
+        // 守护线程：重建不应阻止进程退出
+        worker.setDaemon(true);
+        worker.start();
+        return true;
+    }
+
+    /**
+     * 查询最近一次画像任务的状态
+     *
+     * @return 任务状态快照
+     */
+    public RebuildStatus rebuildStatus() {
+        return new RebuildStatus(rebuilding.get(), lastRebuildTime,
+                lastRebuildSuccess, lastRebuildMessage);
+    }
+
+    /**
+     * 执行一次画像生成（手动触发与定时任务共用）
+     */
+    private void doGenerate() {
         long start = System.currentTimeMillis();
         int version = Integer.parseInt(LocalDateTime.now().format(VERSION_FORMAT));
         LocalDateTime since = LocalDateTime.now().minusDays(PROFILE_DAYS);
@@ -99,18 +174,21 @@ public class UserProfileService {
         Map<Long, MallProductDO> itemDimensions = loadItemDimensions();
         if (itemDimensions.isEmpty()) {
             log.warn("商品维度为空，画像任务终止并保留旧版本");
+            markFinished(false, "商品维度为空，任务终止并保留旧版本");
             return;
         }
 
         int success = 0;
         int coldStart = 0;
         int failed = 0;
+        boolean timeout = false;
 
         for (int shard = 0; shard < SHARDS; shard++) {
             if (System.currentTimeMillis() - start > MAX_DURATION_MS) {
                 log.error("画像任务超时中断（已处理 {} 个分片），保留旧版本，已成功: {}, 冷启动: {}, 失败: {}",
                         shard, success, coldStart, failed);
-                return;
+                timeout = true;
+                break;
             }
 
             List<UserBehaviorLogDO> shardLogs = behaviorLogMapper.selectForProfile(since, SHARDS, shard);
@@ -141,6 +219,45 @@ public class UserProfileService {
 
         log.info("画像任务完成, version: {}, 成功: {}, 冷启动跳过: {}, 失败: {}, 耗时: {}ms",
                 version, success, coldStart, failed, System.currentTimeMillis() - start);
+
+        if (timeout) {
+            markFinished(false, String.format("任务超时中断，已生成 %d 个（保留旧版本）", success));
+        } else if (success == 0) {
+            // 跑完但一条都没生成，与「商品为空」同理属需要关注的失败态：
+            // 只看时间戳的调用方会以为「重建完成」，实际画像仍是空的
+            markFinished(false,
+                    String.format("未生成任何画像（行为数据不足 %d 条的用户）", MIN_BEHAVIOR_COUNT));
+        } else {
+            markFinished(true, String.format("画像生成完成：成功 %d，冷启动跳过 %d，失败 %d",
+                    success, coldStart, failed));
+        }
+    }
+
+    /**
+     * 记录一次画像任务的结果（结束时间 + 成功标志 + 说明）
+     *
+     * <p>无论成功失败都更新时间戳（标识「动作已结束」，让前端停止轮询），
+     * 成功与否必须靠 {@link #lastRebuildSuccess} 区分。
+     *
+     * @param success 是否成功
+     * @param message 结果说明
+     */
+    private void markFinished(boolean success, String message) {
+        this.lastRebuildSuccess = success;
+        this.lastRebuildMessage = message;
+        this.lastRebuildTime = LocalDateTime.now();
+    }
+
+    /**
+     * 画像任务状态快照（管理后台轮询用）
+     *
+     * @param rebuilding         是否正在执行
+     * @param lastRebuildTime    最近一次任务的结束时间；从未执行时为 null
+     * @param lastRebuildSuccess 最近一次任务是否成功
+     * @param lastRebuildMessage 结果说明；从未执行时为「尚未执行重建」
+     */
+    public record RebuildStatus(boolean rebuilding, LocalDateTime lastRebuildTime,
+                                boolean lastRebuildSuccess, String lastRebuildMessage) {
     }
 
     /**

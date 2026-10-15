@@ -14,6 +14,7 @@ B2C 电商系统，**Spring Boot 单体后端 + Vue 3 三端分离前端**，Ngi
 - [数据库](#数据库)
 - [账号与权限](#账号与权限)
 - [核心设计](#核心设计)
+- [推荐子系统](#推荐子系统)
 - [离线数仓](#离线数仓)
 - [前端设计系统](#前端设计系统)
 
@@ -32,9 +33,10 @@ B2C 电商系统，**Spring Boot 单体后端 + Vue 3 三端分离前端**，Ngi
 | 前端 | Vue 3 + Vite + Naive UI + Pinia + ECharts |
 | 反向代理 | Nginx 1.20.2 |
 | JDK | OpenJDK 22 |
-| RAG 语义搜索 | LangChain4j 1.19.0 + Qdrant（1536维）+ DashScope（text-embedding-v1 嵌入） |
-| 全文检索（待接入） | Elasticsearch 8.11.4 + IK 8.11.4 中文分词（compose 一键启动已就绪，Java 侧尚未接线） |
-| 智能客服 | LangChain4j AiServices + DeepSeek（主）/ qwen-plus（备）+ Function Calling 工具链 + RAG 检索增强 |
+| RAG 语义搜索 | LangChain4j 1.19.0 + Qdrant（1024 维）+ 本地 TEI 部署 BGE-M3 向量化 |
+| 全文检索（当前未使用） | Elasticsearch 8.11.4 + IK 8.11.4 中文分词（归 `es` profile，默认关闭省内存；Java 侧未接线） |
+| 智能客服 | LangChain4j AiServices + DeepSeek（主）/ 智谱 glm-4-flash（备）+ Function Calling 工具链 + RAG 检索增强 |
+| 推荐子系统 | Kafka 3.7.0（行为事件流）+ Flink 1.17.2（实时特征计算）+ 独立进程 `:8082` / 独立库 `shop_rec` |
 | 离线数仓 | Hive 3.x + Sqoop 1.4.x + Azkaban 3.x |
 
 ---
@@ -42,7 +44,7 @@ B2C 电商系统，**Spring Boot 单体后端 + Vue 3 三端分离前端**，Ngi
 ## 快速开始
 
 ```bash
-# 0. 中间件一键启动（Redis / Qdrant / Elasticsearch / RocketMQ / Nginx 五个，默认不含 TEI）
+# 0. 中间件一键启动（默认仅 Redis / RocketMQ / Nginx 三个 —— 商城核心链路必需）
 cd shop && docker compose up -d
 
 # 0b. 启用 RAG 向量检索（TEI 文本向量化，需 NVIDIA GPU + nvidia-container-toolkit）
@@ -50,8 +52,10 @@ cd shop && docker compose up -d
 #     BGE-M3 权重目录由 .env 的 BGE_M3_MODEL_PATH 指定（默认 D:/models/bge-m3，约 2.2G，需含 1_Pooling/）
 cd shop && docker compose --profile gpu up -d
 
-# 1. 后端编译启动
-cd shop && mvn clean package -DskipTests -q && mvn spring-boot:run
+# 1. 后端编译启动（Maven 多模块聚合工程：必须 -pl 指定子模块 + 显式 workingDirectory，
+#    否则读不到仓库根的 .env，报 MySQL "Access denied"）
+cd shop && mvn clean install -DskipTests -q
+cd shop && mvn -pl shop-server spring-boot:run -Dspring-boot.run.workingDirectory="$(pwd -W)"
 
 # 2. 前后端构建（三端）
 cd frontend            && npm run build
@@ -63,7 +67,7 @@ cd frontend-merchant   && npm run build
 
 | 地址 | 页面 | 默认账号 |
 |------|------|----------|
-| `http://localhost` | 用户端 | zhangsan / lisi |
+| `http://localhost` | 用户端 | user |
 | `http://localhost/admin/` | 管理后台 | admin |
 | `http://localhost/merchant/` | 商家中心 | merchant1 |
 | `http://localhost:8080/swagger-ui.html` | 接口文档（Swagger UI） | — |
@@ -78,20 +82,25 @@ cd frontend-merchant   && npm run build
 ## 项目结构
 
 ```
-shop/
-├── src/                        # 后端 Java 源码
-│   ├── controller/             #   REST 接口（Admin/User/Order/Product/Merchant...）
-│   ├── service/                #   业务逻辑
-│   ├── mapper/                 #   MyBatis-Plus 数据访问
-│   ├── model/entity/dto/vo     #   数据模型
-│   ├── rag/                    #   语义搜索 + 智能客服
-│   ├── mq/                     #   RocketMQ 异步落单 + 延迟取消
-│   ├── common/                 #   通用工具 + 统一返回
-│   └── config/                 #   全局配置 + 异常处理 + 定时任务
-├── frontend/                   # 用户端 Vue 3
-├── frontend-admin/             # 管理后台 Vue 3
-├── frontend-merchant/          # 商家中心 Vue 3
-└── docker/                     # Nginx / ES / RocketMQ 容器配置
+shop/                            # Maven 聚合工程
+├── shop-common/                 # 通用能力（Result / 异常 / 分页 / 缓存 / Sa-Token 工具）
+├── shop-server/                 # 商城后端 :8080（启动类 ShopApplication）
+│   └── src/main/java/com/shop/
+│       ├── controller/          #   REST 接口（Admin/User/Order/Product/Merchant...）
+│       ├── service/ mapper/     #   业务逻辑与持久层
+│       ├── model/               #   entity / dto / vo / query
+│       ├── rag/                 #   语义搜索 + 智能客服
+│       ├── mq/                  #   RocketMQ 异步落单 + 延迟取消
+│       ├── config/ web/ task/   #   全局配置、异常处理、定时任务
+│       └── constant/            #   枚举与常量
+├── shop-rec/                    # 推荐服务 :8082（启动类 RecApplication，独立库 shop_rec）
+├── shop-rec-flink/              # 推荐链路 Flink 作业（独立 Maven 工程，不参与主构建）
+├── frontend/                    # 用户端 Vue 3
+├── frontend-admin/              # 管理后台 Vue 3
+├── frontend-merchant/           # 商家中心 Vue 3
+├── shared/                      # 三端共享前端源码（CSS 变量 / TS 工具）
+├── docker/                      # Nginx / ES / RocketMQ 容器配置
+└── azkaban/                     # 离线数仓调度作业
 
 独立项目：shop-data-mocker（Mock 数据工具）
 ```
@@ -112,7 +121,8 @@ shop/
 | **商家中心** | shop_id 自动隔离、本店商品/订单管理、发货、本店 ECharts 看板 |
 | **报表库看板** | 查询 shop_ads 报表库（离线数仓产出），ECharts 报表展示 |
 | **智能客服** | SSE 流式对话，RAG 检索 TOP-3 + 分类名回退；Function Calling 工具链（查/取消真实订单，写操作状态机 + 库存回滚）；引用溯源编号 + 商品卡片推送；小星真人导购人设 |
-| **RAG 搜索** | DashScope text-embedding-v1 向量化 → Qdrant 检索 → 元数据过滤（分类/价格） |
+| **RAG 搜索** | 本地 TEI/BGE-M3 向量化（1024 维）→ Qdrant 检索 → 元数据过滤（分类/价格） |
+| **推荐服务** | 独立进程 + 独立库；行为采集（Kafka）→ Flink 实时特征 → 多路召回（类目偏好 + 热门）→ 首页推荐流，详见[推荐子系统](#推荐子系统) |
 
 ---
 
@@ -173,14 +183,14 @@ shop/
 
 ## 数据库
 
-### 主库 `shop`（18 张表）
+### 主库 `shop`（20 张表）
 
 | 类别 | 表 | 说明 |
 |------|----|------|
-| 业务 | user / product / sku / orders / order_item / cart / category / address | 用户/商品/订单/购物车/分类/地址 |
+| 业务 | user / product / sku / orders / order_item / cart / category / address / brand | 用户/商品/订单/购物车/分类/地址/品牌 |
 | 账号 | admin / shop | 管理员、商家独立账号（shop 以 shop_id 为身份标识，无 user_id 关联） |
 | RBAC | role / permission / user_role / role_permission | 三级角色 + 6 项权限 |
-| 日志 | user_status_log | 账号状态变更记录 |
+| 日志 | user_status_log / rag_trace | 账号状态变更记录 / RAG 行为反馈埋点 |
 | 智能客服 | chat_conversation / chat_message / chat_feedback | 对话会话 / 消息 / 反馈 |
 
 ### 报表库 `shop_ads`（9 张表）
@@ -224,10 +234,31 @@ shop/
 | **缓存防护** | 商品 ID 布隆过滤器（防穿透）→ 商品详情逻辑过期缓存（防击穿）→ DB |
 | **商品快照** | order_item 记录下单时名称/价格/图片，不受后续变更影响 |
 | **购物车标记** | 下单后批量 `cart.is_ordered = 1`，列表过滤已结算 |
-| **RAG 搜索** | DashScope text-embedding-v1 向量化 → Qdrant 检索 → 元数据过滤 |
-| **智能客服** | SSE 流式输出 → RAG 检索 TOP-3（空结果走分类名回退）→ DeepSeek 生成回答；主备降级链（熔断 → qwen 纯 RAG → 模板兜底）；Function Calling 工具链（AiServices 查/取消订单，userId 锁死 + 归属校验防越权）；引用溯源 [n] 编号 + 商品卡片推送 |
+| **RAG 搜索** | 本地 TEI/BGE-M3 向量化（1024 维）→ Qdrant 检索 → 元数据过滤 |
+| **智能客服** | SSE 流式输出 → RAG 检索 TOP-3（空结果走分类名回退）→ DeepSeek 生成回答；主备降级链（熔断 → glm-4-flash 纯 RAG → 模板兜底）；Function Calling 工具链（AiServices 查/取消订单，userId 锁死 + 归属校验防越权）；引用溯源 [n] 编号 + 商品卡片推送 |
 | **统一返回** | `{ code, msg, data }`，全局异常处理器接管所有异常 |
 | **Long→String** | Jackson 全局配置，解决雪花 ID 前端 JS 精度丢失 |
+
+---
+
+## 推荐子系统
+
+独立进程 `:8082`（仅绑回环），配独立数据库 `shop_rec`，与商城主库**物理隔离**；与商城后端通过内部令牌 `X-Internal-Token` 鉴权（无默认值，环境变量注入）。
+
+**数据流**
+
+```
+用户行为上报（商城内嵌入口 @Profile("!rec")）→ Kafka user-behavior
+    → Flink 实时计算（商品热度榜 + 用户画像）
+    → shop_rec（热度分 / 画像 / 固定位 / 过滤规则）
+    → 多路召回（类目偏好路 + 热门路）→ 融合排序 → 首页推荐流
+```
+
+**独立库 `shop_rec`（7 张表）**：`user_behavior_log`、`user_profile`、`item_hot_score`、`rec_config`、`rec_filter_rule`、`rec_fixed_slot`、`pipeline_metric`。
+
+**三进程组件隔离约定**（商城 `:8080` / 推荐 `:8082` / Flink 作业）：推荐侧组件标 `@Profile("rec")`，商城侧行为采集标 `@Profile("!rec")`，基础设施不带 profile —— 漏标会让定时任务在两个进程重复执行。
+
+**Flink 作业**：独立工程 `shop-rec-flink`（编译目标 Java 11，不参与主 pom 构建），打包后提交至 compose 的 Flink 集群（归 `rec` profile）。
 
 ---
 

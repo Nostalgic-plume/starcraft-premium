@@ -26,11 +26,6 @@
       </n-button>
     </div>
 
-    <!-- 状态筛选为前端过滤（后端 /merchant/product/page 无 status 参数） -->
-    <n-alert v-if="statusFilter !== null" type="info" :bordered="false" class="filter-tip">
-      后端商品分页接口暂不支持状态筛选，当前为本店商品内按状态过滤（单店商品上限内）。
-    </n-alert>
-
     <!-- 商品表格 -->
     <div class="table-card">
       <n-data-table
@@ -54,18 +49,13 @@
     <!-- 新增 / 编辑抽屉 -->
     <n-drawer v-model:show="showDrawer" :width="600" placement="right">
       <n-drawer-content :title="isEdit ? '编辑商品' : '新增商品'" closable>
-        <n-alert v-if="isEdit" type="warning" :bordered="false" class="form-alert">
-          后端暂未开放商品信息编辑接口，名称 / 分类 / 价格 / 库存仅作展示；可调整状态后保存。
-        </n-alert>
-
         <n-form :label-placement="'left'" label-width="96" :show-feedback="false">
           <n-form-item label="商品名称">
-            <n-input v-model:value="form.name" :disabled="isEdit" placeholder="请输入商品名称" />
+            <n-input v-model:value="form.name" placeholder="请输入商品名称" />
           </n-form-item>
           <n-form-item label="商品分类">
             <n-select
               v-model:value="form.categoryId"
-              :disabled="isEdit"
               :options="categoryOptions"
               placeholder="请选择叶子分类（如「手机」而非「手机数码」）"
             />
@@ -73,15 +63,57 @@
           <n-form-item label="商品品牌">
             <n-select
               v-model:value="form.brandId"
-              :disabled="isEdit"
               :options="brandOptions"
               clearable
               filterable
               placeholder="请选择品牌（品牌参与 RAG 语义检索，建议填写）"
             />
           </n-form-item>
-          <n-form-item label="主图 URL">
-            <n-input v-model:value="form.mainImage" :disabled="isEdit" placeholder="请输入商品主图 URL" />
+          <n-form-item label="主图">
+            <div class="upload-row">
+              <n-input v-model:value="form.mainImage" placeholder="粘贴图片 URL，或点右侧上传" />
+              <n-upload
+                :show-file-list="false"
+                :custom-request="uploadMainImage"
+                accept="image/*"
+              >
+                <n-button size="small" secondary :loading="uploading">上传</n-button>
+              </n-upload>
+            </div>
+          </n-form-item>
+          <n-form-item label="商品描述">
+            <n-input
+              v-model:value="form.description"
+              type="textarea"
+              :rows="2"
+              placeholder="一句话卖点，展示在商品列表与详情页顶部"
+            />
+          </n-form-item>
+          <n-form-item label="轮播图">
+            <div class="upload-col">
+              <n-input
+                v-model:value="form.imagesText"
+                type="textarea"
+                :rows="3"
+                placeholder="每行一个图片 URL（第一张建议与主图一致），留空则不显示轮播"
+              />
+              <n-upload
+                :show-file-list="false"
+                :custom-request="uploadCarouselImage"
+                accept="image/*"
+                multiple
+              >
+                <n-button size="small" secondary :loading="uploading">上传轮播图</n-button>
+              </n-upload>
+            </div>
+          </n-form-item>
+          <n-form-item label="商品详情">
+            <n-input
+              v-model:value="form.detail"
+              type="textarea"
+              :rows="5"
+              placeholder="支持 HTML 富文本，展示在详情页「商品详情」区块，留空则显示「暂无详情」"
+            />
           </n-form-item>
           <n-form-item label="主图预览">
             <img
@@ -101,22 +133,20 @@
                 :options="productStatusOptions"
                 style="width: 140px"
               />
-              <span v-if="!isEdit" class="form-hint">新增商品默认在售</span>
+              <span v-if="!isEdit" class="form-hint">新增后进入待审核，管理员通过后上架</span>
             </div>
           </n-form-item>
           <n-form-item label="SKU 规格">
             <div class="sku-list">
-              <div v-for="(sku, idx) in form.skuList" :key="idx" class="sku-row">
+              <div v-for="(sku, idx) in form.skuList" :key="sku.id ?? idx" class="sku-row">
                 <n-input
                   v-model:value="sku.name"
-                  :disabled="isEdit"
                   placeholder="规格名"
                   size="small"
                   style="width: 130px"
                 />
                 <n-input-number
                   v-model:value="sku.price"
-                  :disabled="isEdit"
                   :min="0"
                   placeholder="价格"
                   size="small"
@@ -124,7 +154,6 @@
                 />
                 <n-input-number
                   v-model:value="sku.originalPrice"
-                  :disabled="isEdit"
                   :min="0"
                   placeholder="原价"
                   size="small"
@@ -132,14 +161,12 @@
                 />
                 <n-input-number
                   v-model:value="sku.stock"
-                  :disabled="isEdit"
                   :min="0"
                   placeholder="库存"
                   size="small"
                   style="width: 96px"
                 />
                 <n-button
-                  v-if="!isEdit"
                   size="tiny"
                   quaternary
                   type="error"
@@ -149,7 +176,7 @@
                   删除
                 </n-button>
               </div>
-              <n-button v-if="!isEdit" size="small" secondary @click="addSku">添加规格</n-button>
+              <n-button size="small" secondary @click="addSku">添加规格</n-button>
             </div>
           </n-form-item>
         </n-form>
@@ -158,7 +185,7 @@
           <div class="drawer-footer">
             <n-button @click="showDrawer = false">取消</n-button>
             <n-button type="primary" :loading="submitting" @click="handleSubmit">
-              {{ isEdit ? '保存状态' : '确定新增' }}
+              {{ isEdit ? '保存修改' : '确定新增' }}
             </n-button>
           </div>
         </template>
@@ -170,10 +197,10 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
 import {
-  NAlert, NButton, NDataTable, NDrawer, NDrawerContent, NForm, NFormItem,
-  NInput, NInputNumber, NPagination, NSelect, useDialog, useMessage
+  NButton, NDataTable, NDrawer, NDrawerContent, NForm, NFormItem,
+  NInput, NInputNumber, NPagination, NSelect, NUpload, useDialog, useMessage
 } from 'naive-ui'
-import type { DataTableColumns } from 'naive-ui'
+import type { DataTableColumns, UploadCustomRequestOptions } from 'naive-ui'
 import { merchantApi } from '@/api/merchant'
 import { get } from '@/api/request'
 import StatusTag, { type StatusType } from '@/components/StatusTag.vue'
@@ -195,18 +222,16 @@ const keyword = ref('')
 /** 状态筛选：null=全部，0=待审核，1=在售，2=下架 */
 const statusFilter = ref<number | null>(null)
 
-/** 商品状态选项（后端约定：0=待审核 1=在售 2=下架） */
+/**
+ * 商品状态选项（后端约定：0=待审核 1=在售 2=下架）
+ * 「在售」对商家置灰：上架须经管理员审核，商家只能送审（0）或下架（2）。
+ * 后端 Service 层有同样的拦截，此处仅为体验优化，不构成防护。
+ */
 const productStatusOptions = [
   { label: '待审核', value: 0 },
-  { label: '在售', value: 1 },
+  { label: '在售（需管理员审核）', value: 1, disabled: true },
   { label: '下架', value: 2 }
 ]
-
-/**
- * 后端 /merchant/product/page 无 status 参数，状态筛选在前端完成。
- * 触发时拉取 keyword 匹配全量（上限内，口径同 Dashboard 组装），前端过滤 + 前端分页。
- */
-const FILTER_ALL_LIMIT = 999
 
 /* ==================== 分类（新增表单用） ==================== */
 
@@ -259,6 +284,8 @@ async function loadBrands() {
 /* ==================== 新增 / 编辑表单 ==================== */
 
 interface SkuFormItem {
+  /** SKU ID：编辑时保留（标识要更新的已有 SKU），新增行为空 */
+  id?: string
   name: string
   price: number
   originalPrice: number
@@ -268,9 +295,13 @@ interface SkuFormItem {
 interface ProductFormModel {
   id: string | null
   name: string
+  description: string
   categoryId: string | number | null
   brandId: string | number | null
   mainImage: string
+  /** 轮播图：表单以多行文本承载，提交时按行拆成数组 */
+  imagesText: string
+  detail: string
   status: number
   skuList: SkuFormItem[]
 }
@@ -278,16 +309,26 @@ interface ProductFormModel {
 const showDrawer = ref(false)
 const isEdit = ref(false)
 const submitting = ref(false)
+/** 编辑前的原始状态：保存时若状态被改动，需额外调一次状态更新接口（状态与商品信息是两条独立接口） */
+const originalStatus = ref<number | null>(null)
 
-const form = ref<ProductFormModel>({
-  id: null,
-  name: '',
-  categoryId: null,
-  brandId: null,
-  mainImage: '',
-  status: 1,
-  skuList: [{ name: '标准版', price: 0, originalPrice: 0, stock: 0 }]
-})
+/** 新增表单的空白初始值（编辑时由 openEdit 按行回填） */
+function emptyForm(): ProductFormModel {
+  return {
+    id: null,
+    name: '',
+    description: '',
+    categoryId: null,
+    brandId: null,
+    mainImage: '',
+    imagesText: '',
+    detail: '',
+    status: 1,
+    skuList: [{ name: '标准版', price: 0, originalPrice: 0, stock: 0 }]
+  }
+}
+
+const form = ref<ProductFormModel>(emptyForm())
 
 /** 无图占位（浅灰底 SVG，data URI 内联，避免外部依赖） */
 const IMG_PLACEHOLDER =
@@ -299,31 +340,28 @@ function onPreviewError(e: Event) {
 
 function openAdd() {
   isEdit.value = false
-  form.value = {
-    id: null,
-    name: '',
-    categoryId: null,
-    brandId: null,
-    mainImage: '',
-    status: 1,
-    skuList: [{ name: '标准版', price: 0, originalPrice: 0, stock: 0 }]
-  }
+  form.value = emptyForm()
   showDrawer.value = true
 }
 
 function openEdit(row: ProductVO) {
   isEdit.value = true
+  originalStatus.value = row.status ?? 1
   const skus = row.skuList || []
   form.value = {
     id: row.id,
     name: row.name || '',
+    description: row.description || '',
     categoryId: row.categoryId ?? null,
     brandId: row.brandId ?? null,
     mainImage: row.mainImage || '',
+    imagesText: (row.images || []).join('\n'),
+    detail: row.detail || '',
     status: row.status ?? 1,
     skuList:
       skus.length > 0
         ? skus.map((s) => ({
+            id: s.id,
             name: s.name || '',
             price: Number(s.price) || 0,
             originalPrice: Number(s.originalPrice) || 0,
@@ -349,29 +387,85 @@ function removeSku(idx: number) {
   form.value.skuList.splice(idx, 1)
 }
 
-async function handleSubmit() {
-  // 编辑：仅状态走真实 updateStatus（后端无商品信息编辑接口）
-  if (isEdit.value) {
-    if (form.value.status === null || form.value.status === undefined) {
-      message.warning('请选择商品状态')
-      return
-    }
-    submitting.value = true
-    try {
-      await merchantApi.productUpdateStatus(form.value.id as string, form.value.status)
-      message.success('商品状态已更新')
-      showDrawer.value = false
-      loadProducts()
-    } catch (e) {
-      console.error('更新商品状态失败:', e)
-      message.error('操作失败')
-    } finally {
-      submitting.value = false
-    }
-    return
-  }
+/* ==================== 图片上传 ==================== */
 
-  // 新增：走真实 /merchant/product/add（shop_id 后端注入）
+/** 上传中标记（禁用按钮避免重复点击） */
+const uploading = ref(false)
+
+/**
+ * 主图上传成功后直接覆盖 form.mainImage。
+ * 「上传」与「手填 URL」并存：mock 数据全是外链，只留上传会导致编辑既有商品时原图丢失。
+ */
+async function uploadMainImage(options: UploadCustomRequestOptions) {
+  const raw = options.file.file
+  if (!raw) return
+  uploading.value = true
+  try {
+    const res = await merchantApi.uploadImage(raw)
+    form.value.mainImage = res.data
+    options.onFinish()
+    message.success('主图上传成功')
+  } catch (e) {
+    console.error('主图上传失败:', e)
+    options.onError()
+    message.error('图片上传失败')
+  } finally {
+    uploading.value = false
+  }
+}
+
+/** 轮播图上传成功后追加到 imagesText 末尾（该字段是每行一个 URL 的文本） */
+async function uploadCarouselImage(options: UploadCustomRequestOptions) {
+  const raw = options.file.file
+  if (!raw) return
+  uploading.value = true
+  try {
+    const res = await merchantApi.uploadImage(raw)
+    const lines = form.value.imagesText
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    lines.push(res.data)
+    form.value.imagesText = lines.join('\n')
+    options.onFinish()
+    message.success('轮播图上传成功')
+  } catch (e) {
+    console.error('轮播图上传失败:', e)
+    options.onError()
+    message.error('图片上传失败')
+  } finally {
+    uploading.value = false
+  }
+}
+
+/**
+ * 组装提交给后端的商品载荷（新增 / 编辑共用）。
+ * 编辑时 skuList 会带上 id，后端据此做「增 / 改 / 删」diff；
+ * 新增时 id 为 undefined，JSON 序列化时自动省略。
+ */
+function buildProductPayload() {
+  return {
+    name: form.value.name.trim(),
+    description: form.value.description,
+    categoryId: form.value.categoryId as string | number,
+    brandId: form.value.brandId ?? undefined,
+    mainImage: form.value.mainImage,
+    images: form.value.imagesText
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    detail: form.value.detail,
+    skuList: form.value.skuList.map((s) => ({
+      id: s.id,
+      name: s.name.trim(),
+      price: Number(s.price) || 0,
+      originalPrice: Number(s.originalPrice) || 0,
+      stock: Number(s.stock) || 0
+    }))
+  }
+}
+
+async function handleSubmit() {
   if (!form.value.name.trim()) {
     message.warning('请输入商品名称')
     return
@@ -384,26 +478,26 @@ async function handleSubmit() {
     message.warning('请填写完整 SKU 规格信息')
     return
   }
+
   submitting.value = true
   try {
-    await merchantApi.productAdd({
-      name: form.value.name.trim(),
-      categoryId: form.value.categoryId,
-      brandId: form.value.brandId ?? undefined,
-      mainImage: form.value.mainImage,
-      skuList: form.value.skuList.map((s) => ({
-        name: s.name.trim(),
-        price: Number(s.price) || 0,
-        originalPrice: Number(s.originalPrice) || 0,
-        stock: Number(s.stock) || 0
-      }))
-    })
-    message.success('新增商品成功')
+    if (isEdit.value) {
+      const id = form.value.id as string
+      await merchantApi.productUpdate(id, buildProductPayload())
+      // 状态与商品信息是两条独立接口，状态有变化时补一次调用
+      if (form.value.status !== originalStatus.value) {
+        await merchantApi.productUpdateStatus(id, form.value.status)
+      }
+      message.success('商品信息已更新')
+    } else {
+      await merchantApi.productAdd(buildProductPayload())
+      message.success('新增成功，等待管理员审核')
+    }
     showDrawer.value = false
     loadProducts()
   } catch (e) {
-    console.error('新增商品失败:', e)
-    message.error('新增失败')
+    console.error(isEdit.value ? '更新商品失败:' : '新增商品失败:', e)
+    message.error(isEdit.value ? '更新失败' : '新增失败')
   } finally {
     submitting.value = false
   }
@@ -514,37 +608,19 @@ const columns: DataTableColumns<ProductVO> = [
 
 /* ==================== 操作 ==================== */
 
-/** 前端分页切片（状态筛选本地过滤后分页用） */
-function paginate<T>(arr: T[], p: number, size: number): T[] {
-  return arr.slice((p - 1) * size, p * size)
-}
-
 async function loadProducts() {
   loading.value = true
   try {
     const kw = keyword.value.trim()
-    if (statusFilter.value === null) {
-      // 后端分页（/merchant/product/page 支持 keyword）
-      const res = await merchantApi.productPage({
-        page: page.value,
-        pageSize: pageSize.value,
-        ...(kw ? { keyword: kw } : {})
-      })
-      list.value = res.data?.list || []
-      total.value = Number(res.data?.total) || 0
-    } else {
-      // 后端无 status 参数 → 拉取 keyword 匹配全量，前端按状态过滤 + 前端分页
-      const res = await merchantApi.productPage({
-        page: 1,
-        pageSize: FILTER_ALL_LIMIT,
-        ...(kw ? { keyword: kw } : {})
-      })
-      const filtered = (res.data?.list || []).filter(
-        (p) => Number(p.status) === statusFilter.value
-      )
-      total.value = filtered.length
-      list.value = paginate(filtered, page.value, pageSize.value)
-    }
+    // keyword 与 status 均交由后端过滤：前端过滤会与分页冲突（只能筛当前页）
+    const res = await merchantApi.productPage({
+      page: page.value,
+      pageSize: pageSize.value,
+      ...(kw ? { keyword: kw } : {}),
+      ...(statusFilter.value !== null ? { status: statusFilter.value } : {})
+    })
+    list.value = res.data?.list || []
+    total.value = Number(res.data?.total) || 0
   } catch (e) {
     console.error('加载商品列表失败:', e)
     list.value = []
@@ -722,6 +798,21 @@ onMounted(async () => {
   object-fit: cover;
   border-radius: var(--ds-r-sm, 9px);
   background: var(--ds-bg-2, #eef0f4);
+}
+/* 主图：URL 输入框 + 上传按钮并排 */
+.upload-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+/* 轮播图：文本框在上、上传按钮在下 */
+.upload-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
 }
 .sku-list {
   width: 100%;

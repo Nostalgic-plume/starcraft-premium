@@ -1,4 +1,4 @@
-import { get, put } from './request'
+import { get, post, put } from './request'
 import type { PageResult, Result, UserPageQuery, UserStatusPayload, UserVO } from './types'
 
 export const adminApi = {
@@ -13,5 +13,9 @@ export const adminApi = {
   /** 批量修改用户状态 */
   batchUpdateUserStatus(data: UserStatusPayload & { ids: string[] }): Promise<Result<void>> {
     return put<void>('/admin/user/batch-status', data)
+  },
+  /** 强制用户下线（只踢会话，不改变账号状态） */
+  kickoutUser(id: string | number): Promise<Result<void>> {
+    return post<void>('/admin/user/' + id + '/kickout')
   }
 }

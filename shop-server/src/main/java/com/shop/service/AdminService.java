@@ -63,4 +63,17 @@ public interface AdminService {
      * @throws BusinessException 操作人/目标用户不存在或无权限操作该用户时抛出
      */
     void batchUpdateUserStatus(java.util.List<Long> targetUserIds, Integer newStatus, String reason);
+
+    /**
+     * 强制目标用户下线（只踢已登录会话，不改变账号状态）
+     * <p>
+     * 与 {@link #updateUserStatus} 的区别：本方法不写 user_status_log、不动 user.status，
+     * 用于「账号本身正常、但需要让该用户立刻掉线」的场景（如异常登录、要求重新认证）。
+     * 账号状态变更引发的踢下线仍由 updateUserStatus 负责，两者互不替代。
+     * </p>
+     *
+     * @param targetUserId 目标用户ID
+     * @throws BusinessException 操作人不存在、目标用户不存在或权限不足时抛出
+     */
+    void kickoutUser(Long targetUserId);
 }

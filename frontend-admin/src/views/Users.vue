@@ -102,7 +102,7 @@
 
 <script setup lang="ts">
 import { h, onMounted, ref } from 'vue'
-import { NButton, NDataTable, NInput, NPagination, NSelect, useMessage } from 'naive-ui'
+import { NButton, NDataTable, NInput, NPagination, NPopconfirm, NSelect, useMessage } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { adminApi } from '@/api/admin'
 import StatusTag, { type StatusType } from '@/components/StatusTag.vue'
@@ -207,6 +207,20 @@ async function submitModify() {
   }
 }
 
+/**
+ * 强制用户下线：只踢出该用户已登录会话，不改变账号状态。
+ * 与「封禁/停用」互补——封禁是改状态顺带踢人，此处只踢人不动状态。
+ */
+async function handleKickout(row: UserVO) {
+  try {
+    await adminApi.kickoutUser(row.id)
+    message.success(`已将用户 ${row.username} 强制下线`)
+  } catch (e) {
+    console.error('强制下线失败:', e)
+    message.error('操作失败')
+  }
+}
+
 /* ==================== 表格 ==================== */
 
 function rowKey(row: UserVO) {
@@ -247,7 +261,7 @@ const columns: DataTableColumns<UserVO> = [
   {
     title: '操作',
     key: 'actions',
-    width: 180,
+    width: 220,
     align: 'center',
     fixed: 'right',
     render: (row) => {
@@ -279,6 +293,22 @@ const columns: DataTableColumns<UserVO> = [
           )
         )
       }
+      // 踢下线：与账号状态无关，任何状态都能执行（账号正常时也可让该用户立刻掉线）
+      btns.push(
+        h(
+          NPopconfirm,
+          { onPositiveClick: () => handleKickout(row) },
+          {
+            trigger: () =>
+              h(
+                NButton,
+                { size: 'small', quaternary: true, type: 'info' },
+                { default: () => '踢下线' }
+              ),
+            default: () => '确定将该用户强制下线？（只踢登录会话，不改变账号状态）'
+          }
+        )
+      )
       return h('div', { class: 'action-btns' }, btns)
     }
   }

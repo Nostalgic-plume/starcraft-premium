@@ -100,6 +100,8 @@ public class RankService {
             sortItems(scoreItems);
 
             List<RankedItem> ranked = toRankedItems(scoreItems);
+            // 顺序不可调换：配额必须在坑位注入之前，运营坑位优先级高于算法位置安排
+            ranked = applyHeadQuota(ranked);
             ranked = injectFixedSlots(ranked);
             result.setItems(ranked);
             result.setDegradeState(filter.getDegradeState());
@@ -228,6 +230,54 @@ public class RankService {
             return RecallCandidate.SOURCE_HOT;
         }
         return RecallCandidate.SOURCE_FALLBACK;
+    }
+
+    /**
+     * 榜单首位个性化配额（前 N 位改用类目偏好路候选）
+     *
+     * <p>把前 N 位换成类目偏好路召回的商品，其余位次保持原融合顺序顺延，满足「首页前 N 条为
+     * 纯个性化」的产品要求。N 由配置项 {@link RecConfigKeys#RANK_HEAD_PERSONALIZED_SIZE} 控制，
+     * <b>置 0 即关闭</b>。
+     *
+     * <p><b>为什么按融合总分取前列、而不是按类目偏好原始分重排</b>：类目偏好路的候选本就在
+     * 融合前按该路召回分排序，取融合后的前列即取该路最靠前的商品；若改用 {@code categoryRaw}
+     * 重排，会绕开热度的 40% 权重，让前 N 位完全脱离热度校验。复用融合分还保证配额内外的
+     * 打分口径一致——变的只是「谁占前 N 位」。
+     *
+     * <p><b>⚠️ 本步骤有意打破「总分降序」不变量</b>：配额之后，第 N 名的融合总分可能低于
+     * 第 N+1 名。这是需求要求的效果，不是缺陷——对照 {@link #sortItems} 的「排序稳定性」
+     * 说明时切勿当成回归修掉。需要关闭把配置项置 0。
+     *
+     * <p><b>不足 N 条不补空位</b>：冷启动用户与游客没有类目偏好候选，类目偏好路经六条过滤规则
+     * 后也可能不足 N 条。此时有多少用多少，剩余位次由融合顺序自然填充，榜单长度不变。
+     *
+     * @param ranked 已按融合总分降序的榜单
+     * @return 配额后的榜单；配额关闭或无类目偏好候选时原样返回
+     */
+    private List<RankedItem> applyHeadQuota(List<RankedItem> ranked) {
+        int quota = configService.getInt(RecConfigKeys.RANK_HEAD_PERSONALIZED_SIZE);
+        if (quota <= 0 || ranked.size() <= 1) {
+            return ranked;
+        }
+
+        List<RankedItem> head = new ArrayList<>(quota);
+        List<RankedItem> rest = new ArrayList<>(ranked.size());
+        for (RankedItem item : ranked) {
+            if (head.size() < quota
+                    && RecallCandidate.SOURCE_CATEGORY_PREF.equals(item.getRecallSource())) {
+                head.add(item);
+            } else {
+                rest.add(item);
+            }
+        }
+
+        if (head.isEmpty()) {
+            // 类目偏好路无候选（冷启动 / 游客 / 该路降级），保持原融合顺序
+            return ranked;
+        }
+
+        head.addAll(rest);
+        return head;
     }
 
     /**

@@ -40,7 +40,15 @@ public class SnapshotService {
     private static final int DIGEST_LENGTH = 6;
 
     /** 默认快照有效期（秒），配置缺失时兜底 */
-    private static final long DEFAULT_TTL_SECONDS = 300L;
+    /**
+     * 快照兜底有效期（秒）——配置项 {@code cache.result.ttl} 缺失或非法时使用
+     *
+     * <p>由 300 提到 1800：首页改为无限滚动后，用户的连续滑动会话会显著长于 5 分钟。
+     * 快照一旦在会话中途过期，下一次触底续接会走到「未命中快照 → 重算」分支，
+     * 表现为<b>已滑过的内容顺序突变、并出现重复卡片</b>。配置项本身的取值见
+     * {@code t_rec_config.cache.result.ttl}，两者需保持一致。
+     */
+    private static final long DEFAULT_TTL_SECONDS = 1800L;
 
     private final RecRedis recRedis;
 

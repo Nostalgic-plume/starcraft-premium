@@ -1,13 +1,13 @@
 # RAG 代码地图（`com.shop.rag`）
 
-> 2026-10-08 包结构重构后生成。28 个类按职责分入 6 个子包，本表作为日常导航与讲项目的入口。
+> 2026-10-08 包结构重构后生成（2026-10-15 校订类数与 `search` 包清单）。32 个类按职责分入 6 个子包，本表作为日常导航与讲项目的入口。
 > 设计依据：[`rag-package-refactor-design.md`](rag-package-refactor-design.md)
 
 ## 一眼看全貌
 
 ```
 com.shop.rag
-├── search/       检索主链路（9 类）
+├── search/       检索主链路（13 类）
 ├── index/        向量索引构建与 Qdrant 集合管理（2 类）
 ├── chat/         智能客服编排：SSE + 意图路由 + workflow + 工具（9 类）
 ├── memory/       对话记忆与历史持久化（3 类）
@@ -17,19 +17,23 @@ com.shop.rag
 
 依赖方向（单向无环）：`config → index → search`，`chat → search / memory / resilience`
 
-## 一、`search` — 检索（9 类）
+## 一、`search` — 检索（13 类）
 
 | 类 | 职责 |
 |----|------|
 | `RagSearchService` | 混合检索入口：向量路 + 关键词路并行 → 加权 RRF 融合；两路候选池对齐（`topK×5` clamp 50~200）；嵌入模型故障降级为纯关键词 |
 | `KeywordSearchService` | MySQL FULLTEXT 关键词路（同义词扩展 + 分类/价格过滤） |
-| `RrfMerger` | 加权 RRF 融合（默认权重 1.0/2.0，k=60） |
-| `RrfProperties` | `rag.rrf.*` 配置绑定 + 非法值兜底 |
 | `QueryRewriter` | LLM 结合对话历史把短 query 改写为独立检索关键词（补指代 + 补同义表述） |
 | `SynonymExpander` | 领域同义词扩展（只作用于关键词路，避免稀释向量语义） |
 | `SynonymProperties` | `rag.synonym.*` 配置绑定 |
+| `RagCandidate` | 检索候选——融合阶段的最小契约，只带商品 ID + 相关性分数，是「召回阶段只认 ID」的落点 |
+| `RrfMerger` | 加权 RRF 融合（默认权重 1.0/2.0，k=60） |
+| `RrfProperties` | `rag.rrf.*` 配置绑定 + 非法值兜底 |
+| `RagHitEnricher` | topK 选出后统一回查 MySQL 补齐展示字段（名称/主图/描述/价格），即「回查富化」 |
 | `SkuPriceResolver` | 商品 → 价格区间（min/max），检索路与索引路共用的唯一聚合来源 |
-| `RagHitVO` | 检索结果契约（供 Controller / 客服链路消费） |
+| `SkuSnapshot` | SKU 维度聚合快照（价格区间 + 总库存），一次查询同时满足「展示价格」与「判定可售」 |
+| `RagSearchResult` | 混合检索结果契约：命中列表 + `allOutOfStock`（区分「真没搜到」与「全售罄被剔除」两种空结果） |
+| `RagHitVO` | 检索结果视图（供 Controller / 客服链路消费） |
 
 ## 二、`index` — 索引（2 类）
 
@@ -91,6 +95,6 @@ com.shop.rag
 
 | 子包 | 测试 |
 |------|------|
-| `search/` | `RagSearchServiceTest`、`RagFallbackTest`、`KeywordSearchServiceTest`、`RrfMergerTest`、`RrfPropertiesBindingTest`、`SynonymExpanderTest`、`SynonymPropertiesBindingTest`、`RagMetricsTest`、`RagMetrics`（辅助类）、`RagEvaluationTest`（`@SpringBootTest`，需真实 Qdrant/BGE-m3） |
+| `search/` | `RagSearchServiceTest`、`RagFallbackTest`、`KeywordSearchServiceTest`、`RrfMergerTest`、`RrfPropertiesBindingTest`、`SynonymExpanderTest`、`SynonymPropertiesBindingTest`、`RagHitEnricherTest`、`RagStockFilterTest`、`SkuPriceResolverTest`、`RagMetricsTest`、`RagMetrics`（辅助类）、`MyBatisPlusTestSupport`（辅助类）、`RagEvaluationTest`（`@SpringBootTest`，需真实 Qdrant/BGE-m3）、`RagSearchExcerptContractTest`（`@SpringBootTest`，需真实检索链路） |
 | `index/` | `ProductIndexerTest`、`ProductIndexerRebuildTest`、`QdrantGrpcCompatibilityTest` |
-| `chat/` | `ChatIntentResolverTest`、`CancelOrderWorkflowTest`、`OrderQueryWorkflowTest`、`BackupModelSmokeTest`、`DeepSeekAiServicesSmokeTest` |
+| `chat/` | `ChatIntentResolverTest`、`CancelOrderWorkflowTest`、`OrderQueryWorkflowTest`、`ChatServiceClearConversationTest`、`BackupModelSmokeTest`、`DeepSeekAiServicesSmokeTest` |

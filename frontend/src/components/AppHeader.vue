@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NDropdown } from 'naive-ui'
 import { useUserStore } from '@/stores/user'
@@ -35,10 +35,25 @@ const userMenuOptions = [
   { label: '退出登录', key: 'logout' }
 ]
 
+/** 搜索统一跳检索页 /search（搜索结果不再渲染在首页） */
 function onSearch() {
   const q = keyword.value.trim()
-  router.push({ path: '/home', query: q ? { keyword: q } : {} })
+  if (!q) {
+    // 空词不塞查询参数，检索页会展示引导态（历史 / 热搜）
+    if (route.path !== '/search') router.push('/search')
+    return
+  }
+  router.push({ path: '/search', query: { q } })
 }
+
+// 输入框与 URL 查询词同步：刷新检索页、浏览器前进后退时都能回显当前词
+watch(
+  () => route.query.q,
+  (q) => {
+    keyword.value = typeof q === 'string' ? q : ''
+  },
+  { immediate: true }
+)
 
 function onUserMenuSelect(key: string) {
   if (key === 'logout') {

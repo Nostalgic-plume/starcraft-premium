@@ -8,12 +8,15 @@ import com.shop.common.Result;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.BindException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 
 /**
@@ -41,12 +44,20 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * 处理未登录异常：访问需登录接口但未携带有效 token，或会话已过期
+     * 处理未登录异常：访问需登录接口但未携带有效 token、会话已过期，或被管理员踢下线
+     * <p>
+     * 除 body 里保留 code=401 外，同时把 HTTP 状态码设为 401。
+     * 原因：前端共享拦截器（shared/js/createRequest.ts）只在 HTTP 401 时才执行
+     * 「清 token + 跳登录页」，若统一返回 HTTP 200 + body code=401，
+     * 用户被踢下线后会停留在原页面反复弹提示却始终不跳转。
+     * 其余业务错误码（400/403 等）不需要前端跳转，故维持 HTTP 200 不变。
+     * </p>
      *
      * @param e Sa-Token 未登录异常，携带具体的未登录原因
      * @return 固定返回 code=401、msg="未登录，请先登录"
      */
     @ExceptionHandler(NotLoginException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
     public Result<Void> handleNotLoginException(NotLoginException e) {
         log.warn("未登录: {}", e.getMessage());
         return Result.error(401, "未登录，请先登录");
@@ -130,6 +141,20 @@ public class GlobalExceptionHandler {
     public Result<Void> handleHttpMessageNotReadableException(HttpMessageNotReadableException e) {
         log.warn("请求参数解析失败: {}", e.getMessage());
         return Result.error(400, "请求参数格式错误");
+    }
+
+    /**
+     * 处理上传文件超过大小限制：Spring 的 multipart 解析在进入 Controller **之前**就拒绝请求，
+     * 业务代码（如 FileStorageService 的大小校验）根本执行不到，故必须在全局兜底，
+     * 否则会落到 {@code Exception} 兜底分支返回含义不明的"系统繁忙"。
+     *
+     * @param e 文件超限异常
+     * @return 固定返回 code=400、明确的大小上限提示
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public Result<Void> handleMaxUploadSizeExceededException(MaxUploadSizeExceededException e) {
+        log.warn("上传文件超过大小限制: {}", e.getMessage());
+        return Result.error(400, "图片大小不能超过 5MB");
     }
 
     /**

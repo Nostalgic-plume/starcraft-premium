@@ -57,6 +57,13 @@ spring:
   mvc:
     throw-exception-if-no-handler-found: true   # 无匹配 Handler 时抛异常而非回退到静态资源
 
+  # 文件上传大小限制：Spring 默认单文件仅 1MB，不显式配置会导致稍大的图片被拒且报错晦涩
+  # （Nginx 侧 client_max_body_size 20m 为外层兜底，实际取二者较小值生效）
+  servlet:
+    multipart:
+      max-file-size: 5MB            # 单文件上限
+      max-request-size: 10MB        # 单次请求总量（多图同时上传时）
+
 # 推荐库数据源（个性化推荐子系统专用）
 # 与商城业务库物理分离：推荐服务对推荐库读写，对商城业务库只读。
 # 单机部署下与商城库共用同一 MySQL 实例；账号密码支持独立环境变量注入（未设置时回退到商城库账号），
@@ -183,3 +190,11 @@ rag:
     k: 60
     weight-vector: 1.0
     weight-keyword: 2.0   # 评估推荐档位：基础集 Recall@3 0.628→0.711（见 docs/rag-evaluation-report.md §8）
+
+# 本地文件存储（商品图片上传）
+# 定位：单机/演示方案。生产环境应替换为对象存储，接口契约保持一致，仅换 FileStorageService 实现
+# （见 docs/image-upload-design.md）。dir 与 Nginx 容器挂载点必须指向同一宿主机目录。
+app:
+  upload:
+    dir: ./uploads          # 落盘根目录（相对后端进程工作目录；本项目工作目录为仓库根）
+    url-prefix: /uploads    # 对外访问前缀（Nginx 映射同一目录为静态资源）

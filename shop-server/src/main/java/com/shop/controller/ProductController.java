@@ -68,6 +68,23 @@ public class ProductController {
     }
 
     /**
+     * 编辑商品信息（需 product:edit 权限，管理员用）
+     * 管理员走此入口时不校验 shop_id 归属（可编辑全平台商品）；
+     * 商家请使用 {@code PUT /api/merchant/product/{id}}，该入口强制本店隔离
+     *
+     * @param id  商品ID
+     * @param dto 商品信息请求体，由 @Valid 校验
+     * @return 操作成功提示
+     */
+    @SaCheckPermission(value = {PermissionConstants.PRODUCT_EDIT}, type ="admin")
+    @PutMapping("/{id}")
+    @Operation(summary = "编辑商品信息（管理员）")
+    public Result<Void> update(@PathVariable Long id, @Valid @RequestBody ProductDTO dto) {
+        productService.updateProduct(id, dto);
+        return Result.success();
+    }
+
+    /**
      * 更新商品状态（需 product:status 权限，商家/管理员可用）
      *
      * @param id     商品ID

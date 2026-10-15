@@ -290,6 +290,9 @@ services:
       - ./frontend/dist:/usr/share/nginx/html/user:ro
       - ./frontend-admin/dist:/usr/share/nginx/html/admin:ro
       - ./frontend-merchant/dist:/usr/share/nginx/html/merchant:ro
+      # 商品图片上传目录：后端（宿主机进程）写入，Nginx 只读提供
+      # ⚠️ 必须与 application.yml 的 app.upload.dir 指向同一宿主机目录，否则上传成功但访问 404
+      - ./uploads:/usr/share/nginx/html/uploads:ro
     depends_on:
       - redis
 

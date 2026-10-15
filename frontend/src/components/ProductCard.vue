@@ -3,10 +3,17 @@ import { computed } from 'vue'
 import type { ProductVO } from '@/api/types'
 import SvgIcon from './SvgIcon.vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   /** 商品数据（ProductVO 至少需 id/name/minPrice） */
   product: ProductVO
-}>()
+  /**
+   * 隐藏加购按钮
+   * ⚠️ 检索页专用：RAG 命中项无 SKU（skuList 为空），点加购必然提示"请到详情页选择规格"
+   */
+  hideAddCart?: boolean
+}>(), {
+  hideAddCart: false
+})
 
 const emit = defineEmits<{
   /** 点击加购按钮（携带完整商品对象，父组件处理库存/登录校验） */
@@ -72,6 +79,7 @@ function onDetailClick() {
           <span class="price-value">{{ formatPrice(product.minPrice) }}</span>
         </div>
         <button
+          v-if="!hideAddCart"
           class="add-btn"
           type="button"
           :aria-label="'加入购物车：' + product.name"

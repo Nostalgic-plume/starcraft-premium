@@ -95,12 +95,15 @@ async function handleLogin() {
     userStore.setToken(res.data.token)
     await userStore.fetchUserInfo()
     // 按角色跳转：admin → 管理后台，merchant → 商家中心，user → 首页
+    // 必须用相对路径走 Nginx 同源：写死 http://localhost:3001/ 只有本机开发能跳，
+    // 别人从局域网 IP 访问时会被跳到他自己机器的 localhost，必然打不开。
+    // 注意：三端会话为独立 loginType，跳过去后需在对应端重新登录。
     const roleRes = await userApi.getRole()
     const roles = roleRes.data || []
     if (roles.includes('admin')) {
-      window.location.href = 'http://localhost:3001/'
+      window.location.href = '/admin/'
     } else if (roles.includes('merchant')) {
-      window.location.href = 'http://localhost:3002/'
+      window.location.href = '/merchant/'
     } else {
       message.success('登录成功')
       router.push('/home')

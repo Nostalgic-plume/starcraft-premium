@@ -9,6 +9,7 @@ import com.shop.mapper.ProductMapper;
 import com.shop.mapper.SkuMapper;
 import com.shop.model.entity.ProductDO;
 import com.shop.model.entity.SkuDO;
+import com.shop.rag.config.RagProperties;
 import com.shop.rag.search.SkuPriceResolver;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
@@ -33,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -75,7 +77,14 @@ class ProductIndexerTest {
         TableInfoHelper.initTableInfo(assistant, ProductDO.class);
 
         indexer = new ProductIndexer(productMapper, categoryMapper, brandMapper, new SkuPriceResolver(skuMapper),
-                embeddingModel, embeddingStore, qdrantCollectionHelper);
+                embeddingModel, embeddingStore, qdrantCollectionHelper, testRagProperties());
+    }
+
+    /** 测试向量统一 2 维：重建前的嵌入服务预检会校验维度与 rag.qdrant.dimension 一致 */
+    private static RagProperties testRagProperties() {
+        RagProperties properties = new RagProperties();
+        properties.setDimension(2);
+        return properties;
     }
 
     @Test
@@ -108,7 +117,7 @@ class ProductIndexerTest {
     @DisplayName("重启场景：新建实例（进程内状态天然为空）后，删除依然生效")
     void remove_afterRestart_shouldStillDelete() {
         ProductIndexer restarted = new ProductIndexer(productMapper, categoryMapper, brandMapper, new SkuPriceResolver(skuMapper),
-                embeddingModel, embeddingStore, qdrantCollectionHelper);
+                embeddingModel, embeddingStore, qdrantCollectionHelper, testRagProperties());
 
         restarted.remove(99L);
 
@@ -154,8 +163,12 @@ class ProductIndexerTest {
         // ① 向量化输入：必须是五段式拼接（改这里会让召回质量断崖式下跌）
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<TextSegment>> embeddingCaptor = ArgumentCaptor.forClass(List.class);
-        verify(embeddingModel).embedAll(embeddingCaptor.capture());
-        String embeddingText = embeddingCaptor.getValue().get(0).text();
+        // 重建前有一次嵌入服务预检（probeEmbeddingService），embedAll 会被调用多次；
+        // 承载商品文本的是最后一次调用
+        verify(embeddingModel, atLeastOnce()).embedAll(embeddingCaptor.capture());
+        List<TextSegment> rebuildInput = embeddingCaptor.getAllValues()
+                .get(embeddingCaptor.getAllValues().size() - 1);
+        String embeddingText = rebuildInput.get(0).text();
         assertTrue(embeddingText.contains("名称：测试商品十一"), "向量化输入应含名称段，实际=" + embeddingText);
         assertTrue(embeddingText.contains("描述：搭载测试芯片的旗舰描述"), "向量化输入应含描述段，实际=" + embeddingText);
         assertTrue(embeddingText.contains("品牌："), "向量化输入应含品牌段，实际=" + embeddingText);

@@ -4,6 +4,7 @@ import cn.hutool.core.collection.CollUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.shop.constant.ProductConstants;
 import com.shop.mapper.BrandMapper;
+import com.shop.rag.config.RagProperties;
 import com.shop.mapper.CategoryMapper;
 import com.shop.mapper.ProductMapper;
 import com.shop.model.entity.BrandDO;
@@ -47,6 +48,8 @@ public class ProductIndexer {
     private final OpenAiEmbeddingModel embeddingModel;
     private final QdrantEmbeddingStore embeddingStore;
     private final QdrantCollectionHelper qdrantCollectionHelper;
+    /** 向量维度唯一事实来源（重建预检时校验嵌入结果维度） */
+    private final RagProperties ragProperties;
 
     /**
      * 最后一次全量重建的**结束**时间（毫秒时间戳，0 表示未重建）
@@ -142,6 +145,16 @@ public class ProductIndexer {
         log.info("===== 开始全量重建商品向量索引 =====");
         long start = System.currentTimeMillis();
 
+        // 预检：先确认嵌入服务可用且维度正确，**再删集合**。
+        // recreateCollection 会先清空集合，若随后向量化失败，检索将完全不可用
+        //（见 markRebuildFinished 的注释）。这是当前「重建非原子」的主要风险入口。
+        // 真正原子化的做法是「临时集合 + 别名切换」（需动态构造 EmbeddingStore），
+        // 成本较高，暂记为后续优化 —— 预检先消除最高频的失败原因（TEI 未就绪 / 维度不符）。
+        if (!probeEmbeddingService()) {
+            markRebuildFinished(false, "嵌入服务预检失败，已中止重建，现有索引保持不变");
+            return;
+        }
+
         // 清理并重建 Qdrant 集合
         recreateCollection();
 
@@ -220,6 +233,37 @@ public class ProductIndexer {
 
         // 联动重建 MySQL FULLTEXT 索引
         rebuildFulltextIndex();
+    }
+
+    /**
+     * 重建前的嵌入服务预检
+     * <p>
+     * 校验两点：① 调用不抛异常；② 返回非空向量且维度与 {@code rag.qdrant.dimension} 一致。
+     * 维度不一致常见于「换了 embedding 模型但配置没改」，此时后续写入会失败，
+     * 而集合已在 {@code recreateCollection} 中被清空 —— 检索将完全不可用。
+     *
+     * @return 可用返回 true
+     */
+    private boolean probeEmbeddingService() {
+        try {
+            List<Embedding> probe = embeddingModel.embedAll(List.of(TextSegment.from("健康检查"))).content();
+            if (probe == null || probe.isEmpty() || probe.get(0) == null
+                    || probe.get(0).vector() == null || probe.get(0).vector().length == 0) {
+                log.error("嵌入服务预检失败：返回空向量，已中止重建（现有索引保持不变）");
+                return false;
+            }
+            int actual = probe.get(0).vector().length;
+            int expected = ragProperties.getDimension();
+            if (actual != expected) {
+                log.error("嵌入服务预检失败：向量维度 {} 与配置 rag.qdrant.dimension={} 不一致，"
+                        + "已中止重建（现有索引保持不变）", actual, expected);
+                return false;
+            }
+            return true;
+        } catch (Exception e) {
+            log.error("嵌入服务预检异常，已中止重建（现有索引保持不变）: {}", e.getMessage(), e);
+            return false;
+        }
     }
 
     /**

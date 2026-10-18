@@ -48,11 +48,13 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * 智能客服服务
@@ -89,6 +91,15 @@ public class ChatService {
     private final OrderQueryWorkflow orderQueryWorkflow;
 
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+
+    /**
+     * 会话级互斥锁：同一会话的请求串行执行
+     * <p>
+     * 原因：agent loop 的记忆缓存在 {@link MySqlChatMemoryStore} 内按 conversationId 存储，
+     * 并发请求会互相覆盖（后到的请求清缓存 → 先到的请求在工具往返中读到别人的系统提示），
+     * 导致回答错乱。锁随会话累积（每把几十字节），不做主动清理。
+     */
+    private final Map<String, ReentrantLock> conversationLocks = new ConcurrentHashMap<>();
 
     /**
      * SSE 心跳调度器：长回答期间定期下发 ping 帧，让 Nginx/浏览器知道连接仍活着。
@@ -192,8 +203,21 @@ public class ChatService {
      */
     public void ask(String conversationId, Long userId, String userMessage, SseEmitter emitter) {
         startHeartbeat(emitter);
+        // 同一会话串行化（见 conversationLocks 字段注释）。心跳在加锁前启动，
+        // 等待期间前端不会因长时间无数据被判空闲断流。
+        ReentrantLock conversationLock = conversationLocks.computeIfAbsent(
+                conversationId, key -> new ReentrantLock());
         executor.execute(() -> {
+            boolean locked = false;
             try {
+                // 等待上限 120s：单条回答的正常耗时远低于此；超时说明前一条异常挂起，
+                // 直接告知用户而不是无限排队
+                locked = conversationLock.tryLock(120, TimeUnit.SECONDS);
+                if (!locked) {
+                    sendEvent(emitter, "error", "上一条消息仍在处理中，请稍后再试");
+                    completeSse(emitter, "");
+                    return;
+                }
                 // 1. 确保会话存在（MySQL持久化）
                 chatHistoryService.getOrCreateConversation(Long.valueOf(conversationId), userId);
 
@@ -313,10 +337,18 @@ public class ChatService {
                             userMessage, conversationId, emitter, productsJson);
                 }
 
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                sendEvent(emitter, "error", "请求等待被中断，请重试");
+                completeSse(emitter, "");
             } catch (Exception e) {
                 log.error("ChatService 处理异常", e);
                 sendEvent(emitter, "error", "服务异常，请稍后重试");
                 completeSse(emitter, "");
+            } finally {
+                if (locked) {
+                    conversationLock.unlock();
+                }
             }
         });
     }
@@ -609,13 +641,7 @@ public class ChatService {
                             .eq(CategoryDO::getStatus, 0));
             if (allCategories == null || allCategories.isEmpty()) return null;
 
-            CategoryDO matched = null;
-            for (CategoryDO cat : allCategories) {
-                if (userMessage.contains(cat.getName())) {
-                    matched = cat;
-                    break;
-                }
-            }
+            CategoryDO matched = matchCategory(allCategories, userMessage);
             if (matched == null) return null;
 
             Long targetFirstCategoryId;
@@ -642,13 +668,13 @@ public class ChatService {
             // 同步剔除售罄商品：与主检索链路的库存过滤语义一致（缺失即放行）。
             // 漏掉这一步，主链路刚过滤掉的「全售罄」商品会被这条回退路径重新捞回来推给用户
             Map<Long, Integer> stockMap = skuPriceResolver.resolveStock(productIds);
-            // 回退路径没有相关性排序，分数沿用历史值 1.0（富化器按入参顺序透出）
+            // 回退路径没有相关性排序：score 记为 0，明确区别于 RRF 分数（避免下游把它当成「最相关」）
             List<RagCandidate> candidates = productIds.stream()
                     .filter(id -> {
                         Integer totalStock = stockMap.get(id);
                         return totalStock == null || totalStock > 0;
                     })
-                    .map(id -> new RagCandidate(id, 1.0))
+                    .map(id -> new RagCandidate(id, 0.0))
                     .toList();
 
             return ragHitEnricher.enrich(candidates);
@@ -657,6 +683,36 @@ public class ChatService {
             log.warn("分类回退查询异常: {}", e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * 从分类列表中匹配用户消息提到的分类（**最长名称优先**）
+     * <p>
+     * 为什么不能「首个命中即返回」：分类名之间存在包含关系（如「手机」与「手机壳」、
+     * 「手机数码」与「手机」），而分类列表的返回顺序不确定，
+     * 首个命中可能选中更短、更泛的分类，导致回退到错误的一级分类。
+     * <p>
+     * 最长匹配是这里最贴近直觉的启发式：用户在消息里写了更具体的分类名，就应优先接受它。
+     *
+     * @param categories 全部分类（可为 null）
+     * @param message    用户消息（可为 null）
+     * @return 命中的分类；无命中返回 null
+     */
+    static CategoryDO matchCategory(List<CategoryDO> categories, String message) {
+        if (categories == null || categories.isEmpty() || message == null || message.isBlank()) {
+            return null;
+        }
+        CategoryDO matched = null;
+        for (CategoryDO category : categories) {
+            String name = category == null ? null : category.getName();
+            if (name == null || name.isBlank() || !message.contains(name)) {
+                continue;
+            }
+            if (matched == null || name.length() > matched.getName().length()) {
+                matched = category;
+            }
+        }
+        return matched;
     }
 
     /**

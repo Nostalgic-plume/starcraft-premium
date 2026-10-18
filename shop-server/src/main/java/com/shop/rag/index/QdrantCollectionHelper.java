@@ -1,5 +1,7 @@
 package com.shop.rag.index;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.shop.rag.config.RagProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -8,6 +10,9 @@ import org.springframework.stereotype.Component;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -23,12 +28,28 @@ import java.util.regex.Pattern;
 public class QdrantCollectionHelper {
 
     private final RagProperties ragProperties;
+    /** scroll / 对账响应解析（REST 返回 JSON，用 Jackson 而非正则，避免嵌套结构解析脆弱） */
+    private final ObjectMapper objectMapper;
 
     /** REST API 基础地址 */
     private static final String QDRANT_REST_URL = "http://localhost:6333/collections/";
 
     /** 从 count 接口响应中提取 count 字段 */
     private static final Pattern COUNT_PATTERN = Pattern.compile("\"count\"\\s*:\\s*(\\d+)");
+
+    /**
+     * 过滤下推所需的 payload 索引定义：字段名 → Qdrant field_schema
+     * <p>
+     * ⚠️ 这些索引是「过滤下推」的**前置条件**：Qdrant 对没有 payload 索引的字段做过滤是全量扫描，
+     * 下推不但不会更快，还可能比应用层过滤更慢。新增可过滤字段时必须同步在这里登记。
+     * <p>
+     * 类型说明：{@code firstCategoryId} 为 Long → integer；价格在 payload 里是 double
+     * （{@code BigDecimal.doubleValue()}）→ float。类型不匹配会导致过滤结果为空。
+     */
+    private static final Map<String, String> PAYLOAD_INDEXES = Map.of(
+            "firstCategoryId", "integer",
+            "minPrice", "float",
+            "maxPrice", "float");
 
     /**
      * 从集合信息响应中提取向量维度（config.params.vectors.size）
@@ -46,6 +67,8 @@ public class QdrantCollectionHelper {
         if (exists(name)) {
             log.info("Qdrant 集合 '{}' 已存在，跳过创建", name);
             verifyDimension(name);
+            // 存量集合可能建于过滤下推改造之前（无 payload 索引）—— 幂等补建，无需重建集合
+            ensurePayloadIndexes(name);
             return;
         }
         log.info("Qdrant 集合 '{}' 不存在，正在创建...", name);
@@ -170,6 +193,125 @@ public class QdrantCollectionHelper {
         }
     }
 
+    /**
+     * 确保过滤字段的 payload 索引存在（过滤下推的前置条件）
+     * <p>
+     * 幂等：已存在的索引重复创建由 Qdrant 返回 "already exists"，不视为错误；
+     * 在**已有数据**的集合上创建索引由 Qdrant 后台完成，**无需删集合重建**。
+     * <p>
+     * 单个字段失败只 WARN，不阻断其余字段 —— 索引缺失时过滤仍可用（降级为全量扫描）。
+     *
+     * @param name 集合名称
+     */
+    private void ensurePayloadIndexes(String name) {
+        PAYLOAD_INDEXES.forEach((field, schema) -> createPayloadIndex(name, field, schema));
+    }
+
+    /**
+     * 创建单个 payload 索引（REST PUT，幂等）
+     *
+     * @param name   集合名称
+     * @param field  payload 字段名
+     * @param schema Qdrant field_schema（integer / float / keyword ...）
+     */
+    private void createPayloadIndex(String name, String field, String schema) {
+        try {
+            URI uri = URI.create(QDRANT_REST_URL + name + "/index?wait=true");
+            HttpURLConnection conn = (HttpURLConnection) uri.toURL().openConnection();
+            conn.setRequestMethod("PUT");
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setDoOutput(true);
+            conn.setConnectTimeout(3000);
+            // 在已有数据上建索引需要扫描 payload，读超时放宽（670 条实测毫秒级，为增长留余量）
+            conn.setReadTimeout(10000);
+            String body = String.format("{\"field_name\":\"%s\",\"field_schema\":\"%s\"}", field, schema);
+            conn.getOutputStream().write(body.getBytes(StandardCharsets.UTF_8));
+            int code = conn.getResponseCode();
+            if (code == 200) {
+                log.info("Qdrant payload 索引 '{}' ({}) 就绪", field, schema);
+            } else {
+                log.warn("Qdrant payload 索引 '{}' 创建返回 HTTP {}", field, code);
+            }
+            conn.disconnect();
+        } catch (Exception e) {
+            // 索引缺失不阻断检索（降级为全量扫描），故只告警
+            log.warn("创建 Qdrant payload 索引 '{}' 失败: {}", field, e.getMessage());
+        }
+    }
+
+    /**
+     * 全量读取集合内所有商品点（索引对账用）
+     * <p>
+     * 分页调用 scroll API，每页 {@code batchSize} 条，直到 {@code next_page_offset} 为 null。
+     * ⚠️ 终止条件必须是 offset 为空，**不能用「本页不足 batchSize」判断** ——
+     * Qdrant 可能返回满页但仍未结束。
+     *
+     * @param batchSize 每页条数（≤0 时取 256）
+     * @return productId → payload.updateTime（旧索引可能缺失该字段，值为 null）；
+     *         **查询失败返回 null**，与「集合为空」返回的空 Map 区分开：
+     *         前者应跳过对账，后者应继续比对（差异会被阈值保护拦截）
+     */
+    public Map<Long, Long> scrollAllProducts(int batchSize) {
+        String name = ragProperties.getCollectionName();
+        int size = batchSize > 0 ? batchSize : 256;
+        Map<Long, Long> result = new HashMap<>();
+        Object offset = null;
+        try {
+            while (true) {
+                Map<String, Object> body = new HashMap<>();
+                body.put("limit", size);
+                body.put("with_payload", List.of("productId", "updateTime"));
+                body.put("with_vector", false);
+                if (offset != null) {
+                    body.put("offset", offset);
+                }
+                String json = postJson(QDRANT_REST_URL + name + "/points/scroll",
+                        objectMapper.writeValueAsString(body));
+                JsonNode root = objectMapper.readTree(json);
+                for (JsonNode point : root.path("result").path("points")) {
+                    JsonNode payload = point.path("payload");
+                    JsonNode productIdNode = payload.get("productId");
+                    if (productIdNode == null || productIdNode.isNull()) {
+                        continue;
+                    }
+                    JsonNode updateTimeNode = payload.get("updateTime");
+                    Long updateTime = (updateTimeNode == null || updateTimeNode.isNull())
+                            ? null : updateTimeNode.asLong();
+                    result.put(productIdNode.asLong(), updateTime);
+                }
+                JsonNode next = root.path("result").get("next_page_offset");
+                if (next == null || next.isNull()) {
+                    break;
+                }
+                offset = objectMapper.convertValue(next, Object.class);
+            }
+            return result;
+        } catch (Exception e) {
+            log.warn("Qdrant 全量 scroll 失败，本轮对账跳过: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /** POST JSON 并返回响应体（连接 3s / 读取 10s） */
+    private String postJson(String url, String body) throws Exception {
+        HttpURLConnection conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
+        conn.setRequestMethod("POST");
+        conn.setRequestProperty("Content-Type", "application/json");
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(3000);
+        conn.setReadTimeout(10000);
+        try {
+            conn.getOutputStream().write(body.getBytes(StandardCharsets.UTF_8));
+            int code = conn.getResponseCode();
+            if (code != 200) {
+                throw new IllegalStateException("HTTP " + code);
+            }
+            return new String(conn.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        } finally {
+            conn.disconnect();
+        }
+    }
+
     // ========== 内部方法 ==========
 
     /**
@@ -215,6 +357,8 @@ public class QdrantCollectionHelper {
             int code = conn.getResponseCode();
             log.info("创建 Qdrant 集合 '{}' 完成, HTTP {}, 维度: {}", name, code, dimension);
             conn.disconnect();
+            // 新集合必须同步建好过滤字段的 payload 索引（过滤下推的前置条件）
+            ensurePayloadIndexes(name);
         } catch (Exception e) {
             log.warn("创建 Qdrant 集合失败: {}", e.getMessage());
         }

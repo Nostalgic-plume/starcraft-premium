@@ -11,7 +11,8 @@ package com.shop.rag.search;
  * 调用方难以分辨「该字段尚未回查」与「该字段确实为空」，容易误用。
  *
  * @param productId 商品 ID
- * @param score     相关性分数（向量路为相似度，关键词路为位次模拟分，融合后为 RRF 分数）
+ * @param score     排序分。**语义统一为 RRF 分数**（单路检索同样按 {@code w/(k+rank)} 计算）；
+ *                  分类回退等无相关性依据的路径固定为 0。它不是「相关度百分比」，跨路径不可直接比较
  * @author shop
  */
 public record RagCandidate(Long productId, double score) {

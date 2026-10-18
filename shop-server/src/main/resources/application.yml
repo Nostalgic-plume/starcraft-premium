@@ -150,6 +150,25 @@ rag:
     # 向量维度：BGE-M3 为 1024（原 DashScope text-embedding-v1 为 1536）
     # 全链路唯一事实来源——建集合（QdrantCollectionHelper）与查询向量自检（RagSearchService）都读此值
     dimension: 1024
+  search:
+    # 向量路相关性门槛：与 embedding 模型**强相关**，换模型（如 BGE-M3 → 其他）后必须重估。
+    # 外置前是 RagSearchService 的类常量，换模型会导致召回质量静默劣化且无任何告警。
+    min-relevance-score: 0.3
+    # 候选池 = topK × multiplier，再收敛到 [min-query-limit, max-query-limit]
+    # 与 rag.rrf 权重同属检索调优旋钮，口径保持一致（均外置）
+    candidate-multiplier: 5
+    min-query-limit: 50
+    max-query-limit: 200
+    # 公开接口未校验 topK，超大值会放大下游 LIMIT 与 Qdrant maxResults
+    max-top-k: 100
+  reconcile:
+    # 向量索引对账：发现并修复「索引更新失败 → 商品永久搜不到 / 搜到旧内容」的不一致。
+    # ⚠️ 升级后（payload 新增 updateTime）先手动重建一次索引，否则存量索引会被判为陈旧
+    #    且因差异过大被阈值拦截（见 docs/rag-index-reconcile-design.md §六.1）
+    enabled: true
+    fixed-rate-ms: 1800000          # 30 分钟
+    max-auto-fix-ratio: 0.2         # 差异超过 20% 只告警不自动修复
+    scroll-batch-size: 256
   llm:
     # 每个键都带「:」默认值：绑定期取不到值时宁可落到默认值，也不要让上下文启动失败
     # （唯一 @SpringBootTest RagEvaluationTest 会因此起不来）

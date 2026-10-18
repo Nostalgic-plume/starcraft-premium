@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * RrfMerger 加权融合单元测试（纯离线，不依赖 Spring / Qdrant / MySQL / 嵌入服务）
  * <p>
  * 覆盖：默认权重与旧三参重载等价（回归保护）、权重可翻转排序、k 参数生效、
- * k 非法值兜底、单路为空时原样透传（不改写原始分数）。
+ * k 非法值兜底、单路也按 RRF 公式给分（score 尺度统一）。
  *
  * @author shop
  */
@@ -85,14 +85,25 @@ class RrfMergerTest {
     }
 
     @Test
-    @DisplayName("单路为空时原样透传，不改写原始分数")
-    void singlePathShouldPassThrough() {
+    @DisplayName("单路也按 RRF 公式给分：顺序不变，分数不再透传余弦相似度")
+    void singlePathShouldUseRrfScore() {
         RagCandidate onlyVector = candidate(1, 0.87);
 
         List<RagCandidate> result = RrfMerger.merge(List.of(onlyVector), List.of(), 5, 60, 1.0, 1.5);
 
-        assertEquals(List.of(1L), ids(result));
-        assertEquals(0.87, result.get(0).score(), 1e-9,
-                "单路透传不得改写原始分数（与 Python 侧为有意分歧）");
+        assertEquals(List.of(1L), ids(result), "单路顺序保持不变");
+        // 向量路权重 1.0 / (60 + rank 0) = 0.0167 → 四舍五入 0.02
+        assertEquals(0.02, result.get(0).score(), 1e-9,
+                "单路必须与双路同一尺度；透传 0.87 会让 score 在降级时跳变一个数量级");
+    }
+
+    @Test
+    @DisplayName("单路分数只由名次决定，与原始分数无关")
+    void singlePathScoreDependsOnRankOnly() {
+        List<RagCandidate> high = RrfMerger.merge(List.of(candidate(1, 0.95)), List.of(), 5, 60, 1.0, 1.0);
+        List<RagCandidate> low = RrfMerger.merge(List.of(candidate(1, 0.31)), List.of(), 5, 60, 1.0, 1.0);
+
+        assertEquals(high.get(0).score(), low.get(0).score(), 1e-9,
+                "原始分数（余弦 / 位次模拟）不再参与，避免两路尺度混用");
     }
 }

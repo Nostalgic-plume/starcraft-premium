@@ -15,6 +15,8 @@ import com.shop.rag.memory.MySqlChatMemoryStore;
 import com.shop.rag.resilience.CircuitBreaker;
 import com.shop.rag.resilience.ToolCallLogger;
 import com.shop.rag.search.QueryRewriter;
+import com.shop.rag.search.RagCandidate;
+import com.shop.rag.search.RagHitEnricher;
 import com.shop.rag.search.RagHitVO;
 import com.shop.rag.search.RagSearchResult;
 import com.shop.rag.search.RagSearchService;
@@ -46,11 +48,13 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * 智能客服服务
@@ -71,6 +75,8 @@ public class ChatService {
     private final CircuitBreaker circuitBreaker;
     private final ToolCallLogger toolCallLogger;
     private final RagSearchService ragSearchService;
+    /** 结果富化器：分类回退路径与主检索链路共用，避免两条路径各拼一份 VO 导致契约漂移 */
+    private final RagHitEnricher ragHitEnricher;
     private final ChatHistoryService chatHistoryService;
     private final QueryRewriter queryRewriter;
     private final ObjectMapper objectMapper;
@@ -85,6 +91,15 @@ public class ChatService {
     private final OrderQueryWorkflow orderQueryWorkflow;
 
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+
+    /**
+     * 会话级互斥锁：同一会话的请求串行执行
+     * <p>
+     * 原因：agent loop 的记忆缓存在 {@link MySqlChatMemoryStore} 内按 conversationId 存储，
+     * 并发请求会互相覆盖（后到的请求清缓存 → 先到的请求在工具往返中读到别人的系统提示），
+     * 导致回答错乱。锁随会话累积（每把几十字节），不做主动清理。
+     */
+    private final Map<String, ReentrantLock> conversationLocks = new ConcurrentHashMap<>();
 
     /**
      * SSE 心跳调度器：长回答期间定期下发 ping 帧，让 Nginx/浏览器知道连接仍活着。
@@ -188,8 +203,21 @@ public class ChatService {
      */
     public void ask(String conversationId, Long userId, String userMessage, SseEmitter emitter) {
         startHeartbeat(emitter);
+        // 同一会话串行化（见 conversationLocks 字段注释）。心跳在加锁前启动，
+        // 等待期间前端不会因长时间无数据被判空闲断流。
+        ReentrantLock conversationLock = conversationLocks.computeIfAbsent(
+                conversationId, key -> new ReentrantLock());
         executor.execute(() -> {
+            boolean locked = false;
             try {
+                // 等待上限 120s：单条回答的正常耗时远低于此；超时说明前一条异常挂起，
+                // 直接告知用户而不是无限排队
+                locked = conversationLock.tryLock(120, TimeUnit.SECONDS);
+                if (!locked) {
+                    sendEvent(emitter, "error", "上一条消息仍在处理中，请稍后再试");
+                    completeSse(emitter, "");
+                    return;
+                }
                 // 1. 确保会话存在（MySQL持久化）
                 chatHistoryService.getOrCreateConversation(Long.valueOf(conversationId), userId);
 
@@ -309,10 +337,18 @@ public class ChatService {
                             userMessage, conversationId, emitter, productsJson);
                 }
 
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                sendEvent(emitter, "error", "请求等待被中断，请重试");
+                completeSse(emitter, "");
             } catch (Exception e) {
                 log.error("ChatService 处理异常", e);
                 sendEvent(emitter, "error", "服务异常，请稍后重试");
                 completeSse(emitter, "");
+            } finally {
+                if (locked) {
+                    conversationLock.unlock();
+                }
             }
         });
     }
@@ -587,6 +623,16 @@ public class ChatService {
 
     /**
      * RAG 无结果时，尝试按分类名匹配回退查询数据库
+     * <p>
+     * 与主检索链路的契约对齐（2026-10-17）：
+     * <ul>
+     *   <li><b>展示字段统一由 {@link RagHitEnricher} 补齐</b> —— 此前这里手工拼 {@link RagHitVO}
+     *       漏了价格（{@code minPrice}/{@code maxPrice} 恒为 null），回退场景下客服推荐的商品没有价格。
+     *       两条检索路径各拼一份 VO 正是契约漂移的根源，现收口到与主链路同一个富化器。</li>
+     *   <li><b>补 ORDER BY</b> —— 此前只有 {@code LIMIT} 没有排序，返回的是数据库任意序；
+     *       改为按创建时间倒序，与索引构建时的选品顺序一致。</li>
+     * </ul>
+     * 售罄过滤仍在本方法内完成：{@link RagHitEnricher} 只补展示字段，不做可用性判断。
      */
     private List<RagHitVO> fallbackSearchByCategory(String userMessage) {
         try {
@@ -595,13 +641,7 @@ public class ChatService {
                             .eq(CategoryDO::getStatus, 0));
             if (allCategories == null || allCategories.isEmpty()) return null;
 
-            CategoryDO matched = null;
-            for (CategoryDO cat : allCategories) {
-                if (userMessage.contains(cat.getName())) {
-                    matched = cat;
-                    break;
-                }
-            }
+            CategoryDO matched = matchCategory(allCategories, userMessage);
             if (matched == null) return null;
 
             Long targetFirstCategoryId;
@@ -611,39 +651,68 @@ public class ChatService {
                 targetFirstCategoryId = matched.getId();
             }
 
-            List<ProductDO> products = productMapper.selectList(
-                    new LambdaQueryWrapper<ProductDO>()
-                            .eq(ProductDO::getStatus, 1)
-                            .eq(ProductDO::getFirstCategoryId, targetFirstCategoryId)
-                            .last("LIMIT 10"));
-
-            if (products == null || products.isEmpty()) return null;
+            // 只取 ID：展示字段（名称/图片/摘要/价格）统一交给 RagHitEnricher 回查，
+            // 避免两条检索路径各拼一份 VO 而漂移（本次修复的正是价格字段缺失）
+            List<Long> productIds = productMapper.selectList(
+                            new LambdaQueryWrapper<ProductDO>()
+                                    .eq(ProductDO::getStatus, 1)
+                                    .eq(ProductDO::getFirstCategoryId, targetFirstCategoryId)
+                                    .select(ProductDO::getId)
+                                    .orderByDesc(ProductDO::getCreateTime)
+                                    .last("LIMIT 10"))
+                    .stream()
+                    .map(ProductDO::getId)
+                    .toList();
+            if (productIds.isEmpty()) return null;
 
             // 同步剔除售罄商品：与主检索链路的库存过滤语义一致（缺失即放行）。
             // 漏掉这一步，主链路刚过滤掉的「全售罄」商品会被这条回退路径重新捞回来推给用户
-            Map<Long, Integer> stockMap = skuPriceResolver.resolveStock(
-                    products.stream().map(ProductDO::getId).toList());
+            Map<Long, Integer> stockMap = skuPriceResolver.resolveStock(productIds);
+            // 回退路径没有相关性排序：score 记为 0，明确区别于 RRF 分数（避免下游把它当成「最相关」）
+            List<RagCandidate> candidates = productIds.stream()
+                    .filter(id -> {
+                        Integer totalStock = stockMap.get(id);
+                        return totalStock == null || totalStock > 0;
+                    })
+                    .map(id -> new RagCandidate(id, 0.0))
+                    .toList();
 
-            List<RagHitVO> hits = new ArrayList<>();
-            for (ProductDO p : products) {
-                Integer totalStock = stockMap.get(p.getId());
-                if (totalStock != null && totalStock <= 0) {
-                    continue;
-                }
-                hits.add(RagHitVO.builder()
-                        .score(1.0)
-                        .productId(p.getId())
-                        .name(p.getName())
-                        .excerpt(p.getDescription() != null ? p.getDescription() : "")
-                        .image(p.getMainImage())
-                        .build());
-            }
-            return hits;
+            return ragHitEnricher.enrich(candidates);
 
         } catch (Exception e) {
             log.warn("分类回退查询异常: {}", e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * 从分类列表中匹配用户消息提到的分类（**最长名称优先**）
+     * <p>
+     * 为什么不能「首个命中即返回」：分类名之间存在包含关系（如「手机」与「手机壳」、
+     * 「手机数码」与「手机」），而分类列表的返回顺序不确定，
+     * 首个命中可能选中更短、更泛的分类，导致回退到错误的一级分类。
+     * <p>
+     * 最长匹配是这里最贴近直觉的启发式：用户在消息里写了更具体的分类名，就应优先接受它。
+     *
+     * @param categories 全部分类（可为 null）
+     * @param message    用户消息（可为 null）
+     * @return 命中的分类；无命中返回 null
+     */
+    static CategoryDO matchCategory(List<CategoryDO> categories, String message) {
+        if (categories == null || categories.isEmpty() || message == null || message.isBlank()) {
+            return null;
+        }
+        CategoryDO matched = null;
+        for (CategoryDO category : categories) {
+            String name = category == null ? null : category.getName();
+            if (name == null || name.isBlank() || !message.contains(name)) {
+                continue;
+            }
+            if (matched == null || name.length() > matched.getName().length()) {
+                matched = category;
+            }
+        }
+        return matched;
     }
 
     /**

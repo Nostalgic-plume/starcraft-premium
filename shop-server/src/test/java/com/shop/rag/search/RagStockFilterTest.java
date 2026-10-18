@@ -1,6 +1,7 @@
 package com.shop.rag.search;
 
 import com.shop.rag.config.RagProperties;
+import com.shop.rag.config.RagSearchProperties;
 import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
@@ -18,6 +19,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -70,7 +73,8 @@ class RagStockFilterTest {
     @BeforeEach
     void setUp() {
         ragSearchService = new RagSearchService(embeddingModel, embeddingStore, keywordSearchService,
-                synonymExpander, new RrfProperties(), new RagProperties(), skuPriceResolver, ragHitEnricher);
+                synonymExpander, new RrfProperties(), new RagProperties(), new RagSearchProperties(),
+                skuPriceResolver, ragHitEnricher);
         when(synonymExpander.expand(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
         // 富化做恒等映射：本测试关注库存过滤，展示数据回查由 RagHitEnricherTest 覆盖；
         // 恒等映射保证 result.hits() 忠实反映过滤后的候选（而非被 mock 成空）
@@ -82,6 +86,13 @@ class RagStockFilterTest {
                             .score(candidate.score())
                             .build())
                     .toList();
+        });
+        // 可展示性过滤默认放行（原样返回入参）：本测试聚焦库存过滤，下架过滤由 RagDisplayableFilterTest 覆盖。
+        // ⚠️ 必须显式 stub —— Mockito 对 Set 返回类型默认给空集合，而「正集」语义下空集合 =
+        //    候选全部不可展示 → 候选池被整体清空，本测试全部用例会失效。
+        lenient().when(ragHitEnricher.findDisplayableIds(anyCollection())).thenAnswer(invocation -> {
+            Collection<Long> ids = invocation.getArgument(0);
+            return new HashSet<>(ids);
         });
     }
 

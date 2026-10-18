@@ -58,7 +58,9 @@ class ChatServiceClearConversationTest {
                 null,   // skuPriceResolver
                 null,   // chatIntentResolver
                 null,   // cancelOrderWorkflow
-                null);  // orderQueryWorkflow
+                null,   // orderQueryWorkflow
+                null,   // cancelPendingService
+                null);  // orderCandidateStore
     }
 
     @Test

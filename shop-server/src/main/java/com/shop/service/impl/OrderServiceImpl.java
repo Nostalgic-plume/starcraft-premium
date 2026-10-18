@@ -452,19 +452,28 @@ public class OrderServiceImpl implements OrderService {
         if (!order.getUserId().equals(userId)) {
             throw new BusinessException("无权操作该订单");
         }
-        if (!Objects.equals(order.getStatus(), OrderConstants.STATUS_PENDING_PAY)) {
-            throw new BusinessException("当前订单状态不允许取消");
-        }
-        // 回滚库存
+        // 回滚库存依赖订单项，先查出来（真正是否回滚由下面的条件更新结果决定）
         List<OrderItemDO> items = orderItemMapper.selectList(
                 new LambdaQueryWrapper<OrderItemDO>().eq(OrderItemDO::getOrderId, orderId));
+
+        // 条件更新保证幂等：并发取消同一订单时，只有一次能把「待支付」改成「已取消」。
+        // 若先回滚库存再无条件 updateById，两个请求都能通过上面的状态检查，库存会被回滚两次。
+        int updated = orderMapper.update(null,
+                new LambdaUpdateWrapper<OrderDO>()
+                        .eq(OrderDO::getId, orderId)
+                        .eq(OrderDO::getUserId, userId)
+                        .eq(OrderDO::getStatus, OrderConstants.STATUS_PENDING_PAY)
+                        .set(OrderDO::getStatus, OrderConstants.STATUS_CANCELLED));
+        if (updated == 0) {
+            throw new BusinessException("当前订单状态不允许取消");
+        }
+
+        // 只有抢到状态流转的这一次才回滚库存
         for (OrderItemDO item : items) {
             skuMapper.restoreStock(item.getSkuId(), item.getQuantity());
             stockCacheService.restoreStock(item.getSkuId(), item.getQuantity());
             redisTemplate.delete(ProductConstants.CACHE_PRODUCT + item.getProductId());
         }
-        order.setStatus(OrderConstants.STATUS_CANCELLED);
-        orderMapper.updateById(order);
         log.info("订单已取消, orderNo: {}", order.getOrderNo());
     }
 
@@ -554,6 +563,24 @@ public class OrderServiceImpl implements OrderService {
     public List<OrderVO> myOrdersByUserId(Long userId, Integer status, int limit) {
         LambdaQueryWrapper<OrderDO> wrapper = new LambdaQueryWrapper<OrderDO>()
                 .eq(OrderDO::getUserId, userId)
+                .orderByDesc(OrderDO::getCreateTime);
+        if (status != null) {
+            wrapper.eq(OrderDO::getStatus, status);
+        }
+        wrapper.last("LIMIT " + limit);
+        return orderMapper.selectList(wrapper).stream()
+                .map(this::convertToVO)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public List<OrderVO> myOrdersByUserIdAndTime(Long userId, Integer status,
+                                                 LocalDateTime start, LocalDateTime end, int limit) {
+        LambdaQueryWrapper<OrderDO> wrapper = new LambdaQueryWrapper<OrderDO>()
+                .eq(OrderDO::getUserId, userId)
+                // 时间条件下推到 SQL：先拉列表再内存过滤会漏单（limit 截断发生在过滤之前）
+                .ge(start != null, OrderDO::getCreateTime, start)
+                .le(end != null, OrderDO::getCreateTime, end)
                 .orderByDesc(OrderDO::getCreateTime);
         if (status != null) {
             wrapper.eq(OrderDO::getStatus, status);

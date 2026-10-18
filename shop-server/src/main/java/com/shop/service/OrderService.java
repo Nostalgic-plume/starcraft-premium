@@ -5,6 +5,7 @@ import com.shop.model.vo.OrderVO;
 import com.shop.mq.OrderCreateMessage;
 import com.shop.common.PageResult;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -126,6 +127,20 @@ public interface OrderService {
      * @return 订单列表 VO（含商品快照与状态文案）
      */
     List<OrderVO> myOrdersByUserId(Long userId, Integer status, int limit);
+
+    /**
+     * 按指定 userId + 时间范围查询订单列表（AI 客服「取消昨天的订单」等模糊描述用）
+     * 时间条件在 SQL 层过滤（create_time），避免先拉列表再内存过滤导致漏单
+     *
+     * @param userId 用户ID
+     * @param status 订单状态（null=全部）
+     * @param start  下单时间起点（null=不限）
+     * @param end    下单时间终点（null=不限）
+     * @param limit  返回条数上限
+     * @return 订单列表 VO
+     */
+    List<OrderVO> myOrdersByUserIdAndTime(Long userId, Integer status,
+                                          LocalDateTime start, LocalDateTime end, int limit);
 
     /**
      * 按指定 userId 查询订单详情（AI 客服工具调用用，内置归属校验）

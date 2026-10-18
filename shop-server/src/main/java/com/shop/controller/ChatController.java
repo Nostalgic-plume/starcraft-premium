@@ -1,10 +1,12 @@
 package com.shop.controller;
 
 import cn.dev33.satoken.stp.StpUtil;
+import cn.hutool.core.util.IdUtil;
 import com.shop.common.Result;
 import com.shop.common.StpUserUtil;
 import com.shop.model.entity.ChatConversationDO;
 import com.shop.model.entity.ChatMessageDO;
+import com.shop.rag.chat.ChatRateLimiter;
 import com.shop.rag.chat.ChatService;
 import com.shop.rag.memory.ChatFeedbackService;
 import com.shop.rag.memory.ChatHistoryService;
@@ -33,9 +35,13 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class ChatController {
 
+    /** 单条用户消息最大长度：接入层直接拦截，避免超长输入拖垮模型与检索链路 */
+    private static final int MAX_MESSAGE_LENGTH = 2000;
+
     private final ChatService chatService;
     private final ChatHistoryService chatHistoryService;
     private final ChatFeedbackService chatFeedbackService;
+    private final ChatRateLimiter chatRateLimiter;
 
     /**
      * 智能客服流式问答（SSE）
@@ -49,27 +55,56 @@ public class ChatController {
     @Operation(summary = "流式问答（SSE）")
     public SseEmitter ask(@RequestBody Map<String, String> body) {
         String message = body.get("message");
-        String conversationId = body.getOrDefault("conversationId", "default");
 
+        // 会话 ID 必须是数字字符串（chat_conversation.id 为 Long）。缺省时由服务端生成，
+        // 不能复用 "default"——所有用户共用一个 ID 会触发「无权访问该会话」且 pending 串会话。
+        String conversationId = body.get("conversationId");
+        boolean generatedConversationId = conversationId == null || conversationId.isBlank()
+                || "default".equals(conversationId);
+        if (generatedConversationId) {
+            conversationId = String.valueOf(IdUtil.getSnowflakeNextId());
+        }
+
+        // 接入层守卫：空消息 / 超长消息直接拒绝，不进模型与检索链路
         if (message == null || message.isBlank()) {
-            SseEmitter emitter = new SseEmitter(0L);
-            try {
-                emitter.send(SseEmitter.event()
-                        .name("message")
-                        .data("{\"type\":\"error\",\"content\":\"消息不能为空\"}"));
-                emitter.send(SseEmitter.event().name("message").data("{\"type\":\"end\",\"content\":\"\"}"));
-                emitter.complete();
-            } catch (Exception e) {
-                // ignore
-            }
-            return emitter;
+            return errorEmitter("消息不能为空");
+        }
+        if (message.length() > MAX_MESSAGE_LENGTH) {
+            return errorEmitter("消息过长，请精简后重试（最多 " + MAX_MESSAGE_LENGTH + " 字）");
         }
 
         // AI 客服为登录后功能：未登录抛 NotLoginException（GlobalExceptionHandler 统一返回 401）
         long userId = StpUserUtil.INSTANCE.getLoginIdAsLong();
 
+        // 频率限制：单用户每分钟 N 条，超限直接拒绝
+        // TODO: 补内容安全（敏感词/违规内容）、Prompt 注入检测与 PII 脱敏；当前只做长度与频率限制
+        if (!chatRateLimiter.allow(userId)) {
+            return errorEmitter("发送太频繁，请稍后再试");
+        }
+
         SseEmitter emitter = new SseEmitter(300_000L);
+        if (generatedConversationId) {
+            // 服务端生成的会话 ID 必须先回传，前端后续轮次才能延续同一会话
+            try {
+                emitter.send(SseEmitter.event().name("message")
+                        .data("{\"type\":\"conversationId\",\"content\":\"" + conversationId + "\"}"));
+            } catch (Exception ignored) {
+            }
+        }
         chatService.ask(conversationId, userId, message, emitter);
+        return emitter;
+    }
+
+    /** 接入层直接拒绝时返回一个已收尾的 SSE（错误 + end），保持前端事件契约一致 */
+    private SseEmitter errorEmitter(String content) {
+        SseEmitter emitter = new SseEmitter(0L);
+        try {
+            emitter.send(SseEmitter.event().name("message")
+                    .data("{\"type\":\"error\",\"content\":\"" + content + "\"}"));
+            emitter.send(SseEmitter.event().name("message").data("{\"type\":\"end\",\"content\":\"\"}"));
+            emitter.complete();
+        } catch (Exception ignored) {
+        }
         return emitter;
     }
 

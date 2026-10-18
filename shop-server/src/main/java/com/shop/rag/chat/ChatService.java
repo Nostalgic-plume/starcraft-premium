@@ -89,6 +89,8 @@ public class ChatService {
     private final ChatIntentResolver chatIntentResolver;
     private final CancelOrderWorkflow cancelOrderWorkflow;
     private final OrderQueryWorkflow orderQueryWorkflow;
+    private final CancelPendingService cancelPendingService;
+    private final OrderCandidateStore orderCandidateStore;
 
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
@@ -99,6 +101,7 @@ public class ChatService {
      * 并发请求会互相覆盖（后到的请求清缓存 → 先到的请求在工具往返中读到别人的系统提示），
      * 导致回答错乱。锁随会话累积（每把几十字节），不做主动清理。
      */
+    // TODO: 多实例部署时把本地 ReentrantLock 换成 Redis 分布式锁；当前只能保证单实例内同会话串行
     private final Map<String, ReentrantLock> conversationLocks = new ConcurrentHashMap<>();
 
     /**
@@ -181,6 +184,27 @@ public class ChatService {
             """;
 
     /**
+     * 取消订单场景的系统提示：agent 只负责查单与提议，不承诺已取消。
+     * 真正的执行由 pending 确认后的确定性代码完成。
+     */
+    private static final String CANCEL_SYSTEM_PROMPT = """
+            你是「星辰优选」商城的智能客服「小星」，本轮在处理取消订单。
+
+            ## 处理规则
+            1. 先确定用户要取消哪一笔待支付订单：
+               - 用户给了订单号 → 直接使用；
+               - 用户描述了时间（如「昨天的」「最近三天」）→ 调 getMyOrders，把时间转成 relativeDay 参数（TODAY/YESTERDAY/LAST_3_DAYS/LAST_7_DAYS）；
+               - 用户没给订单号也没描述 → 调 getMyOrders 查最近订单，列出候选让用户选。
+            2. 确定目标后调用 requestCancelOrder(orderId)。该工具只发起取消请求，不会真正取消。
+            3. 把工具返回的确认话术告诉用户，等待用户下一轮明确确认；绝对不要说「已取消」或「取消成功」。
+            4. 用户只是在询问取消规则、退款政策、手续费时，直接回答，不要调用工具。
+            5. 不要推荐商品、不要追问「想找什么」。
+
+            ## 用户订单信息（Java 侧实时查回）
+            %s
+            """;
+
+    /**
      * 全部售罄时注入的库存提示段落，替代商品列表占位文本。
      * <p>
      * 与「（未找到相关商品信息）」的区别：那个是「真的没搜到」，这个是「有商品但买不到」。
@@ -232,30 +256,50 @@ public class ChatService {
                         .chatMemoryStore(mySqlChatMemoryStore)
                         .build();
 
-                // ===== 意图识别 + 路由（外部 workflow 内部 agent loop 的分层入口）=====
+                // ===== pending 前置判定（优先级高于意图识别）=====
+                // 用户上一轮已被问过「确认取消吗」，本轮回复可能不含任何订单关键词（如「确认」），
+                // 若先走意图识别会被判成 PRODUCT/CHITCHAT，pending 永远处理不到；
+                // 同时「不要取消」「取消要手续费吗」必须由确定性规则拦住，不能交给 LLM。
+                CancelPendingService.PendingOrder pending = cancelPendingService.get(conversationId);
+                if (pending != null) {
+                    if (!userId.equals(pending.userId())) {
+                        // 会话归属异常（理论上已被会话校验拦住）：清掉，按普通消息处理
+                        cancelPendingService.clear(conversationId);
+                    } else {
+                        CancelPendingService.Reply pendingReply = cancelPendingService.judge(userMessage);
+                        if (pendingReply == CancelPendingService.Reply.CONFIRM) {
+                            String result = cancelOrderWorkflow.execute(userId, conversationId, pending.orderId());
+                            cancelPendingService.clear(conversationId);
+                            buildWorkflowContext(conversationId, userId, userMessage, emitter).replyAndComplete(result);
+                            return;
+                        }
+                        if (pendingReply == CancelPendingService.Reply.REVERSE) {
+                            cancelPendingService.clear(conversationId);
+                            buildWorkflowContext(conversationId, userId, userMessage, emitter)
+                                    .replyAndComplete("好的，已为您保留订单，不会取消。");
+                            return;
+                        }
+                        // 其他（追问/转话题/给新订单号）：清掉旧 pending，继续走正常链路
+                        cancelPendingService.clear(conversationId);
+                    }
+                }
+
+                // ===== 意图识别 + 路由 =====
                 // 意图决定走受控 workflow 还是收窄工具后的默认链路；route 事件推给前端显示
                 Intent intent = chatIntentResolver.resolve(userMessage);
                 sendEvent(emitter, "route", intent.code());
 
                 boolean orderIntent = intent == Intent.ORDER_CANCEL || intent == Intent.ORDER_QUERY;
-                if (orderIntent) {
-                    // 订单域意图：进入受控 workflow（订单查询/取消都不走通用 agent 的自由工具池）
-                    WorkflowContext workflowCtx = WorkflowContext.builder()
-                            .conversationId(conversationId)
-                            .userId(userId)
-                            .userMessage(userMessage)
-                            .emitter(emitter)
-                            .objectMapper(objectMapper)
-                            .chatHistoryService(chatHistoryService)
-                            .build();
-                    boolean handled = intent == Intent.ORDER_CANCEL
-                            ? cancelOrderWorkflow.tryHandle(workflowCtx, intent)
-                            : orderQueryWorkflow.tryHandle(workflowCtx, intent);
-                    if (handled) {
+                if (intent == Intent.ORDER_QUERY) {
+                    // 订单查询：确定性 workflow 优先处理结构化查询；无法解析时落回只读 agent
+                    WorkflowContext workflowCtx = buildWorkflowContext(
+                            conversationId, userId, userMessage, emitter);
+                    if (orderQueryWorkflow.tryHandle(workflowCtx, intent)) {
                         return; // workflow 已产出回复并收尾
                     }
-                    // 未消费：取消=反悔/转话题清 pending；查询=模糊长句 → 落回默认链路（该链路对订单只暴露只读工具）
                 }
+                // ORDER_CANCEL 不直接消费：进入下方 agent loop，工具集限定为读工具 + requestCancelOrder
+                // （工具只写 pending，不执行取消；执行由上面的 pending 确认分支完成）
 
                 // 3. Query 改写：利用 LLM 补全指代、优化搜索关键词（不检索的意图直接跳过，省一次 LLM 调用）
                 boolean chitchat = intent == Intent.CHITCHAT;
@@ -300,6 +344,13 @@ public class ChatService {
                         productContext = orderContext + "\n" + productContext;
                     }
                 }
+                // 取消场景额外注入上一轮候选：用户说「就那笔」「第一笔」时只能从候选里选
+                if (intent == Intent.ORDER_CANCEL) {
+                    String candidateContext = buildCandidateContext(conversationId);
+                    if (!candidateContext.isBlank()) {
+                        productContext = candidateContext + "\n" + productContext;
+                    }
+                }
 
                 // 7. 保存用户消息到 MySQL
                 ChatMessageDO userMsgDO = new ChatMessageDO();
@@ -311,9 +362,14 @@ public class ChatService {
 
                 // 8. 构建 system prompt（每轮单条最新）并加入本轮 memory；同步写入 store 缓存，
                 //    确保 AiServices 第一轮从 store.getMessages 能读到含 system 的完整窗口
-                String systemPrompt = chitchat
-                        ? CHITCHAT_SYSTEM_PROMPT
-                        : String.format(SYSTEM_PROMPT_TEMPLATE, productContext);
+                String systemPrompt;
+                if (chitchat) {
+                    systemPrompt = CHITCHAT_SYSTEM_PROMPT;
+                } else if (intent == Intent.ORDER_CANCEL) {
+                    systemPrompt = String.format(CANCEL_SYSTEM_PROMPT, productContext);
+                } else {
+                    systemPrompt = String.format(SYSTEM_PROMPT_TEMPLATE, productContext);
+                }
                 chatMemory.add(new SystemMessage(systemPrompt));
                 mySqlChatMemoryStore.updateMessages(conversationId, chatMemory.messages());
 
@@ -360,11 +416,22 @@ public class ChatService {
     private void deepSeekAgentLoop(Intent intent, Long userId, String systemPrompt, String productContext,
                                    TokenWindowChatMemory chatMemory, String userMessage,
                                    String conversationId, SseEmitter emitter, String productsJson) {
-        // 工具按意图收窄（最小权限）：仅 ORDER_QUERY 暴露只读订单工具；PRODUCT/默认不暴露任何工具。
-        // 写操作（取消订单）已剥离出 agent，只存在于 CancelOrderWorkflow 确定性代码路径。
-        Object[] tools = (intent == Intent.ORDER_QUERY)
-                ? new Object[]{new OrderQueryTool(userId, orderService)}
-                : new Object[0];
+        // 工具按意图收窄（最小权限）：
+        // - ORDER_CANCEL：只读订单工具 + requestCancelOrder（只写 pending，不执行取消）；
+        // - ORDER_QUERY ：只读订单工具；
+        // - 其他        ：不暴露任何工具。
+        // 真正的取消执行在 ChatService 的 pending 确认分支，由 CancelOrderWorkflow 确定性完成。
+        Object[] tools;
+        if (intent == Intent.ORDER_CANCEL) {
+            tools = new Object[]{
+                    new OrderQueryTool(userId, conversationId, orderService, orderCandidateStore),
+                    new RequestCancelTool(userId, conversationId, orderService, cancelPendingService)
+            };
+        } else if (intent == Intent.ORDER_QUERY) {
+            tools = new Object[]{new OrderQueryTool(userId, conversationId, orderService, orderCandidateStore)};
+        } else {
+            tools = new Object[0];
+        }
         AiAssistant assistant = AiServices.builder(AiAssistant.class)
                 .streamingChatModel(streamingChatModel)
                 .chatMemory(chatMemory)
@@ -744,6 +811,40 @@ public class ChatService {
      * 「问订单必有真实数据」，无论最后是哪一层模型接手。
      * </p>
      */
+    /** 上一轮候选订单 → 供 LLM 做跨轮指代选择（限定只能从列表选，防止记错/编造订单号） */
+    private String buildCandidateContext(String conversationId) {
+        List<OrderCandidateStore.Candidate> candidates = orderCandidateStore.get(conversationId);
+        if (candidates.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder("===== 上一轮查询到的候选订单 =====\n");
+        int index = 1;
+        for (OrderCandidateStore.Candidate candidate : candidates) {
+            sb.append(index++).append(". 订单 ").append(candidate.orderNo())
+                    .append("｜").append(candidate.statusText())
+                    .append("｜¥").append(candidate.amount());
+            if (!candidate.createTime().isBlank()) {
+                sb.append("｜下单 ").append(candidate.createTime());
+            }
+            sb.append("\n");
+        }
+        sb.append("用户说「就那笔」「第一笔」「刚才那个」时，只能从上面列表选择，不要编造订单号。\n");
+        return sb.toString();
+    }
+
+    /** 构建 workflow 执行上下文（订单查询 / 取消确认共用） */
+    private WorkflowContext buildWorkflowContext(String conversationId, Long userId,
+                                                 String userMessage, SseEmitter emitter) {
+        return WorkflowContext.builder()
+                .conversationId(conversationId)
+                .userId(userId)
+                .userMessage(userMessage)
+                .emitter(emitter)
+                .objectMapper(objectMapper)
+                .chatHistoryService(chatHistoryService)
+                .build();
+    }
+
     private String buildOrderContext(Long userId) {
         try {
             List<OrderVO> orders = orderService.myOrdersByUserId(userId, null, ORDER_CONTEXT_LIMIT);

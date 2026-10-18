@@ -161,6 +161,14 @@ rag:
     max-query-limit: 200
     # 公开接口未校验 topK，超大值会放大下游 LIMIT 与 Qdrant maxResults
     max-top-k: 100
+  reconcile:
+    # 向量索引对账：发现并修复「索引更新失败 → 商品永久搜不到 / 搜到旧内容」的不一致。
+    # ⚠️ 升级后（payload 新增 updateTime）先手动重建一次索引，否则存量索引会被判为陈旧
+    #    且因差异过大被阈值拦截（见 docs/rag-index-reconcile-design.md §六.1）
+    enabled: true
+    fixed-rate-ms: 1800000          # 30 分钟
+    max-auto-fix-ratio: 0.2         # 差异超过 20% 只告警不自动修复
+    scroll-batch-size: 256
   llm:
     # 每个键都带「:」默认值：绑定期取不到值时宁可落到默认值，也不要让上下文启动失败
     # （唯一 @SpringBootTest RagEvaluationTest 会因此起不来）

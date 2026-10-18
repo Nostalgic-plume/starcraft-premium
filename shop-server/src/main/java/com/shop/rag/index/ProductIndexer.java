@@ -24,6 +24,8 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -527,6 +529,9 @@ public class ProductIndexer {
         putIfNotNull(meta, "firstCategoryId", product.getFirstCategoryId());
         // 预留：多商家检索过滤（当前检索侧无消费点，但属过滤语义字段而非展示冗余，故保留）
         putIfNotNull(meta, "shopId", product.getShopId());
+        // 对账用：与 MySQL update_time 比对以发现「内容陈旧但 id 仍在」的索引。
+        // ⚠️ 必须走 toEpochMillis —— 对账侧用同一函数，否则时区/精度差异会让每轮都误判为陈旧
+        putIfNotNull(meta, "updateTime", toEpochMillis(product.getUpdateTime()));
         if (prices != null && prices.length == 2) {
             putIfNotNull(meta, "minPrice", prices[0] == null ? null : prices[0].doubleValue());
             putIfNotNull(meta, "maxPrice", prices[1] == null ? null : prices[1].doubleValue());
@@ -562,6 +567,20 @@ public class ProductIndexer {
      */
     private BigDecimal[] loadProductPrice(Long productId) {
         return skuPriceResolver.resolveOne(productId);
+    }
+
+    /**
+     * {@link LocalDateTime} → epoch millis
+     * <p>
+     * payload 写入（本类）与对账比对（{@code IndexReconcileTask}）**必须共用此函数**：
+     * 若两侧各写一份转换（如一侧用 {@code toString()}、另一侧用毫秒），会因时区/精度差异
+     * 导致对账每轮都把全部商品误判为「陈旧」并触发全量重建。
+     *
+     * @param time 数据库时间（可为 null）
+     * @return epoch millis；入参为 null 时返回 null（payload 侧据此跳过写入）
+     */
+    public static Long toEpochMillis(LocalDateTime time) {
+        return time == null ? null : time.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
     }
 
     private static String safe(String s) {

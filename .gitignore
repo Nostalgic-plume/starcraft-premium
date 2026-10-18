@@ -11,6 +11,8 @@ target/
 .vscode/
 node_modules/
 dist/
+# 本地上传的图片（FileStorageService 落盘目录，由 Nginx 直接提供访问）
+uploads/
 .env
 .env.local
 *.swp

@@ -18,6 +18,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -82,6 +84,13 @@ class RagStockFilterTest {
                             .score(candidate.score())
                             .build())
                     .toList();
+        });
+        // 可展示性过滤默认放行（原样返回入参）：本测试聚焦库存过滤，下架过滤由 RagDisplayableFilterTest 覆盖。
+        // ⚠️ 必须显式 stub —— Mockito 对 Set 返回类型默认给空集合，而「正集」语义下空集合 =
+        //    候选全部不可展示 → 候选池被整体清空，本测试全部用例会失效。
+        lenient().when(ragHitEnricher.findDisplayableIds(anyCollection())).thenAnswer(invocation -> {
+            Collection<Long> ids = invocation.getArgument(0);
+            return new HashSet<>(ids);
         });
     }
 

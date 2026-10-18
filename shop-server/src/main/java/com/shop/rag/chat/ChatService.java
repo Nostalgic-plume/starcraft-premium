@@ -15,6 +15,8 @@ import com.shop.rag.memory.MySqlChatMemoryStore;
 import com.shop.rag.resilience.CircuitBreaker;
 import com.shop.rag.resilience.ToolCallLogger;
 import com.shop.rag.search.QueryRewriter;
+import com.shop.rag.search.RagCandidate;
+import com.shop.rag.search.RagHitEnricher;
 import com.shop.rag.search.RagHitVO;
 import com.shop.rag.search.RagSearchResult;
 import com.shop.rag.search.RagSearchService;
@@ -71,6 +73,8 @@ public class ChatService {
     private final CircuitBreaker circuitBreaker;
     private final ToolCallLogger toolCallLogger;
     private final RagSearchService ragSearchService;
+    /** 结果富化器：分类回退路径与主检索链路共用，避免两条路径各拼一份 VO 导致契约漂移 */
+    private final RagHitEnricher ragHitEnricher;
     private final ChatHistoryService chatHistoryService;
     private final QueryRewriter queryRewriter;
     private final ObjectMapper objectMapper;
@@ -587,6 +591,16 @@ public class ChatService {
 
     /**
      * RAG 无结果时，尝试按分类名匹配回退查询数据库
+     * <p>
+     * 与主检索链路的契约对齐（2026-10-17）：
+     * <ul>
+     *   <li><b>展示字段统一由 {@link RagHitEnricher} 补齐</b> —— 此前这里手工拼 {@link RagHitVO}
+     *       漏了价格（{@code minPrice}/{@code maxPrice} 恒为 null），回退场景下客服推荐的商品没有价格。
+     *       两条检索路径各拼一份 VO 正是契约漂移的根源，现收口到与主链路同一个富化器。</li>
+     *   <li><b>补 ORDER BY</b> —— 此前只有 {@code LIMIT} 没有排序，返回的是数据库任意序；
+     *       改为按创建时间倒序，与索引构建时的选品顺序一致。</li>
+     * </ul>
+     * 售罄过滤仍在本方法内完成：{@link RagHitEnricher} 只补展示字段，不做可用性判断。
      */
     private List<RagHitVO> fallbackSearchByCategory(String userMessage) {
         try {
@@ -611,34 +625,33 @@ public class ChatService {
                 targetFirstCategoryId = matched.getId();
             }
 
-            List<ProductDO> products = productMapper.selectList(
-                    new LambdaQueryWrapper<ProductDO>()
-                            .eq(ProductDO::getStatus, 1)
-                            .eq(ProductDO::getFirstCategoryId, targetFirstCategoryId)
-                            .last("LIMIT 10"));
-
-            if (products == null || products.isEmpty()) return null;
+            // 只取 ID：展示字段（名称/图片/摘要/价格）统一交给 RagHitEnricher 回查，
+            // 避免两条检索路径各拼一份 VO 而漂移（本次修复的正是价格字段缺失）
+            List<Long> productIds = productMapper.selectList(
+                            new LambdaQueryWrapper<ProductDO>()
+                                    .eq(ProductDO::getStatus, 1)
+                                    .eq(ProductDO::getFirstCategoryId, targetFirstCategoryId)
+                                    .select(ProductDO::getId)
+                                    .orderByDesc(ProductDO::getCreateTime)
+                                    .last("LIMIT 10"))
+                    .stream()
+                    .map(ProductDO::getId)
+                    .toList();
+            if (productIds.isEmpty()) return null;
 
             // 同步剔除售罄商品：与主检索链路的库存过滤语义一致（缺失即放行）。
             // 漏掉这一步，主链路刚过滤掉的「全售罄」商品会被这条回退路径重新捞回来推给用户
-            Map<Long, Integer> stockMap = skuPriceResolver.resolveStock(
-                    products.stream().map(ProductDO::getId).toList());
+            Map<Long, Integer> stockMap = skuPriceResolver.resolveStock(productIds);
+            // 回退路径没有相关性排序，分数沿用历史值 1.0（富化器按入参顺序透出）
+            List<RagCandidate> candidates = productIds.stream()
+                    .filter(id -> {
+                        Integer totalStock = stockMap.get(id);
+                        return totalStock == null || totalStock > 0;
+                    })
+                    .map(id -> new RagCandidate(id, 1.0))
+                    .toList();
 
-            List<RagHitVO> hits = new ArrayList<>();
-            for (ProductDO p : products) {
-                Integer totalStock = stockMap.get(p.getId());
-                if (totalStock != null && totalStock <= 0) {
-                    continue;
-                }
-                hits.add(RagHitVO.builder()
-                        .score(1.0)
-                        .productId(p.getId())
-                        .name(p.getName())
-                        .excerpt(p.getDescription() != null ? p.getDescription() : "")
-                        .image(p.getMainImage())
-                        .build());
-            }
-            return hits;
+            return ragHitEnricher.enrich(candidates);
 
         } catch (Exception e) {
             log.warn("分类回退查询异常: {}", e.getMessage());

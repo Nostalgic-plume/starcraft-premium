@@ -494,24 +494,39 @@ public class ProductIndexer {
     }
 
     /**
-     * 构建商品元数据 Map（检索过滤与展示字段：productId/名称/一级分类/商家ID/主图/价格区间）
+     * 构建商品元数据 Map（**仅检索侧真正消费的字段**）
+     *
+     * <p>
+     * 只写「参与过滤的字段 + 回查关联键」；展示数据（名称 / 主图 / 描述）一律由
+     * {@code com.shop.rag.search.RagHitEnricher} 在选出 topK 之后回查 MySQL 补齐 ——
+     * payload 里再存一份无人读的展示字段属纯冗余（2026-10-16 已据此删除 {@code name} / {@code mainImage}）。
+     *
+     * <p>
+     * ⚠️ <b>新增字段前先确认它「有消费点」</b>，否则只是白白增加 Qdrant 的存储与检索传输量。
+     * 当前消费点（全 {@code com.shop.rag} 包内）：
+     * <ul>
+     *   <li>{@code productId} —— 构造检索候选（RagSearchService）</li>
+     *   <li>{@code firstCategoryId} / {@code minPrice} / {@code maxPrice} —— 元数据过滤（passMetadataFilter）</li>
+     *   <li>{@code shopId} —— 预留：多商家检索过滤（属过滤语义字段，非展示冗余，故保留）</li>
+     * </ul>
      *
      * <p>
      * 空值字段一律跳过：LangChain4j 的 Metadata 不接受 null，任一字段为 null 都会抛
      * IllegalArgumentException —— 在增量更新时表现为该商品静默丢索引，在全量重建时表现为整批失败。
      * 缺失字段不参与检索过滤（passMetadataFilter 对缺失键按「不过滤」处理），也不影响展示。
+     * ⚠️ 价格字段缺失即「价格筛选对该商品失效」，写入路径的调用顺序有硬约束，见
+     * {@code ProductServiceImpl.addProduct} 的注释。
      *
      * @param product 上架商品
      * @param prices  SKU 价格区间 [minPrice, maxPrice]（可为 null，此时不写价格字段）
-     * @return 商品元数据 Map
+     * @return 检索侧消费的商品元数据 Map
      */
     private Map<String, Object> toMetadataMap(ProductDO product, BigDecimal[] prices) {
         Map<String, Object> meta = new HashMap<>();
         putIfNotNull(meta, "productId", product.getId());
-        putIfNotNull(meta, "name", product.getName());
         putIfNotNull(meta, "firstCategoryId", product.getFirstCategoryId());
+        // 预留：多商家检索过滤（当前检索侧无消费点，但属过滤语义字段而非展示冗余，故保留）
         putIfNotNull(meta, "shopId", product.getShopId());
-        putIfNotNull(meta, "mainImage", product.getMainImage());
         if (prices != null && prices.length == 2) {
             putIfNotNull(meta, "minPrice", prices[0] == null ? null : prices[0].doubleValue());
             putIfNotNull(meta, "maxPrice", prices[1] == null ? null : prices[1].doubleValue());

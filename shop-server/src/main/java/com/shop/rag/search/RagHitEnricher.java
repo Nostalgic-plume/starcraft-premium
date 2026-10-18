@@ -10,9 +10,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -24,6 +26,15 @@ import java.util.stream.Collectors;
  * 两条路（向量 / 关键词）的 {@code excerpt} 由此统一为「商品描述的截断」，
  * 消除了此前「向量路带『名称：/描述：/品牌：』标签前缀、关键词路是纯描述」的语义不一致 ——
  * 该差异会让客服卡片在 40 字配额里显示成「名称：xxx 描述：」而挤掉全部有效描述。
+ * <p>
+ * 本类承担**两个时机**的「MySQL 侧商品真相查询」，二者是两层防护而非替代：
+ * <ul>
+ *   <li>{@link #findDisplayableIds}（RRF 合并**前**，候选池清洗）：剔除幽灵索引，
+ *       解决「过滤发生在取 topK 之后 → 返回条数不足」；</li>
+ *   <li>{@link #enrich}（取 topK **后**，结果富化）：补全展示数据，
+ *       并再次强制 {@code status = 上架}，保证最终展示的真实性。</li>
+ * </ul>
+ * 前置过滤解决条数，回查解决真相 —— 少了任何一个都有缺口。
  *
  * @author shop
  */
@@ -91,6 +102,51 @@ public class RagHitEnricher {
                     .build());
         }
         return hits;
+    }
+
+    /**
+     * 查询候选商品中「当前可展示」的 ID 集合（上架且未逻辑删除）
+     * <p>
+     * 供检索链路的**候选池清洗**（RRF 合并之前）使用，与 {@link #enrich} 构成两层防护
+     * （分工见类注释）。为什么必须有这道过滤：向量库与 MySQL 的一致性靠「索引更新尽力而为」
+     * 维持（索引调用一律 try-catch 只 WARN、且与 DB 写入非事务），故向量库可能残留
+     * **已下架商品的幽灵索引**；payload 里没有 status 字段，Qdrant 侧无法过滤，
+     * 而等到 topK 之后的 {@link #enrich} 才剔除会导致**返回条数不足**。
+     * <p>
+     * 之所以读 MySQL 实时状态而非 payload 快照：payload 里的字段是**写入时刻的快照**，
+     * 而索引只建上架商品，故快照 status 恒为 1，对幽灵索引毫无区分力。
+     * <p>
+     * 之所以用**正集**语义（返回「可展示的」，由调用方取补集）而非反集（查 {@code status != 上架}）：
+     * {@code deleted = 1} 的记录被 MyBatis-Plus 的 {@code @TableLogic} 自动排除出本次查询，
+     * 正集能一次覆盖「已下架」与「已逻辑删除」两种失效，反集只能查到前者。
+     * <p>
+     * ⚠️ <b>异常向上抛出，本方法刻意不 catch</b>（与同类 {@link #loadProducts} 的内部消化风格不同）：
+     * 正集语义下「空集合」等价于「候选全部不可展示」，若与「查询失败」共用同一返回值，
+     * 调用方会把一次查询抖动误读成「全部剔除」→ 检索返回空结果。
+     * 检索链路据此按「异常即不过滤」处理（与库存过滤同一约定）。
+     *
+     * @param productIds 候选商品 ID（调用方保证非空；允许重复）
+     * @return 其中当前上架且未逻辑删除的商品 ID 集合（空集 = 全部不可展示）
+     * @throws RuntimeException 查询异常，由调用方决定放行策略
+     */
+    public Set<Long> findDisplayableIds(Collection<Long> productIds) {
+        if (CollUtil.isEmpty(productIds)) {
+            return Set.of();
+        }
+        // 只取 id 列：本方法只做「是否可展示」判定，名称/描述等展示字段由 enrich 在 topK 之后回查
+        List<ProductDO> products = productMapper.selectList(
+                new LambdaQueryWrapper<ProductDO>()
+                        .in(ProductDO::getId, productIds)
+                        .eq(ProductDO::getStatus, ProductConstants.STATUS_ON_SHELF)
+                        .select(ProductDO::getId));
+        if (CollUtil.isEmpty(products)) {
+            return Set.of();
+        }
+        return products.stream()
+                .filter(Objects::nonNull)
+                .map(ProductDO::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
     }
 
     /**

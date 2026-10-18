@@ -12,12 +12,15 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -65,6 +68,13 @@ class RagFallbackTest {
                 new RrfProperties(), new RagProperties(), skuPriceResolver, ragHitEnricher);
         // 库存查询不可用（空 Map → 不过滤），聚焦降级链路本身
         lenient().when(skuPriceResolver.resolveStock(anyList())).thenReturn(Map.of());
+        // 可展示性过滤默认放行（原样返回入参）：本测试聚焦降级链路，下架过滤由 RagDisplayableFilterTest 覆盖。
+        // ⚠️ 必须显式 stub —— Mockito 对 Set 返回类型默认给空集合，而「正集」语义下空集合 =
+        //    候选全部不可展示 → 候选池被整体清空，本测试的「降级后仍有结果」断言会全部失效。
+        lenient().when(ragHitEnricher.findDisplayableIds(anyCollection())).thenAnswer(invocation -> {
+            Collection<Long> ids = invocation.getArgument(0);
+            return new HashSet<>(ids);
+        });
         // 同义词扩展原样返回，聚焦降级逻辑本身
         when(synonymExpander.expand(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
         // 富化做恒等映射，保证命中项如实透出；展示数据回查的正确性由 RagHitEnricherTest 覆盖

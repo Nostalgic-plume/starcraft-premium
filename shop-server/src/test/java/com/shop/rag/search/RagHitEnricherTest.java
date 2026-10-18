@@ -14,9 +14,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -174,5 +176,46 @@ class RagHitEnricherTest {
     void emptyInputSkipsQueries() {
         assertTrue(enricher.enrich(List.of()).isEmpty());
         verifyNoInteractions(productMapper, skuPriceResolver);
+    }
+
+    // ========== findDisplayableIds（候选池清洗：RRF 合并前的可展示性判定） ==========
+
+    @Test
+    @DisplayName("可展示查询：只返回查到的上架商品 ID，补集由调用方取")
+    void findDisplayableIdsReturnsOnlyOnShelfIds() {
+        when(productMapper.selectList(any()))
+                .thenReturn(List.of(product(1L, "商品1", "描述1"), product(3L, "商品3", "描述3")));
+
+        // 传入 3 个候选，其中 2 已下架（查询未命中）
+        Set<Long> displayable = enricher.findDisplayableIds(List.of(1L, 2L, 3L));
+
+        assertEquals(Set.of(1L, 3L), displayable,
+                "只返回当前上架且未逻辑删除的 ID —— 查不到的即已下架/已删除，由调用方取补集剔除");
+    }
+
+    @Test
+    @DisplayName("可展示查询：全部查不到时返回空集合（= 候选全部不可展示）")
+    void findDisplayableIdsReturnsEmptyWhenNoneOnShelf() {
+        when(productMapper.selectList(any())).thenReturn(List.of());
+
+        assertTrue(enricher.findDisplayableIds(List.of(1L, 2L)).isEmpty(),
+                "空集合在正集语义下等于「全部不可展示」，这是与「查询失败」必须区分的根因");
+    }
+
+    @Test
+    @DisplayName("可展示查询：空入参不触发查询")
+    void findDisplayableIdsSkipsQueryOnEmptyInput() {
+        assertTrue(enricher.findDisplayableIds(List.of()).isEmpty());
+        verifyNoInteractions(productMapper);
+    }
+
+    @Test
+    @DisplayName("可展示查询：异常必须向上抛出，不得吞掉")
+    void findDisplayableIdsPropagatesException() {
+        when(productMapper.selectList(any())).thenThrow(new RuntimeException("DB 不可用"));
+
+        // 本方法刻意不 catch（与 loadProducts 的内部消化风格相反）：
+        // 若吞掉异常并返回空集合，调用方会把「查询失败」误读为「全部不可展示」→ 清空候选池
+        assertThrows(RuntimeException.class, () -> enricher.findDisplayableIds(List.of(1L, 2L)));
     }
 }

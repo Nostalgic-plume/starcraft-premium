@@ -34,7 +34,7 @@ public class RagSearchController {
      *
      * @param query      搜索关键词，必填
      * @param topK       返回结果数量上限，默认 10
-     * @param categoryId 分类ID过滤，可空表示不限分类
+     * @param categoryId **一级分类** ID 过滤（与索引 payload 的 {@code firstCategoryId} 比对），可空表示不限分类
      * @param minPrice   最低价格过滤，可空表示不设下限
      * @param maxPrice   最高价格过滤，可空表示不设上限
      * @return 搜索结果 Map（hits 命中列表、total 命中数、query 原查询词）

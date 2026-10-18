@@ -47,6 +47,7 @@ class ChatServiceClearConversationTest {
                 null,   // circuitBreaker
                 null,   // toolCallLogger
                 null,   // ragSearchService
+                null,   // ragHitEnricher
                 chatHistoryService,
                 null,   // queryRewriter
                 null,   // objectMapper

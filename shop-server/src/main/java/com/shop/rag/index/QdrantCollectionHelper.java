@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -31,6 +32,20 @@ public class QdrantCollectionHelper {
     private static final Pattern COUNT_PATTERN = Pattern.compile("\"count\"\\s*:\\s*(\\d+)");
 
     /**
+     * 过滤下推所需的 payload 索引定义：字段名 → Qdrant field_schema
+     * <p>
+     * ⚠️ 这些索引是「过滤下推」的**前置条件**：Qdrant 对没有 payload 索引的字段做过滤是全量扫描，
+     * 下推不但不会更快，还可能比应用层过滤更慢。新增可过滤字段时必须同步在这里登记。
+     * <p>
+     * 类型说明：{@code firstCategoryId} 为 Long → integer；价格在 payload 里是 double
+     * （{@code BigDecimal.doubleValue()}）→ float。类型不匹配会导致过滤结果为空。
+     */
+    private static final Map<String, String> PAYLOAD_INDEXES = Map.of(
+            "firstCategoryId", "integer",
+            "minPrice", "float",
+            "maxPrice", "float");
+
+    /**
      * 从集合信息响应中提取向量维度（config.params.vectors.size）
      * <p>
      * 限定 "vectors" 前缀，避免误匹配响应中的其它 size 字段。
@@ -46,6 +61,8 @@ public class QdrantCollectionHelper {
         if (exists(name)) {
             log.info("Qdrant 集合 '{}' 已存在，跳过创建", name);
             verifyDimension(name);
+            // 存量集合可能建于过滤下推改造之前（无 payload 索引）—— 幂等补建，无需重建集合
+            ensurePayloadIndexes(name);
             return;
         }
         log.info("Qdrant 集合 '{}' 不存在，正在创建...", name);
@@ -170,6 +187,52 @@ public class QdrantCollectionHelper {
         }
     }
 
+    /**
+     * 确保过滤字段的 payload 索引存在（过滤下推的前置条件）
+     * <p>
+     * 幂等：已存在的索引重复创建由 Qdrant 返回 "already exists"，不视为错误；
+     * 在**已有数据**的集合上创建索引由 Qdrant 后台完成，**无需删集合重建**。
+     * <p>
+     * 单个字段失败只 WARN，不阻断其余字段 —— 索引缺失时过滤仍可用（降级为全量扫描）。
+     *
+     * @param name 集合名称
+     */
+    private void ensurePayloadIndexes(String name) {
+        PAYLOAD_INDEXES.forEach((field, schema) -> createPayloadIndex(name, field, schema));
+    }
+
+    /**
+     * 创建单个 payload 索引（REST PUT，幂等）
+     *
+     * @param name   集合名称
+     * @param field  payload 字段名
+     * @param schema Qdrant field_schema（integer / float / keyword ...）
+     */
+    private void createPayloadIndex(String name, String field, String schema) {
+        try {
+            URI uri = URI.create(QDRANT_REST_URL + name + "/index?wait=true");
+            HttpURLConnection conn = (HttpURLConnection) uri.toURL().openConnection();
+            conn.setRequestMethod("PUT");
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setDoOutput(true);
+            conn.setConnectTimeout(3000);
+            // 在已有数据上建索引需要扫描 payload，读超时放宽（670 条实测毫秒级，为增长留余量）
+            conn.setReadTimeout(10000);
+            String body = String.format("{\"field_name\":\"%s\",\"field_schema\":\"%s\"}", field, schema);
+            conn.getOutputStream().write(body.getBytes(StandardCharsets.UTF_8));
+            int code = conn.getResponseCode();
+            if (code == 200) {
+                log.info("Qdrant payload 索引 '{}' ({}) 就绪", field, schema);
+            } else {
+                log.warn("Qdrant payload 索引 '{}' 创建返回 HTTP {}", field, code);
+            }
+            conn.disconnect();
+        } catch (Exception e) {
+            // 索引缺失不阻断检索（降级为全量扫描），故只告警
+            log.warn("创建 Qdrant payload 索引 '{}' 失败: {}", field, e.getMessage());
+        }
+    }
+
     // ========== 内部方法 ==========
 
     /**
@@ -215,6 +278,8 @@ public class QdrantCollectionHelper {
             int code = conn.getResponseCode();
             log.info("创建 Qdrant 集合 '{}' 完成, HTTP {}, 维度: {}", name, code, dimension);
             conn.disconnect();
+            // 新集合必须同步建好过滤字段的 payload 索引（过滤下推的前置条件）
+            ensurePayloadIndexes(name);
         } catch (Exception e) {
             log.warn("创建 Qdrant 集合失败: {}", e.getMessage());
         }

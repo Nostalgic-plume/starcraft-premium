@@ -17,11 +17,14 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -65,6 +68,13 @@ class RagSearchServiceTest {
         // 库存查询默认不可用（空 Map → 不做库存过滤），让既有用例聚焦候选池/入参兜底本身；
         // 验证库存过滤的用例再单独覆盖该 stub
         lenient().when(skuPriceResolver.resolveStock(anyList())).thenReturn(Map.of());
+        // 可展示性过滤默认放行（原样返回入参）：本测试聚焦候选池对齐，下架过滤由 RagDisplayableFilterTest 覆盖。
+        // ⚠️ 必须显式 stub —— Mockito 对 Set 返回类型默认给空集合，而「正集」语义下空集合 =
+        //    候选全部不可展示 → 候选池被整体清空，既有断言会全部失效。
+        lenient().when(ragHitEnricher.findDisplayableIds(anyCollection())).thenAnswer(invocation -> {
+            Collection<Long> ids = invocation.getArgument(0);
+            return new HashSet<>(ids);
+        });
         // 富化做恒等映射：本测试关注检索编排，展示数据回查的正确性由 RagHitEnricherTest 覆盖
         lenient().when(ragHitEnricher.enrich(anyList())).thenAnswer(invocation -> {
             List<RagCandidate> candidates = invocation.getArgument(0);

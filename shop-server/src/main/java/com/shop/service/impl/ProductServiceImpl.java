@@ -138,13 +138,6 @@ public class ProductServiceImpl implements ProductService {
         // 同步布隆过滤器：新商品 id 必须 put，否则会被 getDetail 的布隆判断误判为"商品不存在"
         productBloomFilter.put(product.getId());
 
-        // 同步 RAG 索引
-        try {
-            productIndexer.addOrUpdate(product);
-        } catch (Exception e) {
-            log.warn("RAG 索引同步异常（不影响主流程）: {}", e.getMessage());
-        }
-
         if (CollUtil.isNotEmpty(dto.getSkuList())) {
             for (ProductDTO.SkuDTO skuDTO : dto.getSkuList()) {
                 SkuDO sku = new SkuDO();
@@ -152,6 +145,18 @@ public class ProductServiceImpl implements ProductService {
                 sku.setProductId(product.getId());
                 skuMapper.insert(sku);
             }
+        }
+
+        // 同步 RAG 索引 —— ⚠️ 顺序不可调换：必须晚于 SKU 落库。
+        // 索引构建要读 SKU 价格区间（SkuPriceResolver.resolveOne），若在此之前调用则价格查不到 →
+        // payload 里没有 minPrice/maxPrice → 该商品在价格区间筛选时**永远不会被淘汰**
+        // （passMetadataFilter 对缺失键按「不过滤」放行）。
+        // 影响面：管理员新增的商品 status=1，会真正入索引，缺陷静默生效（无异常无日志）；
+        // 商家新增的 status=0 被 addOrUpdate 首行拦掉，属无害的无用调用。
+        try {
+            productIndexer.addOrUpdate(product);
+        } catch (Exception e) {
+            log.warn("RAG 索引同步异常（不影响主流程）: {}", e.getMessage());
         }
 
         return product.getId();

@@ -11,6 +11,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Profile;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -31,6 +32,13 @@ import java.io.IOException;
  * 均不受本过滤器影响。
  *
  * <p>
+ * <b>为什么必须 {@code @Profile("rec")}</b>：本过滤器只服务于推荐服务（8082，仅绑定回环）。
+ * 商城后端会组件扫描到 {@code com.shop.rec} 包，但商城后端没有 {@code /api/rec/home} 路径
+ * ——该路径仅由推荐服务的 {@link com.shop.rec.controller.RecRankController} 提供，商城后端只作为
+ * 客户端调用。因此商城侧加载本过滤器时对所有请求都只是直接放行，去掉 profile 不会增加任何校验，
+ * 反而会让 {@code @WebMvcTest} 因缺少 {@code RecProperties} 而启动失败。
+ *
+ * <p>
  * <b>失败语义</b>：凭证缺失或不匹配时拒绝服务并返回错误码
  * {@link RecErrorCode#INTERNAL_TOKEN_INVALID}，HTTP 状态保持成功（降级与拒绝均不改变
  * HTTP 状态，避免调用方进入错误分支）。凭证未配置时同样拒绝，并记录告警提示配置缺失。
@@ -39,6 +47,7 @@ import java.io.IOException;
  */
 @Slf4j
 @Component
+@Profile("rec")
 @RequiredArgsConstructor
 public class InternalTokenFilter extends OncePerRequestFilter {
 

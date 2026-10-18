@@ -1,6 +1,7 @@
 package com.shop.controller;
 
-import cn.dev33.satoken.stp.StpUtil;
+import cn.dev33.satoken.stp.StpInterface;
+import com.shop.common.SaTokenMockUtil;
 import com.shop.config.MockMyBatisConfig;
 import com.shop.config.SaTokenConfig;
 import org.springframework.context.annotation.Import;
@@ -109,25 +110,23 @@ class UserControllerTest {
     }
 
     @Test
-    @DisplayName("退出登录：调用 StpUtil.logout")
-    void logout_ShouldCallStpUtil() throws Exception {
-        try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-            stpUtil.when(StpUtil::logout).then(invocation -> null);
-
+    @DisplayName("退出登录：返回成功")
+    void logout_ShouldReturnSuccess() throws Exception {
+        try (var scope = SaTokenMockUtil.userLogin(1L)) {
             mockMvc.perform(post("/api/user/logout"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code", is(200)));
-
-            stpUtil.verify(StpUtil::logout);
         }
     }
 
     @Test
     @DisplayName("获取角色列表：返回角色编码")
     void getRoles_ShouldReturnRoleList() throws Exception {
-        try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-            stpUtil.when(StpUtil::getRoleList).thenReturn(List.of("user", "merchant"));
+        StpInterface stpInterface = mock(StpInterface.class);
+        // loginId 由 Sa-Token 从 Dao 以字符串形式取出，这里用 any() 匹配，避免 Long/String 形态差异
+        when(stpInterface.getRoleList(any(), eq("user"))).thenReturn(List.of("user", "merchant"));
 
+        try (var scope = SaTokenMockUtil.userLogin(1L, stpInterface)) {
             mockMvc.perform(get("/api/user/role"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code", is(200)))

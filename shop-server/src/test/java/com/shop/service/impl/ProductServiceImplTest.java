@@ -1,13 +1,16 @@
 package com.shop.service.impl;
 
-import cn.dev33.satoken.stp.StpUtil;
+import cn.dev33.satoken.context.mock.SaTokenContextMockUtil;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.shop.common.BusinessException;
 import com.shop.common.PageResult;
+import com.google.common.hash.BloomFilter;
+import com.shop.common.RedisCache;
 import com.shop.common.SaTokenMockUtil;
+import com.shop.common.StpShopUtil;
 import com.shop.constant.ProductConstants;
 import com.shop.mapper.CategoryMapper;
 import com.shop.mapper.OrderItemMapper;
@@ -34,7 +37,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -80,6 +82,12 @@ class ProductServiceImplTest {
     @Mock
     private ValueOperations<String, String> valueOps;
 
+    @Mock
+    private BloomFilter<Long> productBloomFilter;
+
+    @Mock
+    private RedisCache redisCache;
+
     @InjectMocks
     private ProductServiceImpl productService;
 
@@ -95,6 +103,8 @@ class ProductServiceImplTest {
         // 纯 Mockito 无 Spring 上下文：断言 wrapper 条件（getSqlSegment 解析 Lambda 列名）需 TableInfo 缓存，
         // 手动初始化（幂等，重复调用直接返回已有缓存）
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), ProductDO.class);
+        // 布隆过滤器前置拦截：默认放行，个别用例（不存在商品）再覆盖
+        lenient().when(productBloomFilter.mightContain(anyLong())).thenReturn(true);
 
         parentCategory = new CategoryDO();
         parentCategory.setId(1L);
@@ -146,23 +156,26 @@ class ProductServiceImplTest {
             doAnswer(inv -> { inv.<ProductDO>getArgument(0).setId(100L); return 0; })
                     .when(productMapper).insert(any(ProductDO.class));
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
-                stpUtil.when(StpUtil::getRoleList).thenReturn(List.of("merchant"));
-                when(shopMapper.selectById(1L)).thenAnswer(inv -> {
-                    ShopDO shop = new ShopDO();
-                    shop.setId(50L);
-                    return shop;
-                });
+            when(shopMapper.selectById(1L)).thenAnswer(inv -> {
+                ShopDO shop = new ShopDO();
+                shop.setId(50L);
+                return shop;
+            });
 
-                Long productId = productService.addProduct(productDTO);
+            Long productId = SaTokenContextMockUtil.setMockContext(() -> {
+                StpShopUtil.INSTANCE.login(1L);
+                try {
+                    return productService.addProduct(productDTO);
+                } finally {
+                    StpShopUtil.INSTANCE.logout();
+                }
+            });
 
-                assertEquals(100L, productId);
-                verify(productMapper).insert(argThat(p ->
-                        p.getFirstCategoryId() == 1L && p.getShopId() == 50L));
-                verify(skuMapper).insert(argThat(s ->
-                        s.getProductId() == 100L && s.getName().equals("测试SKU")));
-            }
+            assertEquals(100L, productId);
+            verify(productMapper).insert(argThat(p ->
+                    p.getFirstCategoryId() == 1L && p.getShopId() == 50L));
+            verify(skuMapper).insert(argThat(s ->
+                    s.getProductId() == 100L && s.getName().equals("测试SKU")));
         }
 
         @Test
@@ -195,14 +208,13 @@ class ProductServiceImplTest {
             doAnswer(inv -> { inv.<ProductDO>getArgument(0).setId(100L); return 0; })
                     .when(productMapper).insert(any(ProductDO.class));
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
-                stpUtil.when(StpUtil::getRoleList).thenReturn(List.of("user")); // 非商家
-
+            // 商家与管理员均未登录：不填充 shopId
+            SaTokenContextMockUtil.setMockContext(() -> {
                 productService.addProduct(productDTO);
+                return null;
+            });
 
-                verify(productMapper).insert(argThat(p -> p.getShopId() == null));
-            }
+            verify(productMapper).insert(argThat(p -> p.getShopId() == null));
         }
 
         @Test
@@ -213,16 +225,19 @@ class ProductServiceImplTest {
             doAnswer(inv -> { inv.<ProductDO>getArgument(0).setId(100L); return 0; })
                     .when(productMapper).insert(any(ProductDO.class));
 
-            try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-                stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(1L);
-                stpUtil.when(StpUtil::getRoleList).thenReturn(List.of("merchant"));
-                when(shopMapper.selectById(1L)).thenReturn(null);
+            when(shopMapper.selectById(1L)).thenReturn(null);
 
-                Long productId = productService.addProduct(productDTO);
+            Long productId = SaTokenContextMockUtil.setMockContext(() -> {
+                StpShopUtil.INSTANCE.login(1L);
+                try {
+                    return productService.addProduct(productDTO);
+                } finally {
+                    StpShopUtil.INSTANCE.logout();
+                }
+            });
 
-                assertEquals(100L, productId);
-                verify(skuMapper, never()).insert(any());
-            }
+            assertEquals(100L, productId);
+            verify(skuMapper, never()).insert(any());
         }
     }
 
@@ -242,7 +257,6 @@ class ProductServiceImplTest {
 
             when(productMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class)))
                     .thenReturn(mpPage);
-            when(categoryMapper.selectById(10L)).thenReturn(leafCategory);
             when(skuMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(sku));
 
             PageResult<ProductVO> result = productService.page(query);
@@ -265,7 +279,6 @@ class ProductServiceImplTest {
             when(categoryMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(leafCategory));
             when(productMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class)))
                     .thenReturn(mpPage);
-            when(categoryMapper.selectById(10L)).thenReturn(leafCategory);
             when(skuMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(sku));
 
             PageResult<ProductVO> result = productService.page(query);
@@ -286,7 +299,6 @@ class ProductServiceImplTest {
             when(categoryMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
             when(productMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class)))
                     .thenReturn(mpPage);
-            when(categoryMapper.selectById(10L)).thenReturn(leafCategory);
             when(skuMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(sku));
 
             PageResult<ProductVO> result = productService.page(query);
@@ -306,7 +318,6 @@ class ProductServiceImplTest {
 
             when(productMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class)))
                     .thenReturn(mpPage);
-            when(categoryMapper.selectById(10L)).thenReturn(leafCategory);
             when(skuMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(sku));
 
             PageResult<ProductVO> result = productService.page(query);
@@ -342,7 +353,6 @@ class ProductServiceImplTest {
             mpPage.setTotal(1);
 
             when(productMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(mpPage);
-            when(categoryMapper.selectById(10L)).thenReturn(leafCategory);
             when(skuMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(sku));
 
             productService.page(query);
@@ -365,7 +375,6 @@ class ProductServiceImplTest {
             mpPage.setTotal(1);
 
             when(productMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(mpPage);
-            when(categoryMapper.selectById(10L)).thenReturn(leafCategory);
             when(skuMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(sku));
 
             try (var scope = SaTokenMockUtil.userLogin(1L)) {
@@ -388,7 +397,6 @@ class ProductServiceImplTest {
             mpPage.setTotal(1);
 
             when(productMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(mpPage);
-            when(categoryMapper.selectById(10L)).thenReturn(leafCategory);
             when(skuMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(sku));
 
             try (var scope = SaTokenMockUtil.userLogin(50L)) {
@@ -426,11 +434,12 @@ class ProductServiceImplTest {
         @Test
         @DisplayName("成功获取详情，含 SKU 列表和分类名")
         void getDetail_ShouldReturnVO() {
-            when(redisTemplate.opsForValue()).thenReturn(valueOps);
-            when(valueOps.get(anyString())).thenReturn(null); // 缓存 miss，走 DB
             when(productMapper.selectById(100L)).thenReturn(product);
             when(categoryMapper.selectById(10L)).thenReturn(leafCategory);
             when(skuMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(sku));
+            // 逻辑过期缓存：直接执行回源 loader，模拟缓存 miss
+            when(redisCache.queryWithLogicalExpire(anyString(), eq(ProductVO.class), anyLong(), any()))
+                    .thenAnswer(inv -> ((java.util.function.Supplier<?>) inv.getArgument(3)).get());
 
             ProductVO vo = productService.getDetail(100L);
 
@@ -446,9 +455,9 @@ class ProductServiceImplTest {
         @Test
         @DisplayName("获取详情：商品不存在")
         void getDetail_ShouldThrow_WhenNotFound() {
-            when(redisTemplate.opsForValue()).thenReturn(valueOps);
-            when(valueOps.get(anyString())).thenReturn(null); // 缓存 miss，走 DB
             when(productMapper.selectById(99L)).thenReturn(null);
+            when(redisCache.queryWithLogicalExpire(anyString(), eq(ProductVO.class), anyLong(), any()))
+                    .thenAnswer(inv -> ((java.util.function.Supplier<?>) inv.getArgument(3)).get());
 
             BusinessException ex = assertThrows(BusinessException.class,
                     () -> productService.getDetail(99L));
@@ -458,11 +467,11 @@ class ProductServiceImplTest {
         @Test
         @DisplayName("获取详情：无 SKU 时价格和库存返回 null")
         void getDetail_ShouldReturnNullValues_WhenNoSkus() {
-            when(redisTemplate.opsForValue()).thenReturn(valueOps);
-            when(valueOps.get(anyString())).thenReturn(null); // 缓存 miss，走 DB
             when(productMapper.selectById(100L)).thenReturn(product);
             when(categoryMapper.selectById(10L)).thenReturn(leafCategory);
             when(skuMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
+            when(redisCache.queryWithLogicalExpire(anyString(), eq(ProductVO.class), anyLong(), any()))
+                    .thenAnswer(inv -> ((java.util.function.Supplier<?>) inv.getArgument(3)).get());
 
             ProductVO vo = productService.getDetail(100L);
 

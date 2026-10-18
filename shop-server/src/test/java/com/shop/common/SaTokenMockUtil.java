@@ -7,6 +7,7 @@ import cn.dev33.satoken.config.SaTokenConfig;
 import cn.dev33.satoken.context.model.SaResponse;
 import cn.dev33.satoken.context.model.SaStorage;
 import cn.dev33.satoken.dao.SaTokenDao;
+import cn.dev33.satoken.stp.StpInterface;
 import org.mockito.MockedStatic;
 
 import static org.mockito.ArgumentMatchers.anyString;
@@ -42,6 +43,17 @@ public final class SaTokenMockUtil {
      * @return SaTokenLoginScope，需 try-with-resources 关闭以释放 mock
      */
     public static SaTokenLoginScope userLogin(Long loginId) {
+        return userLogin(loginId, null);
+    }
+
+    /**
+     * 模拟指定 ID 已登录，并指定 Sa-Token 权限加载器（用于 getRoleList / getPermissionList 场景）
+     *
+     * @param loginId     登录 ID
+     * @param stpInterface 权限加载器（null 表示不注册，权限类调用会返回空/报错）
+     * @return SaTokenLoginScope，需 try-with-resources 关闭以释放 mock
+     */
+    public static SaTokenLoginScope userLogin(Long loginId, StpInterface stpInterface) {
         // 提前触发 StpUserUtil 类初始化（其构造注册到真实 SaManager），
         // 避免 mockStatic 建立后再访问 INSTANCE 触发 <clinit> 与 stub 过程冲突（UnfinishedStubbing）
         StpUserUtil.INSTANCE.hashCode();
@@ -64,6 +76,9 @@ public final class SaTokenMockUtil {
         // 登录动作（StpXxxUtil.INSTANCE.login）内部经 SaManager.getStpLogic(type) 获取当前 StpLogic 再取 config；
         // mockStatic 会拦截 putStpLogic 导致注册表为空，这里直接返回真实 StpUserUtil 实例（config 全局共享，各 loginType 均适用）
         lenient().when(SaManager.getStpLogic(anyString())).thenReturn(StpUserUtil.INSTANCE);
+        if (stpInterface != null) {
+            lenient().when(SaManager.getStpInterface()).thenReturn(stpInterface);
+        }
         SaTokenDao dao = mock(SaTokenDao.class);
         lenient().when(SaManager.getSaTokenDao()).thenReturn(dao);
         // StpLogic.getLoginIdByToken → getLoginIdNotHandle → getSaTokenDao().get(拼接后的 token key)。

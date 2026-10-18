@@ -1,6 +1,7 @@
 package com.shop.rag.search;
 
 import com.shop.rag.config.RagProperties;
+import com.shop.rag.config.RagSearchProperties;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
@@ -63,21 +64,17 @@ public class RagSearchService {
     private final SynonymExpander synonymExpander;
     private final RrfProperties rrfProperties;
     private final RagProperties ragProperties;
+    /**
+     * 检索参数（相关性门槛 / 候选池规模 / topK 上限），外置到 {@code rag.search.*}
+     * <p>
+     * 其中 {@code minRelevanceScore} 与 embedding 模型强相关，写死会在换模型时静默失效
+     * （见 {@link RagSearchProperties} 的类注释）。
+     */
+    private final RagSearchProperties ragSearchProperties;
     /** SKU 维度聚合：库存过滤需要「商品 → 总库存」，与索引侧/关键词侧共用同一聚合来源 */
     private final SkuPriceResolver skuPriceResolver;
     /** 结果富化：融合出 topK 后回查商品展示数据（名称/主图/描述）并组装最终命中项 */
     private final RagHitEnricher ragHitEnricher;
-
-    private static final double MIN_RELEVANCE_SCORE = 0.3;
-
-    /** 候选池 = topK × 该倍数（再由 MIN_QUERY_LIMIT 兜底下限） */
-    private static final int CANDIDATE_MULTIPLIER = 5;
-    /** 候选池下限：topK 很小时也要保证向量路有足够的融合候选 */
-    private static final int MIN_QUERY_LIMIT = 50;
-    /** 候选池上限：防止超大 topK 放大 MySQL LIMIT 与 Qdrant maxResults */
-    private static final int MAX_QUERY_LIMIT = 200;
-    /** topK 上限：公开接口未校验参数，超大值会放大下游查询成本 */
-    private static final int MAX_TOP_K = 100;
 
     /**
      * 混合搜索商品（向量 + 关键词双路 → 加权 RRF 合并）
@@ -125,11 +122,11 @@ public class RagSearchService {
 
         // 2. 双路检索，候选池对齐：两路各取 queryLimit 条，融合后再截断 topK
         //    （向量路已降级时为空列表，RRF 合并天然退化为纯关键词）
-        int queryLimit = clampQueryLimit(safeTopK * CANDIDATE_MULTIPLIER);
+        int queryLimit = clampQueryLimit(safeTopK * ragSearchProperties.getCandidateMultiplier());
 
         List<RagCandidate> vectorHits = queryVector == null
                 ? Collections.emptyList()
-                : searchViaQdrant(queryVector, queryLimit, MIN_RELEVANCE_SCORE,
+                : searchViaQdrant(queryVector, queryLimit, ragSearchProperties.getMinRelevanceScore(),
                         categoryId, minPrice, maxPrice);
 
         // 关键词路使用同义词扩展后的 query（向量路保持原 query，避免扩展词稀释语义重心）
@@ -190,8 +187,8 @@ public class RagSearchService {
      * @param topK 原始入参
      * @return 合法 topK
      */
-    private static int clampTopK(int topK) {
-        return Math.min(Math.max(topK, 1), MAX_TOP_K);
+    private int clampTopK(int topK) {
+        return Math.min(Math.max(topK, 1), ragSearchProperties.getMaxTopK());
     }
 
     /**
@@ -200,8 +197,9 @@ public class RagSearchService {
      * @param queryLimit 原始候选池大小
      * @return 合法候选池大小
      */
-    private static int clampQueryLimit(int queryLimit) {
-        return Math.min(Math.max(queryLimit, MIN_QUERY_LIMIT), MAX_QUERY_LIMIT);
+    private int clampQueryLimit(int queryLimit) {
+        return Math.min(Math.max(queryLimit, ragSearchProperties.getMinQueryLimit()),
+                ragSearchProperties.getMaxQueryLimit());
     }
 
     /**

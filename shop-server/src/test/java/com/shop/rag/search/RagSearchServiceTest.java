@@ -1,6 +1,7 @@
 package com.shop.rag.search;
 
 import com.shop.rag.config.RagProperties;
+import com.shop.rag.config.RagSearchProperties;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
@@ -63,7 +64,8 @@ class RagSearchServiceTest {
     @BeforeEach
     void setUp() {
         ragSearchService = new RagSearchService(embeddingModel, embeddingStore, keywordSearchService,
-                synonymExpander, new RrfProperties(), new RagProperties(), skuPriceResolver, ragHitEnricher);
+                synonymExpander, new RrfProperties(), new RagProperties(), new RagSearchProperties(),
+                skuPriceResolver, ragHitEnricher);
         when(synonymExpander.expand(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
         // 库存查询默认不可用（空 Map → 不做库存过滤），让既有用例聚焦候选池/入参兜底本身；
         // 验证库存过滤的用例再单独覆盖该 stub

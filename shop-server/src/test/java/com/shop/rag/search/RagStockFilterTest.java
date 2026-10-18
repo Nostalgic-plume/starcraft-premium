@@ -1,6 +1,7 @@
 package com.shop.rag.search;
 
 import com.shop.rag.config.RagProperties;
+import com.shop.rag.config.RagSearchProperties;
 import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
@@ -72,7 +73,8 @@ class RagStockFilterTest {
     @BeforeEach
     void setUp() {
         ragSearchService = new RagSearchService(embeddingModel, embeddingStore, keywordSearchService,
-                synonymExpander, new RrfProperties(), new RagProperties(), skuPriceResolver, ragHitEnricher);
+                synonymExpander, new RrfProperties(), new RagProperties(), new RagSearchProperties(),
+                skuPriceResolver, ragHitEnricher);
         when(synonymExpander.expand(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
         // 富化做恒等映射：本测试关注库存过滤，展示数据回查由 RagHitEnricherTest 覆盖；
         // 恒等映射保证 result.hits() 忠实反映过滤后的候选（而非被 mock 成空）

@@ -1,6 +1,7 @@
 package com.shop.rag.search;
 
 import com.shop.rag.config.RagProperties;
+import com.shop.rag.config.RagSearchProperties;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
 import dev.langchain4j.model.output.Response;
@@ -65,7 +66,8 @@ class RagFallbackTest {
     void setUp() {
         ragSearchService = new RagSearchService(
                 embeddingModel, embeddingStore, keywordSearchService, synonymExpander,
-                new RrfProperties(), new RagProperties(), skuPriceResolver, ragHitEnricher);
+                new RrfProperties(), new RagProperties(), new RagSearchProperties(),
+                skuPriceResolver, ragHitEnricher);
         // 库存查询不可用（空 Map → 不过滤），聚焦降级链路本身
         lenient().when(skuPriceResolver.resolveStock(anyList())).thenReturn(Map.of());
         // 可展示性过滤默认放行（原样返回入参）：本测试聚焦降级链路，下架过滤由 RagDisplayableFilterTest 覆盖。

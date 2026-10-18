@@ -1,6 +1,7 @@
 package com.shop.rag.search;
 
 import com.shop.rag.config.RagProperties;
+import com.shop.rag.config.RagSearchProperties;
 import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
@@ -76,7 +77,8 @@ class RagDisplayableFilterTest {
     @BeforeEach
     void setUp() {
         ragSearchService = new RagSearchService(embeddingModel, embeddingStore, keywordSearchService,
-                synonymExpander, new RrfProperties(), new RagProperties(), skuPriceResolver, ragHitEnricher);
+                synonymExpander, new RrfProperties(), new RagProperties(), new RagSearchProperties(),
+                skuPriceResolver, ragHitEnricher);
         when(synonymExpander.expand(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
         // 库存查询默认不可用（空 Map → 不做库存过滤），让本测试聚焦可展示性过滤
         lenient().when(skuPriceResolver.resolveStock(anyList())).thenReturn(Map.of());

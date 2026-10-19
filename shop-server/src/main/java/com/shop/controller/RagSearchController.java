@@ -65,8 +65,12 @@ public class RagSearchController {
     /**
      * 判断命中列表中是否存在与查询词「字面直接相关」的商品。
      *
-     * <p>规则：查询词按空白/标点切分后，所有词都出现在商品名称或摘要中。
-     * 中文查询（如「面包」）没有分隔符，整体作为一个词；这样「方便面」不会被判为直接相关。</p>
+     * <p>长句/口语化查询（「适合跑步的轻便鞋子」）没有空格分隔，不能要求整句出现在商品名中。
+     * 这里对超过 2 字的 token 做 2 字滑窗，提取「跑步」「鞋子」「零食」这类核心词，
+     * 并过滤含口语停用字的窗口（「适合」「的轻」「高的」），只要任一核心词出现在
+     * 商品名称或摘要中即判定为直接相关。</p>
+     *
+     * <p>短查询（「面包」）不做滑窗，整体匹配；「方便面」不会被误判为「面包」的直接相关结果。</p>
      *
      * @param hits  命中列表
      * @param query 原始查询词
@@ -76,30 +80,45 @@ public class RagSearchController {
         if (CollUtil.isEmpty(hits) || query == null || query.isBlank()) {
             return false;
         }
-        String[] tokens = query.trim().toLowerCase(Locale.ROOT).split("[\\s,，、;；/|]+");
-        int validTokens = 0;
-        for (String token : tokens) {
-            if (!token.isBlank()) {
-                validTokens++;
-            }
-        }
-        if (validTokens == 0) {
+        List<String> matchUnits = buildMatchUnits(query.trim().toLowerCase(Locale.ROOT));
+        if (matchUnits.isEmpty()) {
             return false;
         }
         for (RagHitVO hit : hits) {
             String text = ((hit.getName() == null ? "" : hit.getName()) + " "
                     + (hit.getExcerpt() == null ? "" : hit.getExcerpt())).toLowerCase(Locale.ROOT);
-            boolean allMatched = true;
-            for (String token : tokens) {
-                if (!token.isBlank() && !text.contains(token)) {
-                    allMatched = false;
-                    break;
+            for (String unit : matchUnits) {
+                if (text.contains(unit)) {
+                    return true;
                 }
-            }
-            if (allMatched) {
-                return true;
             }
         }
         return false;
+    }
+
+    /** 口语/虚词：含这些字的 2 字窗口不参与字面匹配，避免「适合」「的轻」「高的」造成误判 */
+    private static final String STOP_CHARS = "的了是在有和与或我想买点个款求请适合高低便宜一些那这么呢吧啊帮找看要";
+
+    /**
+     * 把查询词拆成用于字面匹配的单元：短词整体保留，长词取 2 字滑窗并过滤口语停用字。
+     */
+    private List<String> buildMatchUnits(String query) {
+        java.util.LinkedHashSet<String> units = new java.util.LinkedHashSet<>();
+        for (String token : query.split("[\\s,，、;；/|]+")) {
+            if (token.isBlank()) {
+                continue;
+            }
+            if (token.length() <= 2) {
+                units.add(token);
+                continue;
+            }
+            for (int i = 0; i + 2 <= token.length(); i++) {
+                String unit = token.substring(i, i + 2);
+                if (STOP_CHARS.indexOf(unit.charAt(0)) < 0 && STOP_CHARS.indexOf(unit.charAt(1)) < 0) {
+                    units.add(unit);
+                }
+            }
+        }
+        return new java.util.ArrayList<>(units);
     }
 }

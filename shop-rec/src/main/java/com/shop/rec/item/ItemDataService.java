@@ -7,7 +7,9 @@ import com.shop.rec.mall.model.MallProductDO;
 import com.shop.rec.mall.model.MallSkuStatDO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.annotation.Profile;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -124,6 +126,20 @@ public class ItemDataService {
      * 需要异步的是管理后台手动触发（{@link #triggerRebuild()}），两者共用
      * {@link #rebuildAll()} 保证产出一致。
      */
+    /**
+     * 启动时全量补齐商品状态缓存。
+     *
+     * <p>商品状态缓存是 Flink 解析行为维度（类目/品牌）的数据源；若缓存只覆盖部分商品
+     * （如进程跨过每日 01:00 重建点、或首次启动），缺失商品的行为会被计入却算不出偏好，
+     * 表现为「用户浏览了但画像不变」的静默丢特征。启动后异步触发一次全量重建补齐。</p>
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void rebuildOnStartup() {
+        if (triggerRebuild()) {
+            log.info("推荐服务启动，已触发商品状态缓存全量重建");
+        }
+    }
+
     @Scheduled(cron = "0 0 1 * * ?")
     public void fullReloadDaily() {
         if (!rebuilding.compareAndSet(false, true)) {

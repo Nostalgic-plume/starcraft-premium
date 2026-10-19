@@ -5,6 +5,7 @@ import { NSpin } from 'naive-ui'
 import { productApi } from '@/api/product'
 import ProductCard from '@/components/ProductCard.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import { trackView } from '@/utils/behaviorTracker'
 import SvgIcon from '@/components/SvgIcon.vue'
 import type { ProductVO, RagHitVO } from '@/api/types'
 
@@ -148,6 +149,7 @@ async function loadResults() {
   try {
     const res = await productApi.ragSearch({ q, topK: topK.value })
     hits.value = res.data?.hits || []
+    reportSearchImpressions(q)
   } catch (e) {
     // 失败必须清空，否则旧结果会被当成新词的结果展示
     console.error('智能搜索失败:', e)
@@ -155,6 +157,26 @@ async function loadResults() {
   } finally {
     loading.value = false
   }
+}
+
+/**
+ * 搜索意图埋点：搜索结果曝光前 N 个商品，写入推荐子系统的行为流
+ *
+ * <p>搜索页原先只写 rag_trace（RAG 反馈），不进入推荐画像；用户搜索后
+ * 「猜你喜欢」不会变化。这里对首次加载的结果上报 view，让搜索意图实时
+ * 进入用户类目偏好。加载更多、同一关键词重复请求不重复上报，避免过度加权。</p>
+ */
+const SEARCH_IMPRESSION_LIMIT = 3
+let impressedQuery = ''
+function reportSearchImpressions(query: string) {
+  if (topK.value !== SIZE_STEP || query === impressedQuery) {
+    return
+  }
+  impressedQuery = query
+  hits.value.slice(0, SEARCH_IMPRESSION_LIMIT).forEach((hit) => {
+    // duration=0：曝光不是真实停留，不参与停留时长判定
+    trackView(hit.productId, 0)
+  })
 }
 
 /** 提交搜索：只改 URL，加载由 watch(activeQuery) 统一触发，避免同一状态两个写入方 */

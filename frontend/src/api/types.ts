@@ -133,6 +133,8 @@ export interface RagSearchResult {
   hits: RagHitVO[]
   total: number
   query: string
+  /** 是否存在与查询词字面直接相关的商品；false 时 hits 仅为语义相近的推荐 */
+  exactMatch?: boolean
 }
 
 /** 商品分页查询参数 */

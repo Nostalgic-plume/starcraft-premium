@@ -5,6 +5,7 @@ import { NSpin } from 'naive-ui'
 import { productApi } from '@/api/product'
 import ProductCard from '@/components/ProductCard.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import RecRankList from '@/components/RecRankList.vue'
 import { trackView } from '@/utils/behaviorTracker'
 import SvgIcon from '@/components/SvgIcon.vue'
 import type { ProductVO, RagHitVO } from '@/api/types'
@@ -39,6 +40,8 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
 const keyword = ref('')
 /** RAG 命中原始列表（保持后端相关性顺序，排序在 computed 里做） */
 const hits = ref<RagHitVO[]>([])
+/** 是否存在字面直接相关的商品（后端判定）；false 时只展示其他推荐 */
+const exactMatch = ref(true)
 const loading = ref(false)
 const topK = ref(SIZE_STEP)
 const searchHistory = ref<string[]>([])
@@ -149,6 +152,8 @@ async function loadResults() {
   try {
     const res = await productApi.ragSearch({ q, topK: topK.value })
     hits.value = res.data?.hits || []
+    // 后端判定是否有字面直接相关商品；false 时页面改为「无直接匹配 + 其他推荐」
+    exactMatch.value = res.data?.exactMatch !== false
     reportSearchImpressions(q)
   } catch (e) {
     // 失败必须清空，否则旧结果会被当成新词的结果展示
@@ -381,9 +386,10 @@ onUnmounted(() => {
     <section v-else class="result-area">
       <div class="result-bar">
         <span class="result-summary">
-          「{{ activeQuery }}」找到 <strong>{{ hits.length }}</strong> 件商品
+          <template v-if="exactMatch">「{{ activeQuery }}」找到 <strong>{{ hits.length }}</strong> 件商品</template>
+          <template v-else>「{{ activeQuery }}」暂无直接匹配的商品</template>
         </span>
-        <div class="sort-group">
+        <div v-if="exactMatch" class="sort-group">
           <button
             v-for="opt in SORT_OPTIONS"
             :key="opt.key"
@@ -395,7 +401,16 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div class="grid-area">
+      <!-- 没有字面直接相关商品：明确提示，下方展示其他推荐（不再把语义相近结果冒充搜索结果） -->
+      <template v-if="!loading && !exactMatch">
+        <EmptyState
+          text="没有找到直接相关的商品"
+          :description="`没有与「${activeQuery}」直接匹配的商品，下面为你推荐一些可能感兴趣的内容`"
+        />
+        <RecRankList @add-cart="(p) => router.push('/product/' + p.id)" />
+      </template>
+
+      <div v-else class="grid-area">
         <n-spin :show="loading">
           <div v-if="productList.length" class="product-grid">
             <ProductCard
@@ -409,12 +424,12 @@ onUnmounted(() => {
         </n-spin>
 
         <EmptyState
-          v-if="!loading && productList.length === 0"
+          v-if="!loading && exactMatch && productList.length === 0"
           text="没有找到相关商品"
           description="换个说法试试，比如把「便宜的手机」改成「性价比手机」"
         />
 
-        <div v-if="!loading && productList.length" class="load-more">
+        <div v-if="!loading && exactMatch && productList.length" class="load-more">
           <button v-if="topK < SIZE_MAX" type="button" class="more-btn" @click="loadMore">
             加载更多（{{ topK + SIZE_STEP }} 条）
           </button>

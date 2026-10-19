@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -54,7 +55,51 @@ public class RagSearchController {
         data.put("hits", hits != null ? hits : List.of());
         data.put("total", CollUtil.isEmpty(hits) ? 0 : hits.size());
         data.put("query", query);
+        // 是否命中「字面直接相关」的商品：向量路会返回语义相近但字面无关的结果
+        // （如搜「面包」返回方便面），前端据此区分「搜索结果」与「相关推荐」。
+        data.put("exactMatch", isExactMatch(hits, query));
 
         return Result.success(data);
+    }
+
+    /**
+     * 判断命中列表中是否存在与查询词「字面直接相关」的商品。
+     *
+     * <p>规则：查询词按空白/标点切分后，所有词都出现在商品名称或摘要中。
+     * 中文查询（如「面包」）没有分隔符，整体作为一个词；这样「方便面」不会被判为直接相关。</p>
+     *
+     * @param hits  命中列表
+     * @param query 原始查询词
+     * @return true=存在直接相关商品；false=只有语义相近的推荐结果
+     */
+    private boolean isExactMatch(List<RagHitVO> hits, String query) {
+        if (CollUtil.isEmpty(hits) || query == null || query.isBlank()) {
+            return false;
+        }
+        String[] tokens = query.trim().toLowerCase(Locale.ROOT).split("[\\s,，、;；/|]+");
+        int validTokens = 0;
+        for (String token : tokens) {
+            if (!token.isBlank()) {
+                validTokens++;
+            }
+        }
+        if (validTokens == 0) {
+            return false;
+        }
+        for (RagHitVO hit : hits) {
+            String text = ((hit.getName() == null ? "" : hit.getName()) + " "
+                    + (hit.getExcerpt() == null ? "" : hit.getExcerpt())).toLowerCase(Locale.ROOT);
+            boolean allMatched = true;
+            for (String token : tokens) {
+                if (!token.isBlank() && !text.contains(token)) {
+                    allMatched = false;
+                    break;
+                }
+            }
+            if (allMatched) {
+                return true;
+            }
+        }
+        return false;
     }
 }

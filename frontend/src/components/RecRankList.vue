@@ -293,10 +293,10 @@ function toProduct(item: RankItem): ProductVO {
   cursor: not-allowed;
 }
 
-/* 竖向信息流：自适应列数，窄屏自动减少列而不挤压卡片 */
+/* 单列竖向信息流：只保留一列 */
 .rec-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: 1fr;
   gap: 16px;
   /* 纵向留白给卡片 hover 上浮与阴影，避免被容器裁掉 */
   padding: 10px 0 4px;
@@ -331,7 +331,7 @@ function toProduct(item: RankItem): ProductVO {
 
 @media (max-width: 640px) {
   .rec-grid {
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    grid-template-columns: 1fr;
     gap: 12px;
   }
 }

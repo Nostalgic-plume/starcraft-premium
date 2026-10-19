@@ -113,6 +113,15 @@
             <version>5.1.2</version>
             <scope>test</scope>
         </dependency>
+
+        <!-- ==================== .env 自动加载 ==================== -->
+        <!-- 与 shop-server 保持一致：推荐服务同样从仓库根 .env 读取 REC_INTERNAL_TOKEN / REC_DB_* 等。
+             spring-dotenv 按进程工作目录查找 .env，故下方 spring-boot-maven-plugin 统一把
+             workingDirectory 指回仓库根（${project.basedir}/..），无需启动命令再传参数。 -->
+        <dependency>
+            <groupId>me.paulschwarz</groupId>
+            <artifactId>spring-dotenv</artifactId>
+        </dependency>
     </dependencies>
 
     <build>
@@ -123,6 +132,9 @@
                 <version>3.2.12</version>
                 <configuration>
                     <mainClass>com.shop.rec.RecApplication</mainClass>
+                    <!-- .env 在仓库根；spring-dotenv 按进程工作目录查找，多模块下默认是 shop-rec/，
+                         统一指回仓库根后才能自动读到 REC_INTERNAL_TOKEN（否则内部调用一律 1009）。 -->
+                    <workingDirectory>${project.basedir}/..</workingDirectory>
                     <excludes>
                         <exclude>
                             <groupId>org.projectlombok</groupId>

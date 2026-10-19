@@ -159,6 +159,8 @@
                 <version>3.2.12</version>
                 <configuration>
                     <mainClass>com.shop.ShopApplication</mainClass>
+                    <!-- .env 在仓库根；统一工作目录，避免每次启动都手写 -Dspring-boot.run.workingDirectory -->
+                    <workingDirectory>${project.basedir}/..</workingDirectory>
                     <excludes>
                         <exclude>
                             <groupId>org.projectlombok</groupId>

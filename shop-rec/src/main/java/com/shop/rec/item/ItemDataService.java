@@ -11,6 +11,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -18,6 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -64,8 +66,14 @@ public class ItemDataService {
     /** 兜底名单条数（对应详细设计 3.4 步骤 8） */
     private static final int FALLBACK_LIMIT = 100;
 
-    /** 兜底名单重建间隔（秒） */
-    private static final long FALLBACK_REBUILD_INTERVAL_SECONDS = 30L;
+    /**
+     * 兜底名单重建间隔（秒）
+     *
+     * <p>取 5 秒与需求分析 4.3「行为产生后 5 秒内特征生效」对齐：降级时对外返回的
+     * 就是这份兜底名单，若它比热度榜慢一个数量级，5 秒时效在降级路径上就不成立。
+     * 重建成本仅为一次「读热度榜前 100 名」并构造列表，5 秒一次可忽略。
+     */
+    private static final long FALLBACK_REBUILD_INTERVAL_SECONDS = 5L;
 
     /** 商品上架状态取值（product.status = 1） */
     private static final int PRODUCT_STATUS_ON_SALE = 1;
@@ -73,9 +81,29 @@ public class ItemDataService {
     /** 对账时单次比对的商品数上限，避免单轮任务耗时过长 */
     private static final int RECONCILE_SAMPLE_SIZE = 2000;
 
+    /** 未执行过重建时的状态说明（与前端约定：该文案表示「从未重建」，而非「失败」） */
+    public static final String NOT_REBUILT = "尚未执行重建";
+
     private final MallProductMapper mallProductMapper;
 
     private final RecRedis recRedis;
+
+    /**
+     * 重建进行中标记
+     *
+     * <p>手动触发与定时任务共用：全量重建会清空并重写商品状态缓存，
+     * 两次重建交叠会把彼此的写入互相覆盖，必须串行。
+     */
+    private final AtomicBoolean rebuilding = new AtomicBoolean(false);
+
+    /** 最近一次重建的结束时间；从未重建时为 null */
+    private volatile LocalDateTime lastRebuildTime;
+
+    /** 最近一次重建是否成功 */
+    private volatile boolean lastRebuildSuccess;
+
+    /** 最近一次重建的结果说明 */
+    private volatile String lastRebuildMessage = NOT_REBUILT;
 
     /** 兜底名单：热度榜前 N 名的进程内副本 */
     private volatile List<Long> fallbackItems = Collections.emptyList();
@@ -87,19 +115,125 @@ public class ItemDataService {
      * 商品与索引全量重建
      *
      * <p>每日 01:00 执行（对应详细设计 8.2 任务 2），与画像任务（02:00）分时执行避免重叠。
+     *
+     * <p><b>同步执行（勿改为异步）</b>：定时任务与集成测试都直接调用本方法并
+     * <b>紧接着断言</b>结果——{@code ItemAndProfileIntegrationTest} 与
+     * {@code RecallFusionRankIntegrationTest} 的类注释写明「定时任务 cron 位于凌晨低峰期，
+     * 无法在测试中等待，故直接调用其入口方法」。改成起线程后立即返回会让断言读到
+     * {@link #rebuildAll()} 清空缓存之后、重写之前的中间态，测试必失败。
+     * 需要异步的是管理后台手动触发（{@link #triggerRebuild()}），两者共用
+     * {@link #rebuildAll()} 保证产出一致。
      */
     @Scheduled(cron = "0 0 1 * * ?")
     public void fullReloadDaily() {
-        long start = System.currentTimeMillis();
+        if (!rebuilding.compareAndSet(false, true)) {
+            log.warn("已有商品索引重建在执行中，本次定时触发被忽略");
+            return;
+        }
         try {
+            rebuildAll();
+        } finally {
+            rebuilding.set(false);
+        }
+    }
+
+    /**
+     * 手动触发全量重建（管理后台用）
+     *
+     * <p><b>为什么需要这个入口</b>：商品索引此前完全依赖 {@code @Scheduled}（全量每日 01:00、
+     * 增量每 10 分钟），换完商品数据只能干等——手动重建补齐了这个缺口。
+     *
+     * <p><b>与定时入口的区别仅在异步</b>：全量加载上万商品并重写索引耗时可达数秒至数十秒，
+     * 同步执行会让管理后台请求超时。触发后由调用方轮询 {@link #rebuildStatus()} 获知结果。
+     *
+     * @return 已触发返回 true；已有重建在执行中返回 false
+     */
+    public boolean triggerRebuild() {
+        if (!rebuilding.compareAndSet(false, true)) {
+            log.warn("已有商品索引重建在执行中，本次触发被忽略");
+            return false;
+        }
+        Thread worker = new Thread(() -> {
+            try {
+                rebuildAll();
+            } finally {
+                rebuilding.set(false);
+            }
+        }, "rec-item-rebuild");
+        // 守护线程：重建不应阻止进程退出
+        worker.setDaemon(true);
+        worker.start();
+        return true;
+    }
+
+    /**
+     * 查询最近一次重建状态
+     *
+     * @return 重建状态快照
+     */
+    public RebuildStatus rebuildStatus() {
+        return new RebuildStatus(rebuilding.get(), lastRebuildTime,
+                lastRebuildSuccess, lastRebuildMessage);
+    }
+
+    /**
+     * 全量重建商品状态缓存、类目候选索引与兜底名单
+     *
+     * <p>手动触发与定时任务共用本方法，保证两条路径产出一致。
+     *
+     * <p><b>与纯定时重建的差别在开头的清理</b>：定时任务面对的是商品的小幅变动，
+     * 分页遍历写入即可覆盖；而手动重建的典型场景是商品数据被整体替换，此时
+     * <b>已被物理删除的商品不会出现在分页查询结果中</b>——它们的状态缓存键既不会被写入语句
+     * 覆盖，也不会被对账任务清掉（对账只遍历「当前可售商品」），会永久残留，
+     * 使推荐结果里出现「已不存在但仍在售」的悬空商品。故先按模式清空状态缓存，再全量重写。
+     *
+     * <p>⚠️ 清理与重写之间存在短暂空窗，期间榜单可能因查不到商品状态而降级到兜底名单，
+     * 属预期行为（重建是低频运维操作）。
+     */
+    private void rebuildAll() {
+        long start = System.currentTimeMillis();
+
+        // 清空前先探测商城库可达性：若库不可达却已把状态缓存清空，重建随即失败，
+        // 榜单会在下一次重建成功之前持续降级。宁可不动缓存、直接放弃本轮。
+        try {
+            mallProductMapper.selectSellableProducts(1);
+        } catch (Exception e) {
+            lastRebuildSuccess = false;
+            lastRebuildMessage = "重建中止：商城商品库不可达，未改动任何缓存";
+            lastRebuildTime = LocalDateTime.now();
+            log.error("商品索引重建中止：商城库不可达，未改动缓存", e);
+            return;
+        }
+
+        try {
+            long cleared = recRedis.deleteByPattern(RecRedisKeys.itemStatePattern());
             int loaded = fullReloadProducts();
             int indexed = refreshCategoryIndex();
             refreshFallbackList();
-            log.info("商品全量重建完成, 加载商品: {}, 类目索引写入: {}, 耗时: {}ms",
-                    loaded, indexed, System.currentTimeMillis() - start);
+            lastRebuildSuccess = true;
+            lastRebuildMessage = String.format(
+                    "清理残留状态 %d 个，加载商品 %d 件，重建类目索引 %d 个", cleared, loaded, indexed);
+            log.info("商品索引全量重建完成, {}，耗时: {}ms", lastRebuildMessage,
+                    System.currentTimeMillis() - start);
         } catch (Exception e) {
-            log.error("商品全量重建失败，沿用上一版数据与索引", e);
+            lastRebuildSuccess = false;
+            lastRebuildMessage = "重建失败：" + e.getMessage();
+            log.error("商品索引全量重建失败", e);
+        } finally {
+            lastRebuildTime = LocalDateTime.now();
         }
+    }
+
+    /**
+     * 重建状态快照（管理后台轮询用）
+     *
+     * @param rebuilding         是否正在重建
+     * @param lastRebuildTime    最近一次重建的结束时间；从未重建时为 null
+     * @param lastRebuildSuccess 最近一次重建是否成功
+     * @param lastRebuildMessage 结果说明；从未重建时为「尚未执行重建」
+     */
+    public record RebuildStatus(boolean rebuilding, LocalDateTime lastRebuildTime,
+                                boolean lastRebuildSuccess, String lastRebuildMessage) {
     }
 
     /**

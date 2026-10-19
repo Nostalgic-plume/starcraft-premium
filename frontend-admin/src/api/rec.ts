@@ -3,6 +3,7 @@ import type {
   RecConfigItem,
   RecFilterRule,
   RecFixedSlot,
+  RecItemRebuildStatus,
   RecMetricDefinition,
   RecMetricRecord,
   RecProfileVersion,
@@ -144,5 +145,26 @@ export const recAdminApi = {
     limit?: number
   }): Promise<Result<RecMetricRecord[]>> {
     return get<RecMetricRecord[]>('/rec/metrics', { params })
+  },
+
+  // ==================== 商品索引 ====================
+
+  /**
+   * 查询商品索引重建状态
+   *
+   * 以 `rebuilding` 变为 false 作为「本轮重建结束」的信号，
+   * 再按 `lastRebuildSuccess` 判断成败。
+   */
+  itemRebuildStatus(): Promise<Result<RecItemRebuildStatus>> {
+    return get<RecItemRebuildStatus>('/rec/items/rebuild-status')
+  },
+
+  /**
+   * 触发商品索引全量重建（异步执行，立即返回）
+   *
+   * 已有重建在执行中时后端拒绝并返回错误码 4005。
+   */
+  triggerItemRebuild(): Promise<Result<void>> {
+    return post<void>('/rec/items/rebuild')
   }
 }

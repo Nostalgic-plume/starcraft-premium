@@ -22,6 +22,7 @@ const icons: Record<string, string> = {
   search: '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-3.8-3.8"/>',
   back: '<path d="M14.5 5 8 12l6.5 7"/><path d="M8.5 12H20"/>',
   'chevron-right': '<path d="m9 5 7 7-7 7"/>',
+  'chevron-left': '<path d="m15 5-7 7 7 7"/>',
   'chevron-down': '<path d="m5 9 7 7 7-7"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   minus: '<path d="M5 12h14"/>',

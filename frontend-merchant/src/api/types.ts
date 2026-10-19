@@ -98,10 +98,14 @@ export interface ProductPageQuery {
   page?: number
   pageSize?: number
   keyword?: string
+  /** 状态筛选：0=待审核 1=在售 2=下架。商家端/管理端生效；用户端强制仅返回上架商品 */
+  status?: number
 }
 
-/** 新增商品 SKU 入参（对照 ProductDTO.SkuDTO） */
+/** 新增/编辑商品 SKU 入参（对照 ProductDTO.SkuDTO） */
 export interface SkuFormItem {
+  /** SKU ID：仅编辑时由前端回传，标识要更新的已有 SKU；新增时留空（后端走 INSERT） */
+  id?: string
   name: string
   specs?: string
   price: number

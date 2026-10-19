@@ -42,3 +42,9 @@ AGENTS.md
 
 # 推荐子系统文档的分页渲染产物（约 117MB，可由 figs/render.ps1 与 tools/md2docx.py 重新生成，不入库）
 docs/recsys/out/
+
+# MCP 本地配置（可能含密钥，禁止入库）
+.mcp.json
+
+# 商品图片上传目录（运行时产物，由商家上传产生，不入库）
+uploads/

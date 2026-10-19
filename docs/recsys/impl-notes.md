@@ -121,6 +121,8 @@ Kafka 的幂等生产者**强制要求 `acks=all`**，配置为 `acks=1` 会在�
 | `pkill` 不生效 | `pkill -f xxx.jar` 杀不掉 Java 进程，导致后续 `mvn clean` 报 `Failed to delete ...jar` | 用 `jps -l` 查 PID，再 `taskkill //PID <pid> //F` |
 | named volume 与 Flink 冲突 | JobManager 创建 `{检查点目录}/{jobId}/shared` 失败，而容器内手工 `mkdir` 正常 | Flink 检查点目录不挂 named volume，改用容器内路径；如需跨容器持久化改用 bind mount |
 | 容器内访问中间件 | Flink 容器连不上宿主机的 `127.0.0.1:9092` | Kafka 配双 listener：容器内客户端走 `kafka:9093`（INTERNAL 通告地址），宿主机客户端走 `127.0.0.1:9092`；Redis 用 compose 服务名 `redis:6379` |
+| **IDE 编译污染 `target/classes`**（最易误判） | IntelliJ 的 ECJ 会自动编译你编辑过的文件并写入 `target/classes`，产出的是**带编译错误的半成品 class**；运行时抛 `java.lang.Error: Unresolved compilation problems: The Java feature 'Flexible Constructor Bodies' is only available with source level 25`——**该报错与源码毫无关系**（javac 永不产出这种 Error，只有 ECJ 会）。随后 Maven 增量检查发现 `.class` 比 `.java` 新便跳过重编，于是**源码正确、`mvn` 退出码 0，跑起来却报一个 Java 25 语法错误**。本项目已被它骗过三次 | ① 治因：IDE 设置 → Build, Execution, Deployment → Build Tools → Maven → Runner → 勾选 **Delegate IDE build/run actions to Maven**（或关掉 Compiler 的 Build project automatically），让 IDE 不再自行编译；② 兜底：**改动过 IDE 里打开的文件后，打包与测试一律加 `clean`** |
+| `mvn clean` 会删掉可执行 jar，且 jar 被占用时 clean 会失败 | `clean` 删除整个 `target/`，`shop-rec-1.0.0-exec.jar` 随之消失；若推荐服务正在运行，`clean` 还会报 `Failed to delete ...shop-rec-1.0.0-exec.jar` | 顺序固定为「**停服务 → `clean test` → `clean package` → 重启服务**」。停服务：`netstat -ano \| grep :8082` 取 PID 后 `taskkill //PID <pid> //F` |
 
 ### 5.2 MyBatis-Plus 使用陷阱
 

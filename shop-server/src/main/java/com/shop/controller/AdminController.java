@@ -123,6 +123,21 @@ public class AdminController {
         return Result.success();
     }
 
+    /**
+     * 强制用户下线：只踢出该用户已登录的会话，不改变账号状态
+     * 用于「账号本身正常、但需要让其立刻掉线」的场景，与封禁/停用（改状态顺带踢下线）互补
+     *
+     * @param id 目标用户ID
+     * @return 操作成功提示
+     */
+    @SaCheckPermission(value = {PermissionConstants.USER_MANAGE}, type = "admin")
+    @PostMapping("/user/{id}/kickout")
+    @Operation(summary = "强制用户下线（不改变账号状态）")
+    public Result<Void> kickoutUser(@PathVariable Long id) {
+        adminService.kickoutUser(id);
+        return Result.success();
+    }
+
     // ==================== 订单管理 ====================
 
     /**

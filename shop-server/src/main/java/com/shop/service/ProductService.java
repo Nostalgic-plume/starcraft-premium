@@ -24,6 +24,22 @@ public interface ProductService {
     Long addProduct(ProductDTO dto);
 
     /**
+     * 编辑商品（SPU + SKU）：更新商品基本信息，并按 id 对 SKU 列表做「增 / 改 / 删」diff
+     * <p>
+     * 归属校验：商家登录时只能编辑本店商品（shop_id 隔离），管理员登录时放行。
+     * 变更后主动失效商品详情缓存并同步 RAG 索引；SKU 库存有变动时额外失效库存缓存。
+     * </p>
+     * <p>
+     * SKU 三态约定：带 id 且属于本商品 → 更新；不带 id → 新增；库中存在但提交列表未含 → 逻辑删除。
+     * </p>
+     *
+     * @param id  商品 ID
+     * @param dto 商品信息（字段同新增，SKU 列表为完整列表）
+     * @throws BusinessException 商品不存在、无权操作该商品、分类不存在或非叶子分类、品牌不存在、SKU 不属于该商品
+     */
+    void updateProduct(Long id, ProductDTO dto);
+
+    /**
      * 分页查询商品列表
      * 支持按分类、关键字筛选，默认按创建时间倒序
      *

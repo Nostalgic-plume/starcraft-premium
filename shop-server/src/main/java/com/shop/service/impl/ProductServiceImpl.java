@@ -44,6 +44,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -101,7 +102,11 @@ public class ProductServiceImpl implements ProductService {
         ProductDO product = new ProductDO();
         BeanUtil.copyProperties(dto, product);
         product.setImages(dto.getImages() != null ? JSONUtil.toJsonStr(dto.getImages()) : null);
-        product.setStatus(ProductConstants.STATUS_ON_SHELF);
+        // 初始状态：管理员新增即上架（管理员本身就是审核方，无需自我审核）；
+        // 商家新增一律进待审核，须经管理员审核通过才上架
+        product.setStatus(StpAdminUtil.INSTANCE.isLogin()
+                ? ProductConstants.STATUS_ON_SHELF
+                : ProductConstants.STATUS_PENDING);
 
         // 自动填充分类层级
         product.setCategoryId(category.getId());
@@ -160,6 +165,136 @@ public class ProductServiceImpl implements ProductService {
         }
 
         return product.getId();
+    }
+
+    /**
+     * 编辑商品（SPU + SKU）：更新商品基本信息，并按 id 对 SKU 列表做「增 / 改 / 删」diff
+     * <p>
+     * 归属校验：商家登录时只能编辑本店商品（shop_id 隔离），管理员登录时放行。
+     * 变更后主动失效商品详情缓存并同步 RAG 索引；SKU 库存有变动时额外失效库存缓存。
+     * </p>
+     * <p>
+     * 字段更新采用「显式逐字段赋值」而非 {@code BeanUtil.copyProperties}——
+     * 后者会把 status、deleted 等不该由编辑接口触碰的字段一并覆盖。
+     * </p>
+     *
+     * @param id  商品 ID
+     * @param dto 商品信息（SKU 列表为完整列表）
+     * @throws BusinessException 商品不存在、无权操作该商品、分类不存在或非叶子分类、品牌不存在、SKU 不属于该商品
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateProduct(Long id, ProductDTO dto) {
+        ProductDO product = productMapper.selectById(id);
+        if (product == null) {
+            throw new BusinessException("商品不存在");
+        }
+
+        // 归属校验：商家只能改本店商品；管理员走 admin 登录态，此处不拦
+        if (StpShopUtil.INSTANCE.isLogin()) {
+            long shopId = StpShopUtil.INSTANCE.getLoginIdAsLong();
+            if (!Objects.equals(product.getShopId(), shopId)) {
+                throw new BusinessException("无权操作该商品");
+            }
+        }
+
+        // 分类校验：必须挂到二级（叶子）分类，并重算一级分类，避免沿用旧值导致分类联动错乱
+        CategoryDO category = categoryMapper.selectById(dto.getCategoryId());
+        if (category == null) {
+            throw new BusinessException("分类不存在");
+        }
+        if (category.getParentId() == null || category.getParentId() == 0) {
+            throw new BusinessException("请选择具体的子分类（如「手机」而非「手机数码」）");
+        }
+
+        // 品牌可选，但传了就必须有效（防悬空 brand_id）
+        if (dto.getBrandId() != null && brandMapper.selectById(dto.getBrandId()) == null) {
+            throw new BusinessException("品牌不存在");
+        }
+
+        // 逐字段赋值；images 序列化为 JSON 字符串存储（与新增逻辑保持一致）
+        product.setName(dto.getName());
+        product.setDescription(dto.getDescription());
+        product.setCategoryId(category.getId());
+        product.setFirstCategoryId(category.getParentId());
+        product.setBrandId(dto.getBrandId());
+        product.setMainImage(dto.getMainImage());
+        product.setImages(dto.getImages() != null ? JSONUtil.toJsonStr(dto.getImages()) : null);
+        product.setDetail(dto.getDetail());
+        productMapper.updateById(product);
+
+        syncSkus(product.getId(), dto.getSkuList());
+
+        // 主动失效详情缓存：逻辑过期缓存物理永不过期，不删除则用户端一直看到旧数据
+        redisCache.delete(ProductConstants.CACHE_PRODUCT + id);
+
+        // 同步 RAG 索引（失败只告警，不阻断主流程）
+        try {
+            if (product.getStatus() != null && product.getStatus() == ProductConstants.STATUS_ON_SHELF) {
+                productIndexer.addOrUpdate(product);
+            } else {
+                productIndexer.remove(id);
+            }
+        } catch (Exception e) {
+            log.warn("RAG 索引同步异常（不影响主流程）: {}", e.getMessage());
+        }
+
+        log.info("商品编辑成功, productId: {}, shopId: {}", id, product.getShopId());
+    }
+
+    /**
+     * 按 id 对商品 SKU 列表做 diff 同步
+     * <p>
+     * 三态：带 id 且属于本商品 → 更新；不带 id → 新增；库中存在但提交列表未含 → 逻辑删除。
+     * 库存发生变化的 SKU 额外失效 Redis 库存缓存，避免旧缓存被继续扣减造成超卖。
+     * </p>
+     *
+     * @param productId  商品 ID
+     * @param skuDTOList 前端提交的完整 SKU 列表（已通过 {@code @NotEmpty} 校验）
+     * @throws BusinessException 传入的 SKU id 不属于该商品
+     */
+    private void syncSkus(Long productId, List<ProductDTO.SkuDTO> skuDTOList) {
+        List<SkuDO> existing = skuMapper.selectList(
+                new LambdaQueryWrapper<SkuDO>().eq(SkuDO::getProductId, productId));
+        Map<Long, SkuDO> existingMap = existing.stream()
+                .collect(Collectors.toMap(SkuDO::getId, s -> s));
+
+        Set<Long> keepIds = new HashSet<>();
+        for (ProductDTO.SkuDTO skuDTO : skuDTOList) {
+            if (skuDTO.getId() != null) {
+                SkuDO sku = existingMap.get(skuDTO.getId());
+                if (sku == null) {
+                    throw new BusinessException("SKU 不属于该商品");
+                }
+                boolean stockChanged = !Objects.equals(sku.getStock(), skuDTO.getStock());
+                sku.setName(skuDTO.getName());
+                sku.setSpecs(skuDTO.getSpecs());
+                sku.setPrice(skuDTO.getPrice());
+                sku.setOriginalPrice(skuDTO.getOriginalPrice());
+                sku.setStock(skuDTO.getStock());
+                sku.setImage(skuDTO.getImage());
+                skuMapper.updateById(sku);
+                if (stockChanged) {
+                    stockCacheService.evictStock(sku.getId());
+                }
+                keepIds.add(sku.getId());
+            } else {
+                SkuDO sku = new SkuDO();
+                BeanUtil.copyProperties(skuDTO, sku);
+                sku.setId(null);
+                sku.setProductId(productId);
+                skuMapper.insert(sku);
+            }
+        }
+
+        // 提交列表中已移除的 SKU：逻辑删除（@TableLogic 生效，保留审计痕迹），并清理其库存缓存
+        for (SkuDO sku : existing) {
+            if (!keepIds.contains(sku.getId())) {
+                skuMapper.deleteById(sku.getId());
+                stockCacheService.evictStock(sku.getId());
+                log.info("编辑商品时逻辑删除 SKU: productId={}, skuId={}", productId, sku.getId());
+            }
+        }
     }
 
     /**
@@ -276,7 +411,7 @@ public class ProductServiceImpl implements ProductService {
         String cacheKey = ProductConstants.CACHE_PRODUCT + id;
         // 逻辑过期缓存（防击穿）：物理永不过期，value 内置过期时间戳；逻辑过期瞬间返回旧数据并异步重建，
         // 热点 key 击穿时始终只有拿到互斥锁的一个线程回源 DB（缓存不存在时的首次重建同样走互斥锁）
-        return redisCache.queryWithLogicalExpire(
+        ProductVO vo = redisCache.queryWithLogicalExpire(
                 cacheKey, ProductVO.class, ProductConstants.CACHE_PRODUCT_LOGICAL_TTL,
                 () -> {
                     ProductDO product = productMapper.selectById(id);
@@ -285,6 +420,17 @@ public class ProductServiceImpl implements ProductService {
                     }
                     return convertToVO(product);
                 });
+
+        // 待审核商品对外完全不可见（尚未发布过）：仅管理员与商家可查。
+        // 判定放在缓存读取之后，故缓存命中/回源 DB 两条路径都被覆盖，不会因缓存绕过。
+        // 商家侧另有 ShopDataIsolationInterceptor 追加 shop_id 条件，只能命中本店商品。
+        // 注意：下架商品（status=2）不在此列——它曾发布过，详情页允许查看，仅在下单时拦截。
+        if (vo.getStatus() != null && vo.getStatus() == ProductConstants.STATUS_PENDING
+                && !StpAdminUtil.INSTANCE.isLogin() && !StpShopUtil.INSTANCE.isLogin()) {
+            throw new BusinessException("商品不存在");
+        }
+
+        return vo;
     }
 
     /**
@@ -297,6 +443,19 @@ public class ProductServiceImpl implements ProductService {
      */
     @Override
     public void updateStatus(Long id, Integer status) {
+        // 状态值合法性：只允许 0=待审核 / 1=上架 / 2=下架
+        if (status == null || (status != ProductConstants.STATUS_PENDING
+                && status != ProductConstants.STATUS_ON_SHELF
+                && status != ProductConstants.STATUS_OFF_SHELF)) {
+            throw new BusinessException("非法的商品状态");
+        }
+
+        // 商家不能自行上架：上架须经管理员审核，否则审核流程形同虚设
+        // （商家上架只需一次 API 调用即可绕过，故必须在此拦截，前端置灰不构成防护）
+        if (StpShopUtil.INSTANCE.isLogin() && status == ProductConstants.STATUS_ON_SHELF) {
+            throw new BusinessException("商品上架需管理员审核，请提交审核后等待审核通过");
+        }
+
         ProductDO product = productMapper.selectById(id);
         if (product == null) {
             throw new BusinessException("商品不存在");

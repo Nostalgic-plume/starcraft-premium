@@ -189,4 +189,38 @@ public class AdminServiceImpl implements AdminService {
         }
         log.info("批量状态变更完成: count={}, newStatus={}", targetUserIds.size(), newStatus);
     }
+
+    /**
+     * 强制目标用户下线（只踢会话，不改账号状态、不写状态变更日志）
+     * <p>
+     * 纯 Redis 会话操作，不涉及数据库写入，故不加事务。
+     * 权限校验与 {@link #updateUserStatus} 保持一致：操作人必须是有效管理员。
+     * 踢的是 "user" loginType 下的会话，不会误伤同 id 的管理端 / 商家端会话。
+     * </p>
+     *
+     * @param targetUserId 目标用户ID
+     * @throws BusinessException 操作人不存在、目标用户不存在或权限不足时抛出
+     */
+    @Override
+    public void kickoutUser(Long targetUserId) {
+        long operatorId = StpAdminUtil.INSTANCE.getLoginIdAsLong();
+        AdminDO operator = adminMapper.selectById(operatorId);
+        if (operator == null) {
+            throw new BusinessException("操作人不存在");
+        }
+
+        UserDO target = userMapper.selectById(targetUserId);
+        if (target == null) {
+            throw new BusinessException("目标用户不存在");
+        }
+
+        Integer adminLevel = operator.getAdminLevel();
+        if (adminLevel == null || !AdminLevelEnum.canOperate(adminLevel, AdminLevelEnum.NONE.getValue())) {
+            log.warn("权限不足: 操作人={}(level={}), 目标={}", operatorId, adminLevel, targetUserId);
+            throw new BusinessException("权限不足，无法操作该用户");
+        }
+
+        StpUserUtil.INSTANCE.kickout(targetUserId);
+        log.info("用户强制下线: targetUserId={}, operatorId={}", targetUserId, operatorId);
+    }
 }

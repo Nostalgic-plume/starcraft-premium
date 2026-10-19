@@ -84,6 +84,17 @@ public final class RecConfigKeys {
     /** 品牌偏好分权值（默认 0，预留） */
     public static final String RANK_WEIGHT_BRAND = "rank.weight.brand";
 
+    /**
+     * 榜单首位个性化配额（条）
+     *
+     * <p>榜单前 N 位改用类目偏好路的候选（纯个性化），其后位次走原有融合排序。
+     * <b>置 0 即关闭</b>，线上出问题时可不开版止血。
+     *
+     * <p>注意该步骤会**有意打破「总分降序」不变量**——前 N 名的融合总分可能低于第 N+1 名，
+     * 这是需求要求的效果，详见 {@code RankService#applyHeadQuota} 的方法注释。
+     */
+    public static final String RANK_HEAD_PERSONALIZED_SIZE = "rank.head.personalized.size";
+
     // ==================== 缓存 ====================
 
     /** 榜单快照有效期（秒） */
@@ -145,6 +156,7 @@ public final class RecConfigKeys {
             Map.entry(RANK_WEIGHT_CAT, "0.6"),
             Map.entry(RANK_WEIGHT_HOT, "0.4"),
             Map.entry(RANK_WEIGHT_BRAND, "0"),
+            Map.entry(RANK_HEAD_PERSONALIZED_SIZE, "5"),
 
             Map.entry(CACHE_RESULT_TTL, "300"),
 

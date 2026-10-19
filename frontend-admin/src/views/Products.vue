@@ -55,12 +55,12 @@
 
         <n-form :label-placement="'left'" label-width="96" :show-feedback="false">
           <n-form-item label="商品名称">
-            <n-input v-model:value="form.name" :disabled="isEdit" placeholder="请输入商品名称" />
+            <n-input v-model:value="form.name" placeholder="请输入商品名称" />
           </n-form-item>
           <n-form-item label="商品分类">
             <n-select
               v-model:value="form.categoryId"
-              :disabled="isEdit"
+             
               :options="categoryOptions"
               placeholder="请选择叶子分类（如「手机」而非「手机数码」）"
             />
@@ -68,15 +68,24 @@
           <n-form-item label="商品品牌">
             <n-select
               v-model:value="form.brandId"
-              :disabled="isEdit"
+             
               :options="brandOptions"
               clearable
               filterable
               placeholder="请选择品牌（品牌参与 RAG 语义检索，建议填写）"
             />
           </n-form-item>
-          <n-form-item label="主图 URL">
-            <n-input v-model:value="form.mainImage" :disabled="isEdit" placeholder="请输入商品主图 URL" />
+          <n-form-item label="主图">
+            <div class="upload-row">
+              <n-input v-model:value="form.mainImage" placeholder="粘贴图片 URL，或点右侧上传" />
+              <n-upload
+                :show-file-list="false"
+                :custom-request="uploadMainImage"
+                accept="image/*"
+              >
+                <n-button size="small" secondary :loading="uploading">上传</n-button>
+              </n-upload>
+            </div>
           </n-form-item>
           <n-form-item label="主图预览">
             <img
@@ -87,6 +96,40 @@
               @error="onPreviewError"
             />
             <span v-else class="cell-muted">暂无图片</span>
+          </n-form-item>
+          <n-form-item label="商品描述">
+            <n-input
+              v-model:value="form.description"
+              type="textarea"
+              :rows="2"
+              placeholder="一句话卖点，展示在商品列表与详情页顶部"
+            />
+          </n-form-item>
+          <n-form-item label="轮播图">
+            <div class="upload-col">
+              <n-input
+                v-model:value="form.imagesText"
+                type="textarea"
+                :rows="3"
+                placeholder="每行一个图片 URL（第一张建议与主图一致），留空则不显示轮播"
+              />
+              <n-upload
+                :show-file-list="false"
+                :custom-request="uploadCarouselImage"
+                accept="image/*"
+                multiple
+              >
+                <n-button size="small" secondary :loading="uploading">上传轮播图</n-button>
+              </n-upload>
+            </div>
+          </n-form-item>
+          <n-form-item label="商品详情">
+            <n-input
+              v-model:value="form.detail"
+              type="textarea"
+              :rows="5"
+              placeholder="支持 HTML 富文本，展示在详情页「商品详情」区块，留空则显示「暂无详情」"
+            />
           </n-form-item>
           <n-form-item label="状态">
             <div class="status-form-row">
@@ -104,14 +147,14 @@
               <div v-for="(sku, idx) in form.skuList" :key="idx" class="sku-row">
                 <n-input
                   v-model:value="sku.name"
-                  :disabled="isEdit"
+                 
                   placeholder="规格名"
                   size="small"
                   style="width: 130px"
                 />
                 <n-input-number
                   v-model:value="sku.price"
-                  :disabled="isEdit"
+                 
                   :min="0"
                   placeholder="价格"
                   size="small"
@@ -119,7 +162,7 @@
                 />
                 <n-input-number
                   v-model:value="sku.originalPrice"
-                  :disabled="isEdit"
+                 
                   :min="0"
                   placeholder="原价"
                   size="small"
@@ -127,14 +170,13 @@
                 />
                 <n-input-number
                   v-model:value="sku.stock"
-                  :disabled="isEdit"
+                 
                   :min="0"
                   placeholder="库存"
                   size="small"
                   style="width: 96px"
                 />
                 <n-button
-                  v-if="!isEdit"
                   size="tiny"
                   quaternary
                   type="error"
@@ -144,7 +186,7 @@
                   删除
                 </n-button>
               </div>
-              <n-button v-if="!isEdit" size="small" secondary @click="addSku">添加规格</n-button>
+              <n-button size="small" secondary @click="addSku">添加规格</n-button>
             </div>
           </n-form-item>
         </n-form>
@@ -166,9 +208,9 @@
 import { computed, h, onMounted, ref } from 'vue'
 import {
   NAlert, NButton, NDataTable, NDrawer, NDrawerContent, NForm, NFormItem,
-  NInput, NInputNumber, NPagination, NSelect, useDialog, useMessage
+  NInput, NInputNumber, NPagination, NSelect, NUpload, useDialog, useMessage
 } from 'naive-ui'
-import type { DataTableColumns } from 'naive-ui'
+import type { DataTableColumns, UploadCustomRequestOptions } from 'naive-ui'
 import { productApi } from '@/api/product'
 import { get } from '@/api/request'
 import StatusTag, { type StatusType } from '@/components/StatusTag.vue'
@@ -248,6 +290,8 @@ async function loadBrands() {
 /* ==================== 新增 / 编辑表单 ==================== */
 
 interface SkuFormItem {
+  /** SKU ID：编辑时保留（标识要更新的已有 SKU），新增行为空 */
+  id?: string
   name: string
   price: number
   originalPrice: number
@@ -261,6 +305,9 @@ interface ProductFormModel {
   brandId: string | number | null
   categoryId: string | number | null
   mainImage: string
+  /** 轮播图：表单以多行文本承载，提交时按行拆成数组 */
+  imagesText: string
+  detail: string
   status: number
   skuList: SkuFormItem[]
 }
@@ -268,17 +315,28 @@ interface ProductFormModel {
 const showDrawer = ref(false)
 const isEdit = ref(false)
 const submitting = ref(false)
+/** 编辑前的原始状态：保存时若状态被改动，需额外调一次状态更新接口（状态与商品信息是两条独立接口） */
+const originalStatus = ref<number | null>(null)
+/** 上传中标记（禁用上传按钮避免重复点击） */
+const uploading = ref(false)
 
-const form = ref<ProductFormModel>({
-  id: null,
-  name: '',
-  description: '',
-  brandId: null,
-  categoryId: null,
-  mainImage: '',
-  status: 1,
-  skuList: [{ name: '标准版', price: 0, originalPrice: 0, stock: 0 }]
-})
+/** 新增表单的空白初始值（编辑时由 openEdit 回填） */
+function emptyForm(): ProductFormModel {
+  return {
+    id: null,
+    name: '',
+    description: '',
+    brandId: null,
+    categoryId: null,
+    mainImage: '',
+    imagesText: '',
+    detail: '',
+    status: 1,
+    skuList: [{ name: '标准版', price: 0, originalPrice: 0, stock: 0 }]
+  }
+}
+
+const form = ref<ProductFormModel>(emptyForm())
 
 /** 无图占位（浅灰底 SVG，data URI 内联，避免外部依赖） */
 const IMG_PLACEHOLDER =
@@ -290,21 +348,13 @@ function onPreviewError(e: Event) {
 
 function openAdd() {
   isEdit.value = false
-  form.value = {
-    id: null,
-    name: '',
-    description: '',
-    brandId: null,
-    categoryId: null,
-    mainImage: '',
-    status: 1,
-    skuList: [{ name: '标准版', price: 0, originalPrice: 0, stock: 0 }]
-  }
+  form.value = emptyForm()
   showDrawer.value = true
 }
 
 function openEdit(row: ProductVO) {
   isEdit.value = true
+  originalStatus.value = row.status ?? 1
   const skus = row.skuList || []
   form.value = {
     id: row.id,
@@ -313,10 +363,13 @@ function openEdit(row: ProductVO) {
     brandId: row.brandId ?? null,
     categoryId: row.categoryId ?? null,
     mainImage: row.mainImage || '',
+    imagesText: (row.images || []).join('\n'),
+    detail: row.detail || '',
     status: row.status ?? 1,
     skuList:
       skus.length > 0
         ? skus.map((s) => ({
+            id: s.id,
             name: s.name || '',
             price: Number(s.price) || 0,
             originalPrice: Number(s.originalPrice) || 0,
@@ -342,29 +395,81 @@ function removeSku(idx: number) {
   form.value.skuList.splice(idx, 1)
 }
 
-async function handleSubmit() {
-  // 编辑：仅状态走真实 updateStatus（后端无商品信息编辑接口）
-  if (isEdit.value) {
-    if (form.value.status === null || form.value.status === undefined) {
-      message.warning('请选择商品状态')
-      return
-    }
-    submitting.value = true
-    try {
-      await productApi.updateStatus(form.value.id as string, form.value.status)
-      message.success('商品状态已更新')
-      showDrawer.value = false
-      loadProducts()
-    } catch (e) {
-      console.error('更新商品状态失败:', e)
-      message.error('操作失败')
-    } finally {
-      submitting.value = false
-    }
-    return
-  }
+/* ==================== 图片上传 ==================== */
 
-  // 新增：走真实 /product/add
+/**
+ * 主图上传成功后直接覆盖 form.mainImage。
+ * 「上传」与「手填 URL」并存：mock 数据全是外链，只留上传会导致编辑既有商品时原图丢失。
+ */
+async function uploadMainImage(options: UploadCustomRequestOptions) {
+  const raw = options.file.file
+  if (!raw) return
+  uploading.value = true
+  try {
+    const res = await productApi.uploadImage(raw)
+    form.value.mainImage = res.data
+    options.onFinish()
+    message.success('主图上传成功')
+  } catch (e) {
+    console.error('主图上传失败:', e)
+    options.onError()
+    message.error('图片上传失败')
+  } finally {
+    uploading.value = false
+  }
+}
+
+/** 轮播图上传成功后追加到 imagesText 末尾（该字段是每行一个 URL 的文本） */
+async function uploadCarouselImage(options: UploadCustomRequestOptions) {
+  const raw = options.file.file
+  if (!raw) return
+  uploading.value = true
+  try {
+    const res = await productApi.uploadImage(raw)
+    const lines = form.value.imagesText
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    lines.push(res.data)
+    form.value.imagesText = lines.join('\n')
+    options.onFinish()
+    message.success('轮播图上传成功')
+  } catch (e) {
+    console.error('轮播图上传失败:', e)
+    options.onError()
+    message.error('图片上传失败')
+  } finally {
+    uploading.value = false
+  }
+}
+
+/**
+ * 组装提交给后端的商品载荷（新增 / 编辑共用）。
+ * 编辑时 skuList 会带上 id，后端据此做「增 / 改 / 删」diff；新增时 id 为 undefined，JSON 序列化时自动省略。
+ */
+function buildProductPayload() {
+  return {
+    name: form.value.name.trim(),
+    description: form.value.description,
+    categoryId: form.value.categoryId as string | number,
+    brandId: form.value.brandId ?? undefined,
+    mainImage: form.value.mainImage,
+    images: form.value.imagesText
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    detail: form.value.detail,
+    skuList: form.value.skuList.map((s) => ({
+      id: s.id,
+      name: s.name.trim(),
+      price: Number(s.price) || 0,
+      originalPrice: Number(s.originalPrice) || 0,
+      stock: Number(s.stock) || 0
+    }))
+  }
+}
+
+async function handleSubmit() {
   if (!form.value.name.trim()) {
     message.warning('请输入商品名称')
     return
@@ -377,27 +482,26 @@ async function handleSubmit() {
     message.warning('请填写完整 SKU 规格信息')
     return
   }
+
   submitting.value = true
   try {
-    await productApi.add({
-      name: form.value.name.trim(),
-      description: form.value.description,
-      brandId: form.value.brandId,
-      categoryId: form.value.categoryId,
-      mainImage: form.value.mainImage,
-      skuList: form.value.skuList.map((s) => ({
-        name: s.name.trim(),
-        price: Number(s.price) || 0,
-        originalPrice: Number(s.originalPrice) || 0,
-        stock: Number(s.stock) || 0
-      }))
-    })
-    message.success('新增商品成功')
+    if (isEdit.value) {
+      const id = form.value.id as string
+      await productApi.update(id, buildProductPayload())
+      // 状态与商品信息是两条独立接口，状态有变化时补一次调用
+      if (form.value.status !== originalStatus.value) {
+        await productApi.updateStatus(id, form.value.status)
+      }
+      message.success('商品信息已更新')
+    } else {
+      await productApi.add(buildProductPayload())
+      message.success('新增商品成功')
+    }
     showDrawer.value = false
     loadProducts()
   } catch (e) {
-    console.error('新增商品失败:', e)
-    message.error('新增失败')
+    console.error(isEdit.value ? '更新商品失败:' : '新增商品失败:', e)
+    message.error(isEdit.value ? '更新失败' : '新增失败')
   } finally {
     submitting.value = false
   }
@@ -440,24 +544,57 @@ function renderProductCell(row: ProductVO) {
 }
 
 function renderActions(row: ProductVO) {
-  return h('div', { class: 'action-cell' }, [
+  const buttons = [
     h(
       NButton,
       { size: 'small', quaternary: true, type: 'primary', onClick: () => openEdit(row) },
       { default: () => '编辑' }
-    ),
-    row.status === 1
-      ? h(
-          NButton,
-          { size: 'small', quaternary: true, type: 'warning', onClick: () => toggleStatus(row, 2) },
-          { default: () => '下架' }
-        )
-      : h(
-          NButton,
-          { size: 'small', quaternary: true, type: 'success', onClick: () => toggleStatus(row, 1) },
-          { default: () => '上架' }
-        )
-  ])
+    )
+  ]
+
+  if (row.status === 0) {
+    // 待审核：通过 / 驳回（底层同为状态流转 0→1 / 0→2，此处只做语义化）
+    buttons.push(
+      h(
+        NButton,
+        {
+          size: 'small',
+          quaternary: true,
+          type: 'success',
+          onClick: () => toggleStatus(row, 1, '审核通过')
+        },
+        { default: () => '审核通过' }
+      ),
+      h(
+        NButton,
+        {
+          size: 'small',
+          quaternary: true,
+          type: 'error',
+          onClick: () => toggleStatus(row, 2, '驳回')
+        },
+        { default: () => '驳回' }
+      )
+    )
+  } else if (row.status === 1) {
+    buttons.push(
+      h(
+        NButton,
+        { size: 'small', quaternary: true, type: 'warning', onClick: () => toggleStatus(row, 2) },
+        { default: () => '下架' }
+      )
+    )
+  } else {
+    buttons.push(
+      h(
+        NButton,
+        { size: 'small', quaternary: true, type: 'success', onClick: () => toggleStatus(row, 1) },
+        { default: () => '上架' }
+      )
+    )
+  }
+
+  return h('div', { class: 'action-cell' }, buttons)
 }
 
 const columns: DataTableColumns<ProductVO> = [
@@ -492,7 +629,7 @@ const columns: DataTableColumns<ProductVO> = [
         label: row.status === 1 ? '在售' : row.status === 2 ? '下架' : '待审核'
       })
   },
-  { title: '操作', key: 'actions', width: 150, align: 'center', render: renderActions }
+  { title: '操作', key: 'actions', width: 230, align: 'center', render: renderActions }
 ]
 
 /* ==================== 操作 ==================== */
@@ -525,9 +662,13 @@ function handleFilterChange() {
   loadProducts()
 }
 
-/** 上架 / 下架（走真实 /product/status/{id}） */
-function toggleStatus(row: ProductVO, newStatus: number) {
-  const action = newStatus === 1 ? '上架' : '下架'
+/**
+ * 修改商品状态（走真实 /product/status/{id}）
+ * 待审核商品的「审核通过 / 驳回」本质也是状态流转（0→1 / 0→2），
+ * 故复用本函数，仅通过 actionText 让提示语贴合审核语义。
+ */
+function toggleStatus(row: ProductVO, newStatus: number, actionText?: string) {
+  const action = actionText ?? (newStatus === 1 ? '上架' : '下架')
   dialog.warning({
     title: '确认操作',
     content: `确定${action}商品「${row.name}」吗？`,
@@ -655,6 +796,21 @@ onMounted(async () => {
   object-fit: cover;
   border-radius: var(--ds-r-sm, 9px);
   background: var(--ds-bg-2, #eef0f4);
+}
+/* 主图：URL 输入框 + 上传按钮并排 */
+.upload-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+/* 轮播图：文本框在上、上传按钮在下 */
+.upload-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
 }
 .sku-list {
   width: 100%;

@@ -143,6 +143,7 @@ public class MerchantController {
      * @param page     页码，从 1 开始，默认 1
      * @param pageSize 每页条数，默认 20
      * @param keyword  商品名称关键词搜索，可空
+     * @param status   商品状态：0=待审核 1=在售 2=下架，可空表示全部
      * @return 本店商品分页结果
      */
     @SaCheckLogin(type ="shop")
@@ -151,11 +152,13 @@ public class MerchantController {
     public Result<PageResult<ProductVO>> productPage(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int pageSize,
-            @RequestParam(required = false) String keyword) {
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Integer status) {
         ProductPageQuery query = new ProductPageQuery();
         query.setPage(page);
         query.setPageSize(pageSize);
         query.setKeyword(keyword);
+        query.setStatus(status);
         return Result.success(productService.merchantPage(query));
     }
 
@@ -170,6 +173,24 @@ public class MerchantController {
     @Operation(summary = "商家新增商品（自动绑定本店）")
     public Result<Long> addProduct(@Valid @RequestBody ProductDTO dto) {
         return Result.success("新增成功", productService.addProduct(dto));
+    }
+
+    /**
+     * 商家编辑本店商品信息（需 product:edit 权限）
+     * 可修改商品名称、描述、轮播图、详情、分类、品牌、主图及 SKU 列表；
+     * SKU 列表中带 id 表示更新、不带 id 表示新增、库中存在但未提交表示逻辑删除。
+     * 归属校验在 Service 层按 shop_id 强制（非本店商品返回「无权操作该商品」）
+     *
+     * @param id  商品ID
+     * @param dto 商品信息请求体，由 @Valid 校验
+     * @return 操作成功提示
+     */
+    @SaCheckPermission(value = {PermissionConstants.PRODUCT_EDIT}, type ="shop")
+    @PutMapping("/product/{id}")
+    @Operation(summary = "商家编辑商品信息（含 SKU 增删改）")
+    public Result<Void> updateProduct(@PathVariable Long id, @Valid @RequestBody ProductDTO dto) {
+        productService.updateProduct(id, dto);
+        return Result.success();
     }
 
     /**

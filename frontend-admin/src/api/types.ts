@@ -475,3 +475,20 @@ export interface RecMetricRecord {
   /** 统计时间（写入时截到整点） */
   statTime: string
 }
+
+/** 商品索引重建状态（GET /api/rec/items/rebuild-status） */
+export interface RecItemRebuildStatus {
+  /** 是否正在重建 */
+  rebuilding: boolean
+  /** 最近一次重建的结束时间；从未重建时为 null */
+  lastRebuildTime: string | null
+  /** 最近一次重建是否成功 */
+  lastRebuildSuccess: boolean
+  /**
+   * 结果说明；从未重建时为「尚未执行重建」
+   *
+   * ⚠️ 该文案表示「从未重建」而非「失败」——此时 lastRebuildSuccess 同样是 false，
+   * 直接按布尔渲染会把「从未重建」显示成「失败」，属误报。
+   */
+  lastRebuildMessage: string
+}

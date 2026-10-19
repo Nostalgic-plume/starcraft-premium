@@ -1,7 +1,7 @@
 <template>
   <div class="page-container fade-in" ref="pageRef">
     <!-- ====== Hero 区域（中性渐变底 + 蓝色强调 + 统计条） ====== -->
-    <section class="hero" :class="{ 'hero--panel-open': searchPanelOpen }">
+    <section class="hero">
       <div class="hero-inner">
         <div class="hero-copy">
           <span class="hero-eyebrow">
@@ -13,32 +13,16 @@
           </h1>
           <p class="hero-desc">覆盖数码、家居、美妆全品类，精选正品，好价快物流</p>
 
-          <!-- 搜索框 + 下拉（历史 / 热搜） -->
-          <div class="hero-search-wrap" ref="searchWrapRef">
-            <div class="search-mode">
-              <button
-                type="button"
-                class="mode-item"
-                :class="{ active: searchMode === 'keyword' }"
-                @click="searchMode = 'keyword'"
-              >关键词</button>
-              <button
-                type="button"
-                class="mode-item"
-                :class="{ active: searchMode === 'semantic' }"
-                @click="searchMode = 'semantic'"
-              >智能搜索</button>
-            </div>
-
+          <!-- 搜索框：固定走智能搜索，统一跳转检索页（首页不再就地渲染搜索结果） -->
+          <div class="hero-search-wrap">
             <div class="hero-search">
-              <div class="search-input-box" :class="{ focused: searchPanelOpen }">
+              <div class="search-input-box">
                 <SvgIcon name="search" :size="18" class="search-icon" />
                 <input
                   v-model="keyword"
-                  :placeholder="searchPlaceholder"
+                  placeholder="搜索商品描述，例如：便宜的手机…"
                   class="search-input"
-                  @focus="openSearchPanel"
-                  @keyup.enter="handleSearch"
+                  @keyup.enter="goSearch"
                 />
                 <button
                   v-if="keyword"
@@ -50,62 +34,16 @@
                   <SvgIcon name="close" :size="13" />
                 </button>
               </div>
-              <button type="button" class="search-btn" @click="handleSearch">
-                {{ searchMode === 'semantic' ? '智能搜索' : '搜索' }}
+              <button type="button" class="search-btn" @click="goSearch">
+                智能搜索
                 <SvgIcon name="search" :size="16" />
               </button>
             </div>
 
-            <p v-if="searchMode === 'semantic'" class="search-hint">
+            <p class="search-hint">
               智能搜索基于商品描述语义匹配，而非关键词精确匹配
             </p>
 
-            <!-- 搜索下拉面板 -->
-            <transition name="panel">
-              <div v-if="searchPanelOpen" class="search-panel">
-                <div v-if="searchHistory.length" class="sp-section">
-                  <div class="sp-head">
-                    <span class="sp-title">
-                      <SvgIcon name="clock" :size="14" />
-                      搜索历史
-                    </span>
-                    <button type="button" class="sp-clear" @click="clearHistory">
-                      <SvgIcon name="close" :size="12" />
-                      清空
-                    </button>
-                  </div>
-                  <div class="sp-tags">
-                    <span
-                      v-for="h in searchHistory"
-                      :key="h"
-                      class="sp-tag"
-                      @click="searchWord(h)"
-                    >{{ h }}</span>
-                  </div>
-                </div>
-
-                <div class="sp-section">
-                  <div class="sp-head">
-                    <span class="sp-title">
-                      <SvgIcon name="star" :size="14" />
-                      热搜榜
-                    </span>
-                  </div>
-                  <div class="sp-hot">
-                    <button
-                      v-for="(w, i) in HOT_WORDS"
-                      :key="w"
-                      type="button"
-                      class="sp-hot-item"
-                      @click="searchWord(w)"
-                    >
-                      <span class="hot-rank" :class="{ top: i < 3 }">{{ i + 1 }}</span>
-                      <span class="hot-name">{{ w }}</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </transition>
           </div>
 
           <!-- 数据统计条 -->
@@ -258,36 +196,41 @@
 
         <!-- 商品网格 -->
         <div class="grid-area">
-          <n-spin :show="loading">
+          <!-- 只在首屏转圈：触底续接时若整块转圈，已展示的内容会闪一下 -->
+          <n-spin :show="loading && productList.length === 0">
             <div v-if="productList.length" class="product-grid">
               <ProductCard
                 v-for="p in productList"
                 :key="p.id"
                 :product="p"
                 @add-cart="addToCart"
-                @detail-click="traceClick"
               />
             </div>
           </n-spin>
 
           <EmptyState
-            v-if="!loading && productList.length === 0"
-            :text="isRagResult ? '没有找到相关商品' : '暂无商品'"
-            description="换个关键词或分类试试看"
+            v-if="!loading && productList.length === 0 && !loadFailed"
+            text="暂无商品"
+            description="换个分类试试看"
           >
             <button type="button" class="empty-btn" @click="resetFilter">刷新看看</button>
           </EmptyState>
         </div>
 
-        <!-- 分页（语义搜索结果不分页） -->
-        <div v-if="!isRagResult && total > 0" class="pagination-wrapper">
-          <n-pagination
-            v-model:page="page"
-            :page-size="pageSize"
-            :item-count="total"
-            :page-slot="5"
-            @update:page="loadProducts"
-          />
+        <!-- 触底哨兵：进入视口自动加载下一页（替代原分页组件） -->
+        <div ref="sentinelRef" class="feed-sentinel">
+          <span v-if="loading && productList.length > 0" class="feed-sentinel-text">正在加载…</span>
+          <button
+            v-else-if="loadFailed"
+            type="button"
+            class="empty-btn"
+            @click="loadProducts(false)"
+          >
+            加载失败，点击重试
+          </button>
+          <span v-else-if="!hasMore && productList.length > 0" class="feed-sentinel-text">
+            已经到底了
+          </span>
         </div>
       </div>
     </div>
@@ -295,9 +238,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import { NPagination, NSpin, useMessage } from 'naive-ui'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
+import { NSpin, useMessage } from 'naive-ui'
 import gsap from 'gsap'
 import { productApi } from '@/api/product'
 import { categoryApi } from '@/api/category'
@@ -313,22 +256,34 @@ import type { CategoryVO, ProductPageQuery, ProductVO } from '@/api/types'
 const cartStore = useCartStore()
 const userStore = useUserStore()
 const message = useMessage()
-const route = useRoute()
+const router = useRouter()
 
 const productList = ref<ProductVO[]>([])
 const categories = ref<CategoryVO[]>([])
 const loading = ref(false)
+/** Hero 搜索框输入（仅用于跳转检索页，不参与本页商品筛选） */
 const keyword = ref('')
-const searchMode = ref<'keyword' | 'semantic'>('keyword')
 const currentCategory = ref<string | null>(null)
 const expandedCategoryId = ref<string | null>(null)
 const page = ref(1)
-const pageSize = 12
+/** 每页条数：触底续接场景下取 20，减少请求次数（原分页每页 12） */
+const pageSize = 20
 const total = ref(0)
-/** 全量商品总数（Hero 统计条，不受分类/搜索筛选影响） */
+/** 全量商品总数（Hero 统计条，不受分类筛选影响） */
 const totalProducts = ref(0)
-/** 语义搜索命中结果：不参与分页 */
-const isRagResult = ref(false)
+/**
+ * 触底续接是否还有下一页
+ *
+ * <p>用「已请求页数 × 每页条数 < 总数」而非「已加载条数 < 总数」：后者在服务端返回空页
+ * （或整页都被去重掉）时会永远为 true，配合下面的重新观察会变成死循环刷接口。
+ * 前者只依赖页码推进，哪怕某页一条没加，页码照样前进，必然收敛。
+ */
+const hasMore = computed(() => page.value * pageSize < total.value)
+/** 续接失败：保留已展示内容，尾部给重试入口 */
+const loadFailed = ref(false)
+/** 触底哨兵：进入视口即加载下一页 */
+const sentinelRef = ref<HTMLElement | null>(null)
+let feedObserver: IntersectionObserver | null = null
 
 const pageRef = ref<HTMLElement | null>(null)
 let ctx: gsap.Context | null = null
@@ -345,70 +300,39 @@ const subCategories = computed(() => {
 
 const hotTags = computed(() => topCategories.value.slice(0, 6))
 
-/* ====== 搜索历史 + 热搜榜 ====== */
-const HISTORY_KEY = 'shop_search_history'
-const HISTORY_MAX = 10
-/** 热搜榜（静态占位数据，后续可接后端热搜接口） */
-const HOT_WORDS = ['手机', '耳机', '手表', '运动鞋', '精华', '笔记本', '拉面', '沙发']
-const searchHistory = ref<string[]>([])
-const searchPanelOpen = ref(false)
-const searchWrapRef = ref<HTMLElement | null>(null)
-
-function loadHistory() {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY)
-    const arr = raw ? JSON.parse(raw) : []
-    searchHistory.value = Array.isArray(arr)
-      ? arr.filter((x): x is string => typeof x === 'string').slice(0, HISTORY_MAX)
-      : []
-  } catch {
-    searchHistory.value = []
-  }
+/* ====== 搜索跳转 ====== */
+/**
+ * Hero 搜索统一跳检索页 /search（固定走智能搜索）
+ * 搜索结果渲染、搜索历史 / 热搜榜均已迁至 Search.vue，首页不再就地搜索
+ */
+function goSearch() {
+  const q = keyword.value.trim()
+  router.push(q ? { path: '/search', query: { q } } : '/search')
 }
-
-function persistHistory() {
-  try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(searchHistory.value))
-  } catch {
-    /* localStorage 不可用时静默忽略 */
-  }
-}
-
-function recordHistory(word: string) {
-  const q = word.trim()
-  if (!q) return
-  searchHistory.value = [q, ...searchHistory.value.filter(x => x !== q)].slice(0, HISTORY_MAX)
-  persistHistory()
-}
-
-function clearHistory() {
-  searchHistory.value = []
-  persistHistory()
-}
-
-function openSearchPanel() {
-  searchPanelOpen.value = true
-}
-
-function searchWord(word: string) {
-  keyword.value = word
-  searchPanelOpen.value = false
-  handleSearch()
-}
-
-const searchPlaceholder = computed(() =>
-  searchMode.value === 'semantic' ? '搜索商品描述，例如：便宜的手机…' : '搜索商品名称…'
-)
 
 /* ====== 商品加载 ====== */
-async function loadProducts() {
+/**
+ * 加载商品
+ *
+ * @param reset true（默认）= 重置到第一页并覆盖列表（首屏、切分类、清除筛选都走这条）；
+ *              false = 触底续接，取下一页并**追加去重**
+ *
+ * <p>默认值取 true 是刻意的：现有 6 处调用点（初始化、切分类、重置筛选等）都必须重置，
+ * 只有哨兵需要追加。这样加参数不必逐个改调用点，也不会漏改出「切了分类还追加旧数据」的 bug。
+ */
+async function loadProducts(reset = true) {
+  // 只有追加路径需要防重入；重置路径保持原行为，不受其它加载影响
+  if (!reset && loading.value) {
+    return
+  }
   loading.value = true
-  isRagResult.value = false
+  if (reset) {
+    loadFailed.value = false
+  }
   try {
     const params: ProductPageQuery = {
-      page: page.value || 1,
-      pageSize,
-      keyword: keyword.value.trim() || undefined
+      page: reset ? 1 : page.value + 1,
+      pageSize
     }
     if (currentCategory.value) {
       params.categoryId = currentCategory.value
@@ -416,16 +340,66 @@ async function loadProducts() {
       params.firstCategoryId = expandedCategoryId.value
     }
     const res = await productApi.page(params)
-    productList.value = res.data?.list || []
+    const incoming = res.data?.list || []
     // ⚠️ 后端 Long→String，total 需 Number() 转换
     total.value = Number(res.data?.total) || 0
+
+    if (reset) {
+      productList.value = incoming
+    } else {
+      // 去重后追加：分页边界与并发场景都可能带回已展示的商品
+      const seen = new Set(productList.value.map((p) => p.id))
+      productList.value = [...productList.value, ...incoming.filter((p) => !seen.has(p.id))]
+    }
+    // ProductPageQuery.page 是可选字段，取出后落到本地页码（已是 number）
+    page.value = params.page ?? 1
   } catch (e) {
     console.error('加载商品列表失败:', e)
-    productList.value = []
-    total.value = 0
+    if (reset) {
+      productList.value = []
+      total.value = 0
+    } else {
+      // 续接失败只标记，保留已展示内容
+      loadFailed.value = true
+    }
   } finally {
     loading.value = false
   }
+
+  // 追加后哨兵可能仍在视口内（列表短、屏幕高），此时不产生新的交叉变化，
+  // 观察器不会再回调 —— 重新 observe 强制它按当前状态再评估一次。
+  // 配合 hasMore 的页码式判定，即便某页无新数据也会推进页码，不会死循环。
+  if (!reset && !loadFailed.value && hasMore.value) {
+    await nextTick()
+    const el = sentinelRef.value
+    if (el && feedObserver) {
+      feedObserver.unobserve(el)
+      feedObserver.observe(el)
+    }
+  }
+}
+
+/**
+ * 建立触底观察
+ *
+ * <p>用 IntersectionObserver 而非监听 scroll：scroll 在滚动期间逐帧触发，长列表下反复
+ * 读布局会拖慢主线程。rootMargin 提前 240px 预加载，避免滑到底才看到空白。
+ */
+function setupFeedObserver() {
+  const el = sentinelRef.value
+  if (!el || typeof IntersectionObserver === 'undefined') {
+    return
+  }
+  feedObserver = new IntersectionObserver(
+    (entries) => {
+      const hit = entries.some((e) => e.isIntersecting)
+      if (hit && hasMore.value && !loading.value && !loadFailed.value) {
+        loadProducts(false)
+      }
+    },
+    { rootMargin: '240px 0px' },
+  )
+  feedObserver.observe(el)
 }
 
 /** 全量商品总数（Hero 统计条用，pageSize=1 轻量拉一次 total） */
@@ -445,59 +419,6 @@ async function loadCategories() {
   } catch (e) {
     console.error('加载分类失败:', e)
     categories.value = []
-  }
-}
-
-async function handleSearch() {
-  searchPanelOpen.value = false
-  const q = keyword.value.trim()
-  if (!q) {
-    // 空关键词：恢复全量列表
-    keyword.value = ''
-    page.value = 1
-    loadProducts()
-    return
-  }
-  recordHistory(q)
-  if (searchMode.value === 'semantic') {
-    await semanticSearch(q)
-  } else {
-    page.value = 1
-    loadProducts()
-  }
-}
-
-async function semanticSearch(q: string) {
-  loading.value = true
-  isRagResult.value = true
-  try {
-    const res = await productApi.ragSearch({ q, topK: 20 })
-    const hits = res.data?.hits || []
-    productList.value = hits.map(h => ({
-      id: h.productId,
-      name: h.name || '',
-      description: '',
-      categoryId: '',
-      categoryName: '',
-      brandId: '',
-      brandName: '',
-      mainImage: h.image || '',
-      images: [],
-      detail: '',
-      minPrice: h.minPrice,
-      maxPrice: h.maxPrice,
-      totalStock: 0,
-      soldCount: 0,
-      status: 1,
-      skuList: []
-    }))
-    total.value = hits.length
-  } catch (e) {
-    console.error('语义搜索失败:', e)
-    productList.value = []
-    total.value = 0
-  } finally {
-    loading.value = false
   }
 }
 
@@ -536,7 +457,6 @@ function selectHotTag(tag: CategoryVO) {
 
 /* ====== 筛选摘要 ====== */
 const filterLabel = computed(() => {
-  if (keyword.value.trim()) return `关键词：${keyword.value.trim()}`
   if (currentCategory.value) {
     const sub = categories.value.find(c => c.id === currentCategory.value)
     return `分类：${sub?.name || '全部'}`
@@ -549,12 +469,9 @@ const filterLabel = computed(() => {
 })
 
 function resetFilter() {
-  keyword.value = ''
   currentCategory.value = null
   expandedCategoryId.value = null
   page.value = 1
-  searchMode.value = 'keyword'
-  isRagResult.value = false
   loadProducts()
 }
 
@@ -579,47 +496,34 @@ async function addToCart(product: ProductVO) {
   }
 }
 
-/** Phase 4：商品点击行为反馈埋点（异步上报，失败不影响跳转） */
-function traceClick(product: ProductVO) {
-  const token = localStorage.getItem('token')
-  const baseURL = import.meta.env.VITE_API_BASE || ''
-  fetch(baseURL + '/api/rag/trace', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { token: token } : {})
-    },
-    body: JSON.stringify({ query: keyword.value, productId: product.id, action: 'SEARCH_CLICK' })
-  }).catch(() => {})
-}
-
 /* ====== GSAP Hero 动画 ====== */
 function initHeroAnimation() {
   if (!pageRef.value) return
   ctx = gsap.context(() => {
+    // 首屏入场总时长控制在 0.6s 内（原实现逐段错开叠加到 1.8s，点击首页要等约 2s 才成型）
     const tl = gsap.timeline({ defaults: { ease: 'power3.out' } })
-    tl.from('.hero-eyebrow', { y: 20, opacity: 0, duration: 0.6 })
-      .from('.hero-title', { y: 28, opacity: 0, duration: 0.7 }, '-=0.35')
-      .from('.hero-desc', { y: 18, opacity: 0, duration: 0.6 }, '-=0.3')
-      .from('.hero-search-wrap', { y: 16, opacity: 0, duration: 0.5 }, '-=0.25')
-      .from('.hero-stats', { y: 14, opacity: 0, duration: 0.5 }, '-=0.2')
+    tl.from('.hero-eyebrow', { y: 14, opacity: 0, duration: 0.25 })
+      .from('.hero-title', { y: 18, opacity: 0, duration: 0.28 }, '-=0.18')
+      .from('.hero-desc', { y: 12, opacity: 0, duration: 0.25 }, '-=0.18')
+      .from('.hero-search-wrap', { y: 10, opacity: 0, duration: 0.28 }, '-=0.2')
+      .from('.hero-stats', { y: 10, opacity: 0, duration: 0.26 }, '-=0.2')
     // 右侧装饰卡片 / 条形 / 徽章
-    gsap.from('.hero-card', { y: 24, opacity: 0, duration: 0.7, delay: 0.15 })
+    gsap.from('.hero-card', { y: 16, opacity: 0, duration: 0.3, delay: 0.1 })
     gsap.from('.bar', {
       scaleY: 0,
       transformOrigin: 'bottom',
-      duration: 0.6,
-      stagger: 0.08,
+      duration: 0.3,
+      stagger: 0.04,
       ease: 'power2.out',
-      delay: 0.4
+      delay: 0.15
     })
     gsap.from('.hero-chip', {
-      y: 14,
+      y: 10,
       opacity: 0,
-      duration: 0.5,
-      stagger: 0.12,
+      duration: 0.24,
+      stagger: 0.06,
       ease: 'power2.out',
-      delay: 0.6
+      delay: 0.2
     })
     // 背景光斑浮动
     gsap.to('.blob-1', { y: -14, duration: 4, repeat: -1, yoyo: true, ease: 'sine.inOut' })
@@ -627,45 +531,26 @@ function initHeroAnimation() {
   }, pageRef.value)
 }
 
-/* ====== 点击外部关闭搜索面板 ====== */
-function onDocClick(e: MouseEvent) {
-  if (searchWrapRef.value && !searchWrapRef.value.contains(e.target as Node)) {
-    searchPanelOpen.value = false
-  }
+/* ====== 生命周期 ====== */
+function initPage() {
+  // 入场动画与数据加载并行启动：原实现等三个接口全部返回后才播动画，
+  // 首屏因此串行等待「接口 0.3s + 动画 1.8s」，现改为挂载即开始
+  nextTick(() => initHeroAnimation())
+  loadCategories()
+  loadProducts()
+  loadTotalProducts()
 }
 
-/* ====== 生命周期 ====== */
-onMounted(async () => {
-  loadHistory()
-  document.addEventListener('click', onDocClick)
-  // 支持从 AppHeader 搜索跳转携带 ?keyword=：写入搜索历史，与本地搜索保持一致
-  const q = typeof route.query.keyword === 'string' ? route.query.keyword.trim() : ''
-  if (q) {
-    keyword.value = q
-    recordHistory(q)
-  }
-  await Promise.all([loadCategories(), loadProducts(), loadTotalProducts()])
-  nextTick(() => initHeroAnimation())
-})
-
-// 同路由下 query 变化（AppHeader 全局搜索跳转）时：
-// 1. 清空首页分类筛选，确保搜索结果跨全部分类
-// 2. 写入搜索历史（最近 10 条去重，与本地搜索一致）
-// 3. 切回关键词搜索模式并刷新商品
-watch(() => route.query.keyword, (q) => {
-  currentCategory.value = null
-  expandedCategoryId.value = null
-  const kw = typeof q === 'string' ? q.trim() : ''
-  keyword.value = kw
-  if (kw) recordHistory(kw)
-  searchMode.value = 'keyword'
-  page.value = 1
-  loadProducts()
+onMounted(() => {
+  initPage()
+  setupFeedObserver()
 })
 
 onUnmounted(() => {
-  document.removeEventListener('click', onDocClick)
   ctx?.revert()
+  // 必须断开：否则路由离开首页后，已卸载组件的加载函数仍会被滚动触发
+  feedObserver?.disconnect()
+  feedObserver = null
 })
 </script>
 
@@ -682,22 +567,6 @@ onUnmounted(() => {
   isolation: isolate;
   padding: 44px 48px;
   margin-bottom: 28px;
-}
-/*
- * 下拉面板打开时提升层级，保证面板压住页面其他组件。
- * 面板自身 z-index:60 不够用，它被困在三层层叠上下文里：
- *   .hero(isolation:isolate) → .hero-inner(z-index:1) → .hero-search-wrap(transform)
- * 1) .hero 的 z-index 是 auto，DOM 中更靠后的粘性分类栏(aside.category-panel) 与商品网格
- *    (n-spin-container, position:relative) 会整体盖住 hero 这棵树 → 提升 .hero。
- * 2) hero 内部的数据统计条 .hero-stats 被 GSAP 动画留下 transform，同样脱离普通流层叠顺序，
- *    且在 DOM 中晚于搜索框 → 会盖住面板 → 同步提升 .hero-search-wrap。
- * 仅面板打开时生效，避免滚动时 hero 反过来压住粘性侧栏。
- */
-.hero--panel-open {
-  z-index: 20;
-}
-.hero--panel-open .hero-search-wrap {
-  z-index: 2;
 }
 .hero-inner {
   position: relative;
@@ -738,26 +607,8 @@ onUnmounted(() => {
   margin: 0 0 22px;
 }
 
-/* 搜索模式切换 */
+/* 搜索框（点击跳转检索页，结果不在本页渲染） */
 .hero-search-wrap { max-width: 540px; position: relative; }
-.search-mode { display: flex; gap: 4px; margin-bottom: 10px; }
-.mode-item {
-  border: none;
-  background: transparent;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--ds-text-3, #98a1af);
-  cursor: pointer;
-  padding: 4px 10px;
-  border-radius: 8px;
-  transition: all 0.2s;
-}
-.mode-item:hover { color: var(--ds-primary, #2d7ff9); }
-.mode-item.active {
-  color: var(--ds-primary, #2d7ff9);
-  font-weight: 700;
-  background: var(--ds-primary-tint, rgba(45, 127, 249, 0.08));
-}
 
 /* 搜索条 */
 .hero-search { display: flex; gap: 10px; }
@@ -773,8 +624,7 @@ onUnmounted(() => {
   border-radius: 12px;
   transition: all 0.2s;
 }
-.search-input-box:focus-within,
-.search-input-box.focused {
+.search-input-box:focus-within {
   border-color: var(--ds-primary, #2d7ff9);
   box-shadow: 0 0 0 4px var(--ds-primary-tint, rgba(45, 127, 249, 0.08));
 }
@@ -827,102 +677,6 @@ onUnmounted(() => {
   font-size: 12px;
   color: var(--ds-text-3, #98a1af);
 }
-
-/* 搜索下拉面板 */
-.search-panel {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  right: 0;
-  z-index: 60;
-  background: var(--ds-card, #fff);
-  border: 1px solid var(--ds-line, #e7e9ee);
-  border-radius: 14px;
-  box-shadow: var(--ds-shadow-hover, 0 12px 30px rgba(31, 38, 48, 0.1));
-  padding: 14px;
-  /* 长内容（历史+热搜）高度受限时面板内部滚动，避免超出可视区 */
-  max-height: min(440px, calc(100vh - 150px));
-  overflow-y: auto;
-}
-.sp-section + .sp-section {
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--ds-line, #e7e9ee);
-}
-.sp-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-.sp-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--ds-text, #1e2632);
-}
-.sp-clear {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  border: none;
-  background: transparent;
-  color: var(--ds-text-3, #98a1af);
-  font-size: 12px;
-  cursor: pointer;
-}
-.sp-clear:hover { color: var(--ds-primary, #2d7ff9); }
-.sp-tags { display: flex; flex-wrap: wrap; gap: 8px; }
-.sp-tag {
-  padding: 5px 12px;
-  border-radius: var(--ds-r-pill, 999px);
-  background: var(--ds-bg-2, #eef0f4);
-  color: var(--ds-text-2, #5a6474);
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.sp-tag:hover { background: var(--ds-primary, #2d7ff9); color: #fff; }
-.sp-hot { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
-.sp-hot-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border: none;
-  background: transparent;
-  padding: 7px 8px;
-  border-radius: 8px;
-  font-size: 13px;
-  color: var(--ds-text, #1e2632);
-  cursor: pointer;
-  transition: all 0.2s;
-  text-align: left;
-}
-.sp-hot-item:hover { background: var(--ds-primary-tint, rgba(45, 127, 249, 0.08)); }
-.hot-rank {
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  border-radius: 6px;
-  background: var(--ds-bg-2, #eef0f4);
-  color: var(--ds-text-3, #98a1af);
-  font-size: 12px;
-  font-weight: 700;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.hot-rank.top {
-  background: var(--ds-primary-grad, linear-gradient(135deg, #5aa3ff, #2d7ff9));
-  color: #fff;
-}
-.hot-name { flex: 1; }
-.panel-enter-active,
-.panel-leave-active { transition: all 0.18s ease; }
-.panel-enter-from,
-.panel-leave-to { opacity: 0; transform: translateY(-6px); }
 
 /* 数据统计条 */
 .hero-stats {
@@ -1237,11 +991,17 @@ onUnmounted(() => {
   transform: translateY(-1px);
 }
 
-/* ====== 分页 ====== */
-.pagination-wrapper {
+/* ====== 信息流触底哨兵 ====== */
+.feed-sentinel {
   display: flex;
+  align-items: center;
   justify-content: center;
-  margin-top: 32px;
+  min-height: 56px;
+  margin-top: 8px;
+}
+.feed-sentinel-text {
+  font-size: 13px;
+  color: var(--ds-text-3, #98a1af);
 }
 
 /* ====== 响应式 ====== */

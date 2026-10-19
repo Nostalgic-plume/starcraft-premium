@@ -493,7 +493,11 @@ class ProductServiceImplTest {
         void updateStatus_ShouldSucceed() {
             when(productMapper.selectById(100L)).thenReturn(product);
 
-            productService.updateStatus(100L, 0);
+            // updateStatus 会判断 StpShopUtil 登录态（商家不能自行上架），需要 Sa-Token 上下文
+            SaTokenContextMockUtil.setMockContext(() -> {
+                productService.updateStatus(100L, 0);
+                return null;
+            });
 
             verify(productMapper).updateById(argThat(p ->
                     p.getStatus() == 0));
@@ -505,7 +509,10 @@ class ProductServiceImplTest {
             when(productMapper.selectById(99L)).thenReturn(null);
 
             BusinessException ex = assertThrows(BusinessException.class,
-                    () -> productService.updateStatus(99L, 0));
+                    () -> SaTokenContextMockUtil.setMockContext(() -> {
+                        productService.updateStatus(99L, 0);
+                        return null;
+                    }));
             assertEquals("商品不存在", ex.getMessage());
             verify(productMapper, never()).updateById(any());
         }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { NSpin } from 'naive-ui'
 import { fetchHomeRank } from '@/api/rec'
 import type { RankItem } from '@/api/rec'
@@ -34,142 +34,40 @@ const emit = defineEmits<{
 }>()
 
 /**
- * 每页条数
- *
- * <p>由 8 提到 20：竖向信息流一屏能放更多卡片，且候选池上限 200，取 20 只需约 10 次请求
- * 就能铺满整个流；取 8 会变成 25 次请求。
+ * 首页推荐位固定展示 4 个商品，一行排开。
+ * 不做无限滚动：只加载第一页，换一批时重新生成。
  */
-const PAGE_SIZE = 20
+const PAGE_SIZE = 4
 
 const items = ref<RankItem[]>([])
-/** 批次快照标识：仅触底续接回传；游客场景为 null */
-const snapshotId = ref<string | null>(null)
-const pageNum = ref(1)
-const hasMore = ref(false)
 const loading = ref(false)
-/** 首屏加载失败：隐藏整个区块，避免页面上出现一个空标题 */
+/** 加载失败：隐藏整个区块，避免页面上出现一个空标题 */
 const failed = ref(false)
-/** 续接失败：保留已展示内容，尾部给重试入口 */
-const loadFailed = ref(false)
 
 /**
- * 已展示的商品标识
+ * 加载推荐位（首屏 / 换一批都重新生成）
  *
- * <p>用于追加时去重。快照边界处、以及快照过期后服务端重算的场景，都可能让同一商品
- * 出现在两页里；H5 列表里出现重复卡片观感极差，必须按标识去重。
- * 统一转字符串比较——itemId 类型会随降级路径漂移（推荐服务返回数字、商城兜底榜返回字符串）。
+ * <p>不传 snapshotId：由服务端按当前实时特征重算，保证「行为产生后 5 秒内影响推荐」。</p>
  */
-const seenIds = new Set<string>()
-
-/** 列表尾部哨兵：进入视口即触发续接 */
-const sentinelRef = ref<HTMLElement | null>(null)
-let observer: IntersectionObserver | null = null
-
-/**
- * 加载榜单
- *
- * @param reset true = 重新生成榜单（首屏 / 换一批）；false = 按快照触底续接
- */
-async function load(reset: boolean) {
+async function load() {
   if (loading.value) {
     return
   }
   loading.value = true
-  if (!reset) {
-    loadFailed.value = false
-  }
   try {
-    const res = await fetchHomeRank(
-      reset
-        ? { pageNum: 1, pageSize: PAGE_SIZE }
-        : { snapshotId: snapshotId.value ?? undefined, pageNum: pageNum.value + 1, pageSize: PAGE_SIZE },
-    )
-    const data = res.data
-    const incoming = data?.items || []
-
-    if (reset) {
-      seenIds.clear()
-      items.value = incoming
-      incoming.forEach((it) => seenIds.add(String(it.itemId)))
-    } else {
-      // 去重后追加：快照边界与重算场景都可能带回已展示过的商品
-      const fresh = incoming.filter((it) => !seenIds.has(String(it.itemId)))
-      fresh.forEach((it) => seenIds.add(String(it.itemId)))
-      items.value = [...items.value, ...fresh]
-      if (fresh.length === 0) {
-        // 本页没有新内容（已滑到快照尾部，或整页都是已展示过的商品）：
-        // 必须在此终止，否则「哨兵仍可见 → 继续请求 → 又返回全重复」会死循环刷接口
-        hasMore.value = false
-        return
-      }
-    }
-
-    snapshotId.value = data?.snapshotId ?? null
-    pageNum.value = data?.pageNum ?? 1
-    hasMore.value = !!data?.hasMore
+    const res = await fetchHomeRank({ pageNum: 1, pageSize: PAGE_SIZE })
+    items.value = (res.data?.items || []).slice(0, PAGE_SIZE)
     failed.value = false
   } catch (e) {
-    console.error('加载推荐信息流失败:', e)
-    // 首屏失败整块隐藏；续接失败保留已展示内容，用户可继续浏览并重试
-    if (reset) {
-      failed.value = true
-      items.value = []
-    } else {
-      loadFailed.value = true
-    }
+    console.error('加载推荐位失败:', e)
+    failed.value = true
+    items.value = []
   } finally {
     loading.value = false
   }
-
-  // 追加后哨兵可能仍在视口内（列表短、屏幕高），此时不产生新的交叉变化，
-  // 观察器不会再回调 —— 重新 observe 强制它按当前状态再评估一次。
-  // 上面「本页无新内容即置 hasMore=false」的终止条件保证这样不会死循环。
-  if (!reset && !loadFailed.value && hasMore.value) {
-    await nextTick()
-    const el = sentinelRef.value
-    if (el && observer) {
-      observer.unobserve(el)
-      observer.observe(el)
-    }
-  }
 }
 
-/**
- * 建立触底观察
- *
- * <p>用 IntersectionObserver 而不是监听 scroll 事件：scroll 会在滚动期间逐帧触发，
- * 长列表下反复读布局会拖慢主线程（本组件旧版的跑马灯就吃过这个亏）。
- *
- * <p>rootMargin 提前 240px 预加载，避免用户滑到底才看到「加载中」的空白。
- */
-function setupObserver() {
-  const sentinel = sentinelRef.value
-  if (!sentinel || typeof IntersectionObserver === 'undefined') {
-    return
-  }
-  observer = new IntersectionObserver(
-    (entries) => {
-      const hit = entries.some((e) => e.isIntersecting)
-      // 到终点或正在加载时不重复触发，避免同一批被连发多次
-      if (hit && hasMore.value && !loading.value && !loadFailed.value) {
-        load(false)
-      }
-    },
-    { rootMargin: '240px 0px' },
-  )
-  observer.observe(sentinel)
-}
-
-onMounted(() => {
-  load(true)
-  setupObserver()
-})
-
-onBeforeUnmount(() => {
-  // 必须断开：否则路由离开首页后，已卸载组件的加载函数仍会被滚动触发
-  observer?.disconnect()
-  observer = null
-})
+onMounted(load)
 
 /**
  * 榜单商品 → 商品卡数据
@@ -211,7 +109,7 @@ function toProduct(item: RankItem): ProductVO {
         </h2>
         <p class="rec-sub">基于你的浏览与购买偏好实时生成</p>
       </div>
-      <button type="button" class="rec-refresh" :disabled="loading" @click="load(true)">
+      <button type="button" class="rec-refresh" :disabled="loading" @click="load">
         换一批
       </button>
     </div>
@@ -226,20 +124,6 @@ function toProduct(item: RankItem): ProductVO {
         />
       </div>
     </n-spin>
-
-    <!-- 触底哨兵：始终渲染，靠 hasMore 控制行为，避免 v-if 反复增删导致观察器失效 -->
-    <div ref="sentinelRef" class="rec-sentinel">
-      <span v-if="loading && items.length > 0" class="rec-sentinel-text">正在加载…</span>
-      <button
-        v-else-if="loadFailed"
-        type="button"
-        class="rec-retry"
-        @click="load(false)"
-      >
-        加载失败，点击重试
-      </button>
-      <span v-else-if="!hasMore && items.length > 0" class="rec-sentinel-text">已经到底了</span>
-    </div>
   </section>
 </template>
 
@@ -293,10 +177,10 @@ function toProduct(item: RankItem): ProductVO {
   cursor: not-allowed;
 }
 
-/* 单列竖向信息流：只保留一列 */
+/* 固定 4 个商品，一行排开 */
 .rec-grid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(4, 1fr);
   gap: 16px;
   /* 纵向留白给卡片 hover 上浮与阴影，避免被容器裁掉 */
   padding: 10px 0 4px;
@@ -329,9 +213,9 @@ function toProduct(item: RankItem): ProductVO {
   color: var(--ds-primary, #2d7ff9);
 }
 
-@media (max-width: 640px) {
+@media (max-width: 900px) {
   .rec-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
     gap: 12px;
   }
 }

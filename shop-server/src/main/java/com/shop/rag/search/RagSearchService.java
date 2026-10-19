@@ -18,9 +18,11 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -159,7 +161,16 @@ public class RagSearchService {
 
         // 5. 富化：拿到 topK 之后才回查展示数据（名称/主图/描述），
         //    回查量从候选池（50~200 条）降到 topK（3~10 条）；两路的 excerpt 由此统一为商品描述
-        List<RagHitVO> hits = ragHitEnricher.enrich(merged);
+        List<RagHitVO> hits = new ArrayList<>(ragHitEnricher.enrich(merged));
+
+        // 字面相关性优先：名称包含完整查询词的命中排前（稳定排序，同组保留 RRF 顺序）。
+        // 向量路会返回语义相近但字面无关的结果（如搜「面包」出方便面），此排序保证
+        // 「坚果」这类字面命中的商品稳定在前；全部不命中时顺序不变。
+        String normalizedQuery = query.trim().toLowerCase(Locale.ROOT);
+        hits.sort(Comparator.comparingInt(hit -> {
+            String name = hit.getName();
+            return name != null && name.toLowerCase(Locale.ROOT).contains(normalizedQuery) ? 0 : 1;
+        }));
 
         // T4 可观测性埋点：耗时/命中数/库存剔除数/富化数/权重/向量路状态。
         // 刻意不记录 query 原文 —— 用户输入可能含 PII（如「138xxxx 用的手机」），

@@ -168,6 +168,26 @@ rag:
     max-query-limit: 200
     # 公开接口未校验 topK，超大值会放大下游 LIMIT 与 Qdrant maxResults
     max-top-k: 100
+  # 关键词路 Elasticsearch（功能编号 001，设计见 docs/specs/001-es-keyword-search）
+  # ES 为关键词路首选，故障时 Router 自动回退 MySQL FULLTEXT —— 不需要为故障改这里的开关。
+  # enabled=false 是「整体回滚到 MySQL FULLTEXT」的开关，与故障降级是两回事。
+  # 服务端版本必须与 pom 的 elasticsearch.version 一致（8.11.4，含 IK 分词器）。
+  elasticsearch:
+    enabled: true
+    scheme: http
+    host: localhost
+    port: 9200
+    index-name: shop_products
+    # 超时刻意偏短：ES 故障必须快速回退，不能拖慢整条 RAG 检索
+    connect-timeout-ms: 500
+    socket-timeout-ms: 1500
+    # 熔断后多久半开重试一次；同时作为「ES 晚启动/索引为空」的自愈检查间隔
+    recovery-interval-ms: 30000
+    bulk-batch-size: 200
+    # 匹配门槛（ES 条件语法）。置空 = 纯 OR（当前默认）。
+    # 2026-10-21 实测：OR / 2<70% / 100% 的 Hit@3 分别为 0.973 / 0.892 / 0.946，
+    # 提高门槛会误伤「轻薄本」这类简称查询，故不启用。详见 evaluation-2026-10-21.md §4.2
+    minimum-should-match: ""
   reconcile:
     # 向量索引对账：发现并修复「索引更新失败 → 商品永久搜不到 / 搜到旧内容」的不一致。
     # ⚠️ 升级后（payload 新增 updateTime）先手动重建一次索引，否则存量索引会被判为陈旧
@@ -203,12 +223,23 @@ rag:
       - ["球鞋", "运动鞋", "跑鞋", "跑步鞋"]
       - ["充电头", "快充头", "充电器"]
       - ["笔记本电脑", "游戏本", "轻薄本"]
+    # 错别字纠正（**单向**：错 → 对，不会反向污染正确词）。
+    # 背景：IK 把「手鸡」切成「手」「鸡」单字，纯 OR 命中「手口湿巾」；ngram 则 0 命中。
+    # 人工兜底，覆盖有限；系统性方案（拼音/编辑距离纠错）另立专项（evaluation-2026-10-21.md §4.3）
+    # 格式与 groups 同构：每组首个是错词，其余是纠正结果。
+    # 不用 Map 是因为 Spring Boot 的 ConfigurationPropertyName 不接受中文 key（实测绑定期报错）
+    corrections:
+      - ["手鸡", "手机"]
+      - ["洗依机", "洗衣机"]
   # RRF 融合参数：默认两路等权 1.0/1.0、k=60（与改造前行为完全一致，可随时回滚）
   # 调高 weight-keyword 会提高关键词路话语权：对字面匹配强的 query 有利，但会压制语义类 query
   rrf:
     k: 60
     weight-vector: 1.0
-    weight-keyword: 2.0   # 评估推荐档位：基础集 Recall@3 0.628→0.711（见 docs/rag-evaluation-report.md §8）
+    # 2026-10-21 由 2.0 回调至 1.5（功能编号 001 评估集实测，见 docs/specs/001-es-keyword-search/evaluation-2026-10-21.md §3.4）：
+    # 旧档 2.0 在新数据 + ES 关键词路上 MRR=0.959，1.0/1.5 均为 0.973。
+    # 2.0 会放大 ES `operator: OR` 的宽泛匹配，压制向量路语义结果；1.5 保留关键词话语权且不损排序。
+    weight-keyword: 1.5
 
 # 本地文件存储（商品图片上传）
 # 定位：单机/演示方案。生产环境应替换为对象存储，接口契约保持一致，仅换 FileStorageService 实现

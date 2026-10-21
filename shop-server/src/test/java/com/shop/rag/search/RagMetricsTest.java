@@ -33,10 +33,36 @@ class RagMetricsTest {
     }
 
     @Test
+    void hitAtK_shouldMarkHitWhenAnyExpectedInTopK() {
+        List<Long> expected = List.of(3L, 5L);
+        List<Long> retrieved = List.of(1L, 3L, 2L, 5L, 7L);
+
+        assertEquals(1.0, RagMetrics.hitAtK(expected, retrieved, 3), 1e-9);   // 3 在 top-3
+        assertEquals(0.0, RagMetrics.hitAtK(List.of(9L), retrieved, 5), 1e-9);
+        assertEquals(0.0, RagMetrics.hitAtK(expected, List.of(), 5), 1e-9);
+        // 期望集很大时 Hit@K 不被稀释：40 个期望里命中 1 个仍算成功
+        assertEquals(1.0, RagMetrics.hitAtK(
+                List.of(100L, 3L, 101L, 102L, 103L, 104L), retrieved, 3), 1e-9);
+    }
+
+    @Test
+    void mrrAtFirstHit_shouldOnlyRewardFirstHit() {
+        List<Long> expected = List.of(3L, 5L);
+        List<Long> retrieved = List.of(1L, 3L, 2L, 5L, 7L);
+
+        // 首个命中 3 排第 2 → 1/2（与 mrr 的 0.375 不同）
+        assertEquals(0.5, RagMetrics.mrrAtFirstHit(expected, retrieved), 1e-9);
+        assertEquals(0.0, RagMetrics.mrrAtFirstHit(List.of(9L), retrieved), 1e-9);
+        assertEquals(1.0, RagMetrics.mrrAtFirstHit(expected, List.of(3L, 5L)), 1e-9);
+    }
+
+    @Test
     void emptyOrNullExpected_shouldReturnZero() {
         assertEquals(0.0, RagMetrics.recallAtK(List.of(), List.of(1L), 5), 1e-9);
         assertEquals(0.0, RagMetrics.mrr(List.of(), List.of(1L)), 1e-9);
         assertEquals(0.0, RagMetrics.recallAtK(null, null, 5), 1e-9);
         assertEquals(0.0, RagMetrics.mrr(null, null), 1e-9);
+        assertEquals(0.0, RagMetrics.hitAtK(List.of(), List.of(1L), 5), 1e-9);
+        assertEquals(0.0, RagMetrics.mrrAtFirstHit(null, List.of(1L)), 1e-9);
     }
 }

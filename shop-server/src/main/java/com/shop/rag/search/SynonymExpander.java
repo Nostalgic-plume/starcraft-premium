@@ -24,6 +24,10 @@ import java.util.Set;
  * <p>
  * 匹配采用**整词相等**语义：query 整串等于词表词，或按分隔符切段后某段等于词表词。
  * 不做子串匹配——否则「手机壳」会被「手机」命中，造成错误的词义扩散。
+ * <p>
+ * 另支持**单向错别字纠正**（{@code rag.synonym.corrections}）：错词 → 正确词，只追加正确词，
+ * 绝不反向。它不并入 {@link #synonymIndex} 的原因：同义词组是双向的，
+ * 把「手鸡」和「手机」放同一组会让搜「手机」时混入「手鸡」。
  *
  * @author shop
  */
@@ -43,6 +47,9 @@ public class SynonymExpander {
     /** 词 → 同义词集合（不含自身），双向索引 */
     private final Map<String, Set<String>> synonymIndex = new HashMap<>();
 
+    /** 错词 → 正确词集合（**单向**），与 synonymIndex 分开维护，避免反向污染 */
+    private final Map<String, Set<String>> correctionIndex = new HashMap<>();
+
     /**
      * 构建双向同义词索引
      * <p>
@@ -52,6 +59,9 @@ public class SynonymExpander {
     @PostConstruct
     void buildIndex() {
         synonymIndex.clear();
+        correctionIndex.clear();
+        buildCorrectionIndex();
+
         List<List<String>> groups = properties.getGroups();
         if (groups == null || groups.isEmpty()) {
             log.warn("同义词表为空，关键词路不做同义词扩展");
@@ -97,12 +107,14 @@ public class SynonymExpander {
         String trimmed = query.trim();
 
         LinkedHashSet<String> additions = new LinkedHashSet<>();
-        // 1. 整串命中（query 本身就是词表词）
+        // 1. 错别字纠正（单向，整串 + 分段都试）
+        addCorrections(trimmed, additions);
+        // 2. 整串命中（query 本身就是词表词）
         Set<String> direct = synonymIndex.get(trimmed);
         if (direct != null) {
             additions.addAll(direct);
         } else {
-            // 2. 按分隔符切段，逐段整词命中
+            // 3. 按分隔符切段，逐段整词命中
             for (String token : trimmed.split(TOKEN_DELIMITER)) {
                 Set<String> synonyms = synonymIndex.get(token);
                 if (synonyms != null) {
@@ -120,6 +132,64 @@ public class SynonymExpander {
             return query;
         }
         return appendWithLimit(trimmed, additions);
+    }
+
+    /**
+     * 单向错别字纠正：把 query 中命中的错词替换词（正确词）追加进 additions
+     * <p>
+     * 只做「错 → 对」，不做反向 —— 这是与同义词组的本质区别。
+     * 整串与分段都尝试，覆盖「手鸡」和「手鸡 多少钱」两种输入。
+     *
+     * @param text      已 trim 的 query
+     * @param additions 待追加集合
+     */
+    private void addCorrections(String text, Set<String> additions) {
+        if (correctionIndex.isEmpty()) {
+            return;
+        }
+        Set<String> whole = correctionIndex.get(text);
+        if (whole != null) {
+            additions.addAll(whole);
+        }
+        for (String token : text.split(TOKEN_DELIMITER)) {
+            Set<String> corrected = correctionIndex.get(token);
+            if (corrected != null) {
+                additions.addAll(corrected);
+            }
+        }
+    }
+
+    /**
+     * 构建单向纠错索引：每组首个词是错词，其余是纠正结果
+     * <p>
+     * 配置格式与 {@link #synonymIndex} 同构（{@code List<List<String>>}），
+     * 因为 Spring Boot 的 {@code ConfigurationPropertyName} 不接受中文 Map key。
+     */
+    private void buildCorrectionIndex() {
+        List<List<String>> corrections = properties.getCorrections();
+        if (corrections == null || corrections.isEmpty()) {
+            return;
+        }
+        int validGroups = 0;
+        for (List<String> group : corrections) {
+            if (group == null || group.size() < 2) {
+                continue;
+            }
+            List<String> words = group.stream()
+                    .filter(word -> word != null && !word.isBlank())
+                    .map(String::trim)
+                    .distinct()
+                    .toList();
+            if (words.size() < 2) {
+                continue;
+            }
+            Set<String> targets = correctionIndex.computeIfAbsent(words.get(0), key -> new LinkedHashSet<>());
+            for (int i = 1; i < words.size(); i++) {
+                targets.add(words.get(i));
+            }
+            validGroups++;
+        }
+        log.info("错别字纠正表加载完成: 有效 {} 组, 覆盖 {} 个错词", validGroups, correctionIndex.size());
     }
 
     /**

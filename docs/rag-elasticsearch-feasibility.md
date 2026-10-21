@@ -124,7 +124,16 @@ ES 以「本地构建镜像 + compose 编排」方式并入 `docker-compose.yml`
 | 中文分词 | `POST /_analyze {"analyzer":"ik_max_word"}` | `雅诗兰黛小棕瓶精华第七代50ml` → `雅诗兰黛 / 小 / 棕 / 瓶 / 精华 / 第七代 ...`；同句 standard 分词器切成 `精` `华` 两字，对比明显 |
 | 不回归 | `docker compose up -d` | 6 个容器齐活，既有 5 个容器均 `Running`，未被重建或重启 |
 
-### 8.3 尚未完成：Java 侧接入
+### 8.3 Java 侧接入：已完成（2026-10-21，功能编号 001）
 
-**compose 就绪 ≠ 检索可切换**。当前 Java 代码未引用 ES，仍需：新增 ES 依赖与连接配置 → 建索引（`ik_max_word` 映射，字段对齐
-`ft_product_search`）→ 实现 ES 检索并替换/并联关键词路 → 用现有评估集回归对比（权重基线 1.0/2.0）。属跨模块改造，按 L3 先出设计文档与计划书再动手。
+设计与计划见 `docs/specs/001-es-keyword-search/`（spec / design / plan）。
+
+- **可切换**：`rag.elasticsearch.enabled` 控制；ES 为关键词路首选，故障自动回退 MySQL FULLTEXT
+  （连续 3 次失败熔断 30s，半开重试成功自动恢复）。
+- **实现**：官方 `elasticsearch-java:8.11.4`（**未**使用 spring-data-elasticsearch），
+  `EsProductIndexer`（索引/重建/增量）+ `EsKeywordSearchService`（BM25 + 过滤下推）+
+  `KeywordSearchRouter`（路由/熔断）+ `ProductIndexSyncService`（Qdrant/ES 双写门面）。
+- **实测**：`ik_max_word`/`ik_smart` 分词符合预期；「剃须刀」ES 命中 279 且 BM25=20.3；
+  停 ES 后接口仍返回结果、日志标记 `fulltext(降级)`；319 个测试全绿。
+- **⚠️ 评估集失效**：`RagEvaluationTest` 的期望 ID 与当前商品数据完全对不上（基线代码跑同样只有
+  Recall@3=0.033），改造前后的指标均不可用于对比。评估集需在商品数据稳定后重建。

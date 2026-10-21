@@ -64,7 +64,7 @@ class RagDisplayableFilterTest {
     @Mock
     private QdrantEmbeddingStore embeddingStore;
     @Mock
-    private KeywordSearchService keywordSearchService;
+    private KeywordSearchRouter keywordSearchRouter;
     @Mock
     private SynonymExpander synonymExpander;
     @Mock
@@ -76,7 +76,7 @@ class RagDisplayableFilterTest {
 
     @BeforeEach
     void setUp() {
-        ragSearchService = new RagSearchService(embeddingModel, embeddingStore, keywordSearchService,
+        ragSearchService = new RagSearchService(embeddingModel, embeddingStore, keywordSearchRouter,
                 synonymExpander, new RrfProperties(), new RagProperties(), new RagSearchProperties(),
                 skuPriceResolver, ragHitEnricher);
         when(synonymExpander.expand(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -122,7 +122,7 @@ class RagDisplayableFilterTest {
         when(embeddingModel.embedAll(anyList())).thenReturn(Response.from(List.of(queryVector())));
         when(embeddingStore.search(any(EmbeddingSearchRequest.class)))
                 .thenReturn(new EmbeddingSearchResult<>(vectorMatches));
-        when(keywordSearchService.searchByKeyword(anyString(), anyInt(), any(), any(), any()))
+        when(keywordSearchRouter.searchByKeyword(anyString(), anyInt(), any(), any(), any()))
                 .thenReturn(keywordIds.stream().map(RagDisplayableFilterTest::keywordHit).toList());
     }
 

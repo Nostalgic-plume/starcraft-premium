@@ -52,7 +52,7 @@ class RagFallbackTest {
     @Mock
     private QdrantEmbeddingStore embeddingStore;
     @Mock
-    private KeywordSearchService keywordSearchService;
+    private KeywordSearchRouter keywordSearchRouter;
     @Mock
     private SynonymExpander synonymExpander;
     @Mock
@@ -65,7 +65,7 @@ class RagFallbackTest {
     @BeforeEach
     void setUp() {
         ragSearchService = new RagSearchService(
-                embeddingModel, embeddingStore, keywordSearchService, synonymExpander,
+                embeddingModel, embeddingStore, keywordSearchRouter, synonymExpander,
                 new RrfProperties(), new RagProperties(), new RagSearchProperties(),
                 skuPriceResolver, ragHitEnricher);
         // 库存查询不可用（空 Map → 不过滤），聚焦降级链路本身
@@ -90,7 +90,7 @@ class RagFallbackTest {
                     .toList();
         });
         // 关键词路固定命中 1 条，用于断言「降级后仍有结果」
-        when(keywordSearchService.searchByKeyword(anyString(), anyInt(), any(), any(), any()))
+        when(keywordSearchRouter.searchByKeyword(anyString(), anyInt(), any(), any(), any()))
                 .thenReturn(List.of(new RagCandidate(PRODUCT_ID, 0.9)));
     }
 

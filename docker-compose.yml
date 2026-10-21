@@ -109,6 +109,10 @@ services:
         hard: -1
     volumes:
       - es-data:/usr/share/elasticsearch/data
+      # 功能编号 001：IK 自定义词典（plugins/analysis-ik/config/my_dict.dic）当前**未挂载**，
+      # 容器重建后词典会丢失。首版不依赖自定义词典；需要时补一行：
+      #   - ./docker/elasticsearch/ik-config:/usr/share/elasticsearch/plugins/analysis-ik/config:ro
+      # 并重启容器（词典热更新另见 IKAnalyzer.cfg.xml 的 remote_ext_dict）
     healthcheck:
       # 镜像自带 curl；单节点副本分片必然 unassigned，故 yellow 即视为可用
       test: ["CMD-SHELL", "curl -fs 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null || exit 1"]

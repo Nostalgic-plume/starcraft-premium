@@ -51,7 +51,7 @@ class RagSearchServiceTest {
     @Mock
     private QdrantEmbeddingStore embeddingStore;
     @Mock
-    private KeywordSearchService keywordSearchService;
+    private KeywordSearchRouter keywordSearchRouter;
     @Mock
     private SynonymExpander synonymExpander;
     @Mock
@@ -63,7 +63,7 @@ class RagSearchServiceTest {
 
     @BeforeEach
     void setUp() {
-        ragSearchService = new RagSearchService(embeddingModel, embeddingStore, keywordSearchService,
+        ragSearchService = new RagSearchService(embeddingModel, embeddingStore, keywordSearchRouter,
                 synonymExpander, new RrfProperties(), new RagProperties(), new RagSearchProperties(),
                 skuPriceResolver, ragHitEnricher);
         when(synonymExpander.expand(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -101,7 +101,7 @@ class RagSearchServiceTest {
         when(embeddingModel.embedAll(anyList())).thenReturn(Response.from(List.of(queryVector())));
         when(embeddingStore.search(any(EmbeddingSearchRequest.class)))
                 .thenReturn(new EmbeddingSearchResult<TextSegment>(List.of()));
-        when(keywordSearchService.searchByKeyword(anyString(), anyInt(), any(), any(), any()))
+        when(keywordSearchRouter.searchByKeyword(anyString(), anyInt(), any(), any(), any()))
                 .thenReturn(List.of());
 
         ragSearchService.search(query, topK, null, null, null);
@@ -119,7 +119,7 @@ class RagSearchServiceTest {
                 "topK=5 → 候选池应为下限 50（修复前这里是 5）");
 
         // 关键词路必须拿到同一个候选池，否则两路在 RRF 中不对等
-        verify(keywordSearchService).searchByKeyword(eq("手机"), eq(50), any(), any(), any());
+        verify(keywordSearchRouter).searchByKeyword(eq("手机"), eq(50), any(), any(), any());
     }
 
     @Test
@@ -133,7 +133,7 @@ class RagSearchServiceTest {
     void illegalTopKShouldNotThrow() {
         // 向量路降级，聚焦入参兜底本身
         when(embeddingModel.embedAll(anyList())).thenThrow(new RuntimeException("跳过向量路"));
-        when(keywordSearchService.searchByKeyword(anyString(), anyInt(), any(), any(), any()))
+        when(keywordSearchRouter.searchByKeyword(anyString(), anyInt(), any(), any(), any()))
                 .thenReturn(List.of(new RagCandidate(1L, 0.9)));
 
         List<RagHitVO> hits = ragSearchService.search("手机", -5, null, null, null);

@@ -32,7 +32,7 @@ import com.shop.model.entity.ShopDO;
 import com.shop.model.entity.SkuDO;
 import com.shop.model.query.ProductPageQuery;
 import com.shop.model.vo.ProductVO;
-import com.shop.rag.index.ProductIndexer;
+import com.shop.rag.index.ProductIndexSyncService;
 import com.shop.service.ProductService;
 import com.shop.service.StockCacheService;
 import com.google.common.hash.BloomFilter;
@@ -68,7 +68,8 @@ public class ProductServiceImpl implements ProductService {
     private final BrandMapper brandMapper;
     private final ShopMapper shopMapper;
     private final OrderItemMapper orderItemMapper;
-    private final ProductIndexer productIndexer;
+    /** 索引同步门面：一次调用同时维护 Qdrant 向量索引与 ES 关键词索引（功能编号 001） */
+    private final ProductIndexSyncService productIndexSyncService;
     private final StockCacheService stockCacheService;
     private final BloomFilter<Long> productBloomFilter;
     private final RedisCache redisCache;
@@ -159,7 +160,7 @@ public class ProductServiceImpl implements ProductService {
         // 影响面：管理员新增的商品 status=1，会真正入索引，缺陷静默生效（无异常无日志）；
         // 商家新增的 status=0 被 addOrUpdate 首行拦掉，属无害的无用调用。
         try {
-            productIndexer.addOrUpdate(product);
+            productIndexSyncService.addOrUpdate(product);
         } catch (Exception e) {
             log.warn("RAG 索引同步异常（不影响主流程）: {}", e.getMessage());
         }
@@ -231,9 +232,9 @@ public class ProductServiceImpl implements ProductService {
         // 同步 RAG 索引（失败只告警，不阻断主流程）
         try {
             if (product.getStatus() != null && product.getStatus() == ProductConstants.STATUS_ON_SHELF) {
-                productIndexer.addOrUpdate(product);
+                productIndexSyncService.addOrUpdate(product);
             } else {
-                productIndexer.remove(id);
+                productIndexSyncService.remove(id);
             }
         } catch (Exception e) {
             log.warn("RAG 索引同步异常（不影响主流程）: {}", e.getMessage());
@@ -468,9 +469,9 @@ public class ProductServiceImpl implements ProductService {
         // 同步 RAG 索引
         try {
             if (status == ProductConstants.STATUS_ON_SHELF) {
-                productIndexer.addOrUpdate(product);
+                productIndexSyncService.addOrUpdate(product);
             } else {
-                productIndexer.remove(id);
+                productIndexSyncService.remove(id);
             }
         } catch (Exception e) {
             log.warn("RAG 索引同步异常（不影响主流程）: {}", e.getMessage());

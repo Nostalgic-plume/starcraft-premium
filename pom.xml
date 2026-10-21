@@ -57,6 +57,14 @@
         <rocketmq-starter.version>2.2.3</rocketmq-starter.version>
         <rocketmq-client.version>4.9.7</rocketmq-client.version>
         <spring-dotenv.version>4.0.0</spring-dotenv.version>
+        <!--
+            Elasticsearch 客户端版本：必须与 compose 中的服务端镜像（shop-elasticsearch:8.11.4）严格一致。
+            Spring Boot 3.2.12 的 BOM 默认管理为 8.10.x，8.x 客户端带 product check，
+            minor 版本不一致会直接拒绝请求 —— 故此处覆盖 Boot 的同名 property（继承模式下生效），
+            并在下方 dependencyManagement 显式锁两个坐标（客户端 + 底层 rest-client），防止传递依赖漂移。
+            功能编号：001（docs/specs/001-es-keyword-search）
+        -->
+        <elasticsearch.version>8.11.4</elasticsearch.version>
     </properties>
 
     <!-- 版本统一在此管理，子模块引用时不写版本号 -->
@@ -207,6 +215,20 @@
                 <groupId>me.paulschwarz</groupId>
                 <artifactId>spring-dotenv</artifactId>
                 <version>${spring-dotenv.version}</version>
+            </dependency>
+
+            <!-- Elasticsearch 官方 Java API Client（功能编号 001）
+                 显式锁两个坐标：客户端本身 + 底层 rest-client。只锁前者时，
+                 后者仍可能被 Boot BOM 解析成旧 minor 版本，运行期 product check 失败。 -->
+            <dependency>
+                <groupId>co.elastic.clients</groupId>
+                <artifactId>elasticsearch-java</artifactId>
+                <version>${elasticsearch.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.elasticsearch.client</groupId>
+                <artifactId>elasticsearch-rest-client</artifactId>
+                <version>${elasticsearch.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

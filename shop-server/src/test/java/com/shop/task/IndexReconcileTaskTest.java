@@ -3,7 +3,7 @@ package com.shop.task;
 import com.shop.mapper.ProductMapper;
 import com.shop.model.entity.ProductDO;
 import com.shop.rag.config.IndexReconcileProperties;
-import com.shop.rag.index.ProductIndexer;
+import com.shop.rag.index.ProductIndexSyncService;
 import com.shop.rag.index.QdrantCollectionHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -51,7 +51,7 @@ class IndexReconcileTaskTest {
     @Mock
     private ProductMapper productMapper;
     @Mock
-    private ProductIndexer productIndexer;
+    private ProductIndexSyncService productIndexSyncService;
     @Mock
     private QdrantCollectionHelper qdrantCollectionHelper;
 
@@ -64,7 +64,7 @@ class IndexReconcileTaskTest {
         // 修复类用例放开阈值：小数据集下 1 条差异就会超过默认 20%，
         // 阈值保护本体会单独用例覆盖
         properties.setMaxAutoFixRatio(1.0);
-        task = new IndexReconcileTask(productMapper, productIndexer, qdrantCollectionHelper, properties);
+        task = new IndexReconcileTask(productMapper, productIndexSyncService, qdrantCollectionHelper, properties);
     }
 
     /** 构造商品：updateTime 按系统时区还原，与 ProductIndexer.toEpochMillis 保持同一转换 */
@@ -91,7 +91,7 @@ class IndexReconcileTaskTest {
 
         task.reconcile();
 
-        verifyNoInteractions(productIndexer);
+        verifyNoInteractions(productIndexSyncService);
     }
 
     @Test
@@ -103,7 +103,7 @@ class IndexReconcileTaskTest {
 
         task.reconcile();
 
-        verify(productIndexer).addOrUpdate(any(ProductDO.class));
+        verify(productIndexSyncService).addOrUpdate(any(ProductDO.class));
     }
 
     @Test
@@ -114,8 +114,8 @@ class IndexReconcileTaskTest {
 
         task.reconcile();
 
-        verify(productIndexer).remove(99L);
-        verify(productIndexer, never()).addOrUpdate(any(ProductDO.class));
+        verify(productIndexSyncService).remove(99L);
+        verify(productIndexSyncService, never()).addOrUpdate(any(ProductDO.class));
     }
 
     @Test
@@ -127,7 +127,7 @@ class IndexReconcileTaskTest {
 
         task.reconcile();
 
-        verify(productIndexer).addOrUpdate(any(ProductDO.class));
+        verify(productIndexSyncService).addOrUpdate(any(ProductDO.class));
     }
 
     @Test
@@ -141,7 +141,7 @@ class IndexReconcileTaskTest {
 
         task.reconcile();
 
-        verify(productIndexer).addOrUpdate(any(ProductDO.class));
+        verify(productIndexSyncService).addOrUpdate(any(ProductDO.class));
     }
 
     @Test
@@ -156,7 +156,7 @@ class IndexReconcileTaskTest {
 
         task.reconcile();
 
-        verifyNoInteractions(productIndexer);
+        verifyNoInteractions(productIndexSyncService);
     }
 
     @Test
@@ -167,7 +167,7 @@ class IndexReconcileTaskTest {
 
         task.reconcile();
 
-        verifyNoInteractions(productIndexer);
+        verifyNoInteractions(productIndexSyncService);
         verify(productMapper, never()).selectById(anyLong());
     }
 
@@ -178,6 +178,6 @@ class IndexReconcileTaskTest {
 
         task.reconcile();
 
-        verifyNoInteractions(productMapper, qdrantCollectionHelper, productIndexer);
+        verifyNoInteractions(productMapper, qdrantCollectionHelper, productIndexSyncService);
     }
 }

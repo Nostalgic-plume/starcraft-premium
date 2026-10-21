@@ -5,6 +5,7 @@ import com.shop.constant.ProductConstants;
 import com.shop.mapper.ProductMapper;
 import com.shop.model.entity.ProductDO;
 import com.shop.rag.config.IndexReconcileProperties;
+import com.shop.rag.index.ProductIndexSyncService;
 import com.shop.rag.index.ProductIndexer;
 import com.shop.rag.index.QdrantCollectionHelper;
 import lombok.RequiredArgsConstructor;
@@ -38,7 +39,8 @@ import java.util.Set;
 public class IndexReconcileTask {
 
     private final ProductMapper productMapper;
-    private final ProductIndexer productIndexer;
+    /** 索引同步门面：对账修复同时覆盖 Qdrant 与 ES（功能编号 001） */
+    private final ProductIndexSyncService productIndexSyncService;
     private final QdrantCollectionHelper qdrantCollectionHelper;
     private final IndexReconcileProperties properties;
 
@@ -118,7 +120,7 @@ public class IndexReconcileTask {
             }
             for (Long productId : extra) {
                 try {
-                    productIndexer.remove(productId);
+                    productIndexSyncService.remove(productId);
                     fixed++;
                 } catch (Exception e) {
                     log.warn("[索引对账] 删除多余索引失败 productId={}: {}", productId, e.getMessage());
@@ -143,10 +145,10 @@ public class IndexReconcileTask {
             ProductDO product = productMapper.selectById(productId);
             if (product == null) {
                 // 查不到 = 已被删除 / 对账期间下架 —— 按「多余」处理，幂等
-                productIndexer.remove(productId);
+                productIndexSyncService.remove(productId);
                 return true;
             }
-            productIndexer.addOrUpdate(product);
+            productIndexSyncService.addOrUpdate(product);
             return true;
         } catch (Exception e) {
             log.warn("[索引对账] 重建商品索引失败 productId={}: {}", productId, e.getMessage());

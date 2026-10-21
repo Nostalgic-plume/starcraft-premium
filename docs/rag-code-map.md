@@ -1,28 +1,31 @@
 # RAG 代码地图（`com.shop.rag`）
 
-> 2026-10-08 包结构重构后生成（2026-10-15 校订类数与 `search` 包清单）。32 个类按职责分入 6 个子包，本表作为日常导航与讲项目的入口。
-> 设计依据：[`rag-package-refactor-design.md`](rag-package-refactor-design.md)
+> 2026-10-08 包结构重构后生成（2026-10-15 校订类数与 `search` 包清单；2026-10-21 新增 ES 关键词路相关 5 类）。37 个类按职责分入 6 个子包，本表作为日常导航与讲项目的入口。
+> 设计依据：[`rag-package-refactor-design.md`](rag-package-refactor-design.md)、[`specs/001-es-keyword-search/`](specs/001-es-keyword-search/)
 
 ## 一眼看全貌
 
 ```
 com.shop.rag
-├── search/       检索主链路（13 类）
-├── index/        向量索引构建与 Qdrant 集合管理（2 类）
+├── search/       检索主链路（16 类）
+├── index/        向量 / ES 索引构建与 Qdrant 集合管理（4 类）
 ├── chat/         智能客服编排：SSE + 意图路由 + workflow + 工具（9 类）
 ├── memory/       对话记忆与历史持久化（3 类）
 ├── resilience/   熔断与可观测（2 类）
-└── config/       Bean 装配与配置绑定（3 类）
+└── config/       Bean 装配与配置绑定（5 类）
 ```
 
 依赖方向（单向无环）：`config → index → search`，`chat → search / memory / resilience`
 
-## 一、`search` — 检索（13 类）
+## 一、`search` — 检索（16 类）
 
 | 类 | 职责 |
 |----|------|
 | `RagSearchService` | 混合检索入口：向量路 + 关键词路并行 → 加权 RRF 融合；两路候选池对齐（`topK×5` clamp 50~200）；嵌入模型故障降级为纯关键词 |
-| `KeywordSearchService` | MySQL FULLTEXT 关键词路（同义词扩展 + 分类/价格过滤） |
+| `KeywordSearchRouter` | 关键词路路由：ES 优先，失败自动回退 MySQL FULLTEXT；连续 3 次失败熔断 30s，半开重试（功能编号 001） |
+| `EsKeywordSearchService` | ES BM25 关键词路：`multi_match`（名称^3/品牌^2/分类^1.5/描述）+ 分类/价格/状态过滤下推；失败抛 `KeywordSearchUnavailableException`（功能编号 001） |
+| `KeywordSearchUnavailableException` | ES 不可用异常——与「命中 0 条」严格区分，供路由触发回退 |
+| `KeywordSearchService` | MySQL FULLTEXT 关键词路（同义词扩展 + 分类/价格过滤），现作为 ES 的兜底 |
 | `QueryRewriter` | LLM 结合对话历史把短 query 改写为独立检索关键词（补指代 + 补同义表述） |
 | `SynonymExpander` | 领域同义词扩展（只作用于关键词路，避免稀释向量语义） |
 | `SynonymProperties` | `rag.synonym.*` 配置绑定 |
@@ -35,11 +38,13 @@ com.shop.rag
 | `RagSearchResult` | 混合检索结果契约：命中列表 + `allOutOfStock`（区分「真没搜到」与「全售罄被剔除」两种空结果） |
 | `RagHitVO` | 检索结果视图（供 Controller / 客服链路消费） |
 
-## 二、`index` — 索引（2 类）
+## 二、`index` — 索引（4 类）
 
 | 类 | 职责 |
 |----|------|
 | `ProductIndexer` | 商品向量索引构建：启动全量 + 增量增删改，确定性 pointId |
+| `EsProductIndexer` | ES 商品索引：mapping（ik_max_word/ik_smart）、全量重建、增量 upsert/delete、启动空索引自动导入与定时自愈（功能编号 001） |
+| `ProductIndexSyncService` | 索引同步门面：一次调用扇出到 Qdrant + ES，两端失败互相隔离；商品服务/对账任务/管理接口的唯一入口 |
 | `QdrantCollectionHelper` | Qdrant 集合管理（REST 6333）：建集合、维度校验、count |
 
 ## 三、`chat` — 对话编排（9 类）
@@ -71,11 +76,13 @@ com.shop.rag
 | `CircuitBreaker` | 熔断器：连续 3 次失败熔断 30s，半开重试（只作用于生成层） |
 | `ToolCallLogger` | 工具调用异步日志（userId / 工具名 / 耗时 / 成败，不记 PII） |
 
-## 六、`config` — 配置（3 类）
+## 六、`config` — 配置（5 类）
 
 | 类 | 职责 |
 |----|------|
 | `RagConfig` | Bean 装配：嵌入模型、主/备流式对话模型、Qdrant 向量存储；启动确保集合存在 |
+| `EsClientConfig` | ES 官方 Java Client 装配（RestClient + Transport，懒连接，ES 未启动不阻断应用启动） |
+| `RagElasticsearchProperties` | `rag.elasticsearch.*` 绑定（开关/连接/超时/半开间隔/批量） |
 | `RagProperties` | `rag.qdrant.*` 绑定（`dimension` 是**全链路维度唯一事实来源**） |
 | `RagLlmProperties` | `rag.llm.*` 绑定 + 空值归一化 + 启动端点回显与告警 |
 
@@ -83,7 +90,9 @@ com.shop.rag
 
 | 我要找… | 去哪 |
 |---------|------|
-| 检索为什么召回不到 | `search/RagSearchService` → `search/KeywordSearchService` → `search/SynonymExpander` |
+| 检索为什么召回不到 | `search/RagSearchService` → `search/KeywordSearchRouter`（ES/MySQL）→ `search/SynonymExpander` |
+| 关键词路走的是 ES 还是 FULLTEXT | 日志 `[RAG指标] ... 关键词路=`；`search/KeywordSearchRouter`；管理接口 `/api/admin/rag/status` 的 `keywordRoute` |
+| ES 索引怎么建 / 为什么没数据 | `index/EsProductIndexer`（mapping/自动导入/自愈）；`POST /api/admin/rag/rebuild` |
 | 用户说的词和商品名不一致 | `search/SynonymExpander`（词表）+ `search/QueryRewriter`（LLM 兜底） |
 | 客服回答慢 / 首字延迟 | `chat/ChatService`（心跳、Query 改写、检索、生成四段） |
 | 工具调用死循环 | `memory/MySqlChatMemoryStore`（agent loop 缓存） |
@@ -95,6 +104,6 @@ com.shop.rag
 
 | 子包 | 测试 |
 |------|------|
-| `search/` | `RagSearchServiceTest`、`RagFallbackTest`、`KeywordSearchServiceTest`、`RrfMergerTest`、`RrfPropertiesBindingTest`、`SynonymExpanderTest`、`SynonymPropertiesBindingTest`、`RagHitEnricherTest`、`RagStockFilterTest`、`SkuPriceResolverTest`、`RagMetricsTest`、`RagMetrics`（辅助类）、`MyBatisPlusTestSupport`（辅助类）、`RagEvaluationTest`（`@SpringBootTest`，需真实 Qdrant/BGE-m3）、`RagSearchExcerptContractTest`（`@SpringBootTest`，需真实检索链路） |
+| `search/` | `RagSearchServiceTest`、`RagFallbackTest`、`KeywordSearchServiceTest`、`KeywordSearchRouterTest`（ES/MySQL 路由与熔断）、`RrfMergerTest`、`RrfPropertiesBindingTest`、`SynonymExpanderTest`、`SynonymPropertiesBindingTest`、`RagHitEnricherTest`、`RagStockFilterTest`、`SkuPriceResolverTest`、`RagMetricsTest`、`RagMetrics`（辅助类）、`MyBatisPlusTestSupport`（辅助类）、`RagEvaluationTest`（`@SpringBootTest`，需真实 Qdrant/BGE-m3）、`RagSearchExcerptContractTest`（`@SpringBootTest`，需真实检索链路） |
 | `index/` | `ProductIndexerTest`、`ProductIndexerRebuildTest`、`QdrantGrpcCompatibilityTest` |
 | `chat/` | `ChatIntentResolverTest`、`CancelOrderWorkflowTest`、`OrderQueryWorkflowTest`、`ChatServiceClearConversationTest`、`BackupModelSmokeTest`、`DeepSeekAiServicesSmokeTest` |

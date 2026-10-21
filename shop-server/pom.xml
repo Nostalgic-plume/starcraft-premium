@@ -107,6 +107,15 @@
             <artifactId>langchain4j-qdrant</artifactId>
         </dependency>
 
+        <!-- ==================== Elasticsearch（RAG 关键词路，功能编号 001） ====================
+             用官方 Java API Client 而非 spring-boot-starter-data-elasticsearch：
+             后者会引入 Repository 抽象与自动配置，与本项目 MyBatis-Plus + 手写 SDK 的风格冲突。
+             版本由根 pom 的 elasticsearch.version 统一管理，必须与 compose 服务端 8.11.4 一致。 -->
+        <dependency>
+            <groupId>co.elastic.clients</groupId>
+            <artifactId>elasticsearch-java</artifactId>
+        </dependency>
+
         <!-- ==================== RocketMQ（商城订单/消息链路） ==================== -->
         <dependency>
             <groupId>org.apache.rocketmq</groupId>

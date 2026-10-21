@@ -45,7 +45,8 @@ class RrfPropertiesBindingTest {
 
         assertEquals(60, properties.getK(), "应绑定 k=60");
         assertEquals(1.0, properties.getWeightVector(), 1e-9, "应绑定 weight-vector=1.0");
-        assertEquals(2.0, properties.getWeightKeyword(), 1e-9, "应绑定 weight-keyword=2.0（评估推荐档位）");
+        // 2026-10-21：由 2.0 回调至 1.5（新评估集实测 MRR 0.959→0.973，见 evaluation-2026-10-21.md §3.4）
+        assertEquals(1.5, properties.getWeightKeyword(), 1e-9, "应绑定 weight-keyword=1.5");
     }
 
     @Test

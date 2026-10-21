@@ -31,6 +31,27 @@ class SynonymExpanderTest {
                 List.of("球鞋", "运动鞋", "跑鞋", "跑步鞋"));
     }
 
+    /**
+     * 错别字纠正是**单向**的：错词 → 正确词，正确词绝不会反向扩展出错词。
+     * <p>
+     * 若把「手鸡」「手机」放进同义词组（双向），搜「手机」时会混入「手鸡」，
+     * 而 IK 会把「手鸡」切成单字「手」「鸡」，导致搜手机命中「手口湿巾」。
+     */
+    @Test
+    @DisplayName("错别字纠正：只做「错 → 对」，不反向污染正确词")
+    void corrections_shouldBeOneWay() {
+        SynonymProperties properties = new SynonymProperties();
+        properties.setEnabled(true);
+        properties.setGroups(List.of(List.of("充电宝", "移动电源")));
+        properties.setCorrections(List.of(List.of("手鸡", "手机")));
+        SynonymExpander expander = new SynonymExpander(properties);
+        expander.buildIndex();
+
+        assertEquals("手鸡 手机", expander.expand("手鸡"), "错词应追加正确词");
+        assertEquals("手机", expander.expand("手机"), "正确词不得反向扩展出错词");
+        assertEquals("手鸡 多少钱 手机", expander.expand("手鸡 多少钱"), "分段也应纠错");
+    }
+
     @Test
     @DisplayName("整串命中：原词在前，同义词按组内顺序追加")
     void expand_shouldAppendSynonymsForWholeQuery() {

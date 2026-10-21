@@ -33,7 +33,8 @@ import java.util.stream.Collectors;
  * 双路并行检索 + 加权 RRF 合并：
  * ┌─ 向量化（本地 TEI / BGE-M3）→ 官方 QdrantEmbeddingStore.search() ─┐
  * │                                                            │→ 加权 RRF 合并 → Top-K
- * └─ MySQL FULLTEXT 关键词检索（同义词扩展 + 分类/价格过滤）───┘
+ * └─ 关键词检索（同义词扩展 + 分类/价格过滤）───────────────────┘
+ *    └─ ES BM25 首选，失败自动回退 MySQL FULLTEXT（功能编号 001）
  * <p>
  * 两路候选池对齐：均取 {@code queryLimit = clamp(topK × 5, 50, 200)}，
  * 融合后再截断 topK。此前向量路按 topK 截断、关键词路取 queryLimit，候选池不对称，
@@ -62,7 +63,13 @@ public class RagSearchService {
 
     private final OpenAiEmbeddingModel embeddingModel;
     private final QdrantEmbeddingStore embeddingStore;
-    private final KeywordSearchService keywordSearchService;
+    /**
+     * 关键词路路由：ES（首选）↔ MySQL FULLTEXT（兜底）
+     * <p>
+     * 功能编号 001：关键词路从「只有 FULLTEXT」升级为「可切换双实现」。
+     * 这里只依赖路由门面，不感知具体引擎；ES 故障时路由内部自动回退，本类无感。
+     */
+    private final KeywordSearchRouter keywordSearchRouter;
     private final SynonymExpander synonymExpander;
     private final RrfProperties rrfProperties;
     private final RagProperties ragProperties;
@@ -137,8 +144,10 @@ public class RagSearchService {
             log.debug("关键词路同义词扩展: '{}' → '{}'", query, keywordQuery);
         }
         // 关键词路的分类 / 价格过滤与向量路对齐（此前不过滤，属契约缺口，见 docs/rag-hybrid-tuning-design.md）
-        List<RagCandidate> keywordHits = keywordSearchService.searchByKeyword(
+        // 功能编号 001：经路由选择 ES 或 MySQL FULLTEXT，ES 故障时自动回退
+        List<RagCandidate> keywordHits = keywordSearchRouter.searchByKeyword(
                 keywordQuery, queryLimit, categoryId, minPrice, maxPrice);
+        String keywordRoute = keywordSearchRouter.currentRoute();
 
         log.debug("混合检索: 向量命中 {}, 关键词命中 {}, 候选池 {}, 合并取 Top-{}",
                 vectorHits.size(), keywordHits.size(), queryLimit, safeTopK);
@@ -175,12 +184,12 @@ public class RagSearchService {
         // T4 可观测性埋点：耗时/命中数/库存剔除数/富化数/权重/向量路状态。
         // 刻意不记录 query 原文 —— 用户输入可能含 PII（如「138xxxx 用的手机」），
         // 改记其长度：既能区分「短词命中差」与「长句未命中」，又可凭耗时/命中数与前后日志关联排查
-        log.info("[RAG指标] queryLen={} topK={} 耗时{}ms 向量命中{} 关键词命中{} 下架剔除{} 库存剔除{} 合并{}条 富化{}条 RRF(k={},wv={},wk={}) 向量路={}",
+        log.info("[RAG指标] queryLen={} topK={} 耗时{}ms 向量命中{} 关键词命中{} 下架剔除{} 库存剔除{} 合并{}条 富化{}条 RRF(k={},wv={},wk={}) 向量路={} 关键词路={}",
                 query.length(), safeTopK, (System.nanoTime() - startNanos) / 1_000_000,
                 vectorHits.size(), keywordHits.size(), notDisplayableIds.size(), outOfStockIds.size(),
                 merged.size(), hits.size(),
                 rrfProperties.getK(), rrfProperties.getWeightVector(), rrfProperties.getWeightKeyword(),
-                queryVector == null ? "已降级(纯关键词)" : "正常");
+                queryVector == null ? "已降级(纯关键词)" : "正常", keywordRoute);
 
         // 缺货标记：三个条件缺一不可 ——「过滤前有候选」且「过滤后为空」且「剔除原因中不含『不可展示』」。
         //   ① 候选本身为空说明真的没搜到，不可误报为缺货；

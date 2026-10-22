@@ -26,6 +26,17 @@
           <n-form-item label="手机号" path="receiverPhone">
             <n-input v-model:value="form.receiverPhone" placeholder="请输入 11 位手机号" />
           </n-form-item>
+          <div class="region-row">
+            <n-form-item label="省" path="province">
+              <n-input v-model:value="form.province" placeholder="如：浙江省" />
+            </n-form-item>
+            <n-form-item label="市" path="city">
+              <n-input v-model:value="form.city" placeholder="如：杭州市" />
+            </n-form-item>
+            <n-form-item label="区/县" path="district">
+              <n-input v-model:value="form.district" placeholder="如：西湖区" />
+            </n-form-item>
+          </div>
           <n-form-item label="详细地址" path="detail">
             <n-input
               v-model:value="form.detail"
@@ -57,9 +68,17 @@
               默认
             </span>
           </div>
-          <p class="addr-detail">{{ addr.detail }}</p>
+          <p class="addr-detail">{{ addr.province }} {{ addr.city }} {{ addr.district }} {{ addr.detail }}</p>
         </div>
         <div class="addr-ops">
+          <button
+            v-if="addr.isDefault !== 1"
+            type="button"
+            class="op-btn"
+            @click="handleSetDefault(addr)"
+          >
+            设为默认
+          </button>
           <button type="button" class="op-btn" @click="openEdit(addr)">
             <SvgIcon name="edit" :size="15" />
             编辑
@@ -84,7 +103,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import {
   NButton, NCheckbox, NForm, NFormItem, NInput, useMessage,
   type FormInst, type FormRules
@@ -93,21 +112,15 @@ import BackBar from '@/components/BackBar.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import SvgIcon from '@/components/SvgIcon.vue'
 import { useConfirm } from '@/utils/confirm'
-
-/** 收货地址（占位结构，后端就绪后替换为 types.ts 的 AddressVO） */
-interface AddressVO {
-  id: string
-  receiverName: string
-  receiverPhone: string
-  detail: string
-  /** 0=否 1=是 */
-  isDefault: number
-}
+import { addressApi, type AddressPayload, type AddressVO } from '@/api/address'
 
 /** 表单数据 */
 interface AddressForm {
   receiverName: string
   receiverPhone: string
+  province: string
+  city: string
+  district: string
   detail: string
   isDefault: boolean
 }
@@ -115,13 +128,8 @@ interface AddressForm {
 const message = useMessage()
 const { confirm } = useConfirm()
 
-/** 占位数据：接口未就绪，前端先用静态数据演示（TODO(占位) 接入 GET /api/address/list 后移除） */
-const addressList = ref<AddressVO[]>([
-  // TODO(占位): 以下为本地占位数据，后端地址模块就绪后替换为接口返回
-  { id: '1', receiverName: '张三', receiverPhone: '13800138001', detail: '浙江省杭州市西湖区文一西路 969 号 8 幢 3 单元 501 室', isDefault: 1 },
-  { id: '2', receiverName: '李四', receiverPhone: '13900139002', detail: '上海市浦东新区张江高科园区博云路 2 号 12F', isDefault: 0 },
-  { id: '3', receiverName: '王五', receiverPhone: '13700137003', detail: '广东省深圳市南山区科技园南区深南大道 9988 号', isDefault: 0 }
-])
+/** 地址列表：来自 GET /api/address/list（默认地址由后端置顶） */
+const addressList = ref<AddressVO[]>([])
 
 /** 表单显隐与编辑目标 */
 const formVisible = ref(false)
@@ -132,6 +140,9 @@ const formRef = ref<FormInst | null>(null)
 const form = reactive<AddressForm>({
   receiverName: '',
   receiverPhone: '',
+  province: '',
+  city: '',
+  district: '',
   detail: '',
   isDefault: false
 })
@@ -149,13 +160,20 @@ const rules: FormRules = {
       return true
     }
   },
+  province: { required: true, message: '请输入省份', trigger: ['blur', 'input'] },
+  city: { required: true, message: '请输入城市', trigger: ['blur', 'input'] },
+  district: { required: true, message: '请输入区/县', trigger: ['blur', 'input'] },
   detail: { required: true, message: '请输入详细地址', trigger: ['blur', 'input'] }
 }
 
 /** 打开新增表单 */
 function openAdd() {
   editingId.value = null
-  Object.assign(form, { receiverName: '', receiverPhone: '', detail: '', isDefault: false })
+  Object.assign(form, {
+    receiverName: '', receiverPhone: '',
+    province: '', city: '', district: '',
+    detail: '', isDefault: false
+  })
   formVisible.value = true
 }
 
@@ -165,6 +183,9 @@ function openEdit(addr: AddressVO) {
   Object.assign(form, {
     receiverName: addr.receiverName,
     receiverPhone: addr.receiverPhone,
+    province: addr.province,
+    city: addr.city,
+    district: addr.district,
     detail: addr.detail,
     isDefault: addr.isDefault === 1
   })
@@ -176,7 +197,13 @@ function closeForm() {
   editingId.value = null
 }
 
-/** 保存（新增或编辑）。TODO(占位): 后端就绪后改调 addressApi.add / addressApi.update */
+/** 加载地址列表 */
+async function loadList() {
+  const res = await addressApi.list()
+  addressList.value = res.data || []
+}
+
+/** 保存（新增或编辑）：默认地址唯一性与首条自动默认由后端保证 */
 async function handleSave() {
   try {
     await formRef.value?.validate()
@@ -185,49 +212,46 @@ async function handleSave() {
   }
   saving.value = true
   try {
-    // TODO(占位): 本地增删改，后端接口就绪后替换为真实调用并刷新列表
-    // 先确定本次保存的地址 id：新增时提前生成新 id，避免"取消其他默认"循环用 null 误清空新增地址
-    const isEdit = !!editingId.value
-    let savedId = editingId.value
-    if (isEdit && savedId) {
-      const target = addressList.value.find(a => a.id === savedId)
-      if (target) {
-        target.receiverName = form.receiverName
-        target.receiverPhone = form.receiverPhone
-        target.detail = form.detail
-        target.isDefault = form.isDefault ? 1 : 0
-      }
-    } else {
-      savedId = String(Date.now())
-      addressList.value.unshift({
-        id: savedId,
-        receiverName: form.receiverName,
-        receiverPhone: form.receiverPhone,
-        detail: form.detail,
-        isDefault: form.isDefault ? 1 : 0
-      })
+    const payload: AddressPayload = {
+      receiverName: form.receiverName,
+      receiverPhone: form.receiverPhone,
+      province: form.province,
+      city: form.city,
+      district: form.district,
+      detail: form.detail,
+      isDefault: form.isDefault ? 1 : 0
     }
-    // 设为默认时，其他地址取消默认（排除本次保存的地址本身）
-    if (form.isDefault && savedId) {
-      addressList.value.forEach(a => {
-        if (a.id !== savedId) a.isDefault = 0
-      })
+    const isEdit = !!editingId.value
+    if (isEdit && editingId.value) {
+      await addressApi.update(editingId.value, payload)
+    } else {
+      await addressApi.add(payload)
     }
     message.success(isEdit ? '地址已更新' : '地址已添加')
     closeForm()
+    await loadList()
   } finally {
     saving.value = false
   }
+}
+
+/** 设为默认地址 */
+async function handleSetDefault(addr: AddressVO) {
+  await addressApi.setDefault(addr.id)
+  message.success('已设为默认地址')
+  await loadList()
 }
 
 /** 删除地址 */
 async function handleDelete(addr: AddressVO) {
   const ok = await confirm({ content: `确定删除「${addr.receiverName}」的收货地址吗？` })
   if (!ok) return
-  // TODO(占位): 本地删除，后端就绪后改调 addressApi.remove
-  addressList.value = addressList.value.filter(a => a.id !== addr.id)
+  await addressApi.remove(addr.id)
   message.success('地址已删除')
+  await loadList()
 }
+
+onMounted(loadList)
 </script>
 
 <style scoped>
@@ -236,6 +260,12 @@ async function handleDelete(addr: AddressVO) {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 20px;
+}
+/* 省 / 市 / 区三等分一行 */
+.region-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
 }
 .pg-title {
   font-size: 24px;

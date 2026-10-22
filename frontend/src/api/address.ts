@@ -1,46 +1,56 @@
 /**
- * 地址管理 API 空壳
+ * 地址管理 API
  *
- * ⚠️ 后端地址模块接口尚未就绪，当前仅预留模块与方法签名。
- * 页面数据使用本地占位（见 views/Address.vue），接入后替换为真实调用。
- *
- * 预期接口（对照前端使用）：
- *   GET    /api/address/list       地址列表
- *   POST   /api/address            新增地址
- *   PUT    /api/address/{id}       编辑地址
- *   DELETE /api/address/{id}       删除地址
+ * 后端接口：`/api/address/*`（需用户登录，userId 由服务端从会话注入）
+ * 归属隔离与默认地址唯一性均由后端保证，前端只负责收集与展示。
  */
 import { get, post, put, del } from './request'
 import type { Result } from './types'
 
-// TODO(P0): 后端地址模块就绪后，在 types.ts 补充 AddressVO 并启用下列方法
-// export interface AddressVO {
-//   id: string
-//   receiverName: string
-//   receiverPhone: string
-//   detail: string
-//   isDefault: number // 0=否 1=是
-// }
+/** 收货地址（后端 AddressDO 的对外字段） */
+export interface AddressVO {
+  /** 雪花 ID 被 Jackson 序列化为字符串，避免 JS 精度丢失 */
+  id: string
+  receiverName: string
+  receiverPhone: string
+  province: string
+  city: string
+  district: string
+  detail: string
+  /** 0=否 1=是 */
+  isDefault: number
+}
+
+/** 新增 / 编辑地址的请求体 */
+export interface AddressPayload {
+  receiverName: string
+  receiverPhone: string
+  province: string
+  city: string
+  district: string
+  detail: string
+  isDefault?: number
+}
 
 export const addressApi = {
-  /** 地址列表（未就绪，占位） */
-  list(): Promise<Result<unknown>> {
-    // TODO(P0): 接入 GET /api/address/list
-    return get<unknown>('/address/list')
+  /** 当前用户的地址列表（默认地址置顶） */
+  list(): Promise<Result<AddressVO[]>> {
+    return get<AddressVO[]>('/address/list')
   },
-  /** 新增地址（未就绪，占位） */
-  add(_data: unknown): Promise<Result<void>> {
-    // TODO(P0): 接入 POST /api/address
-    return post<void>('/address', _data)
+  /** 新增地址（首条由后端自动设为默认） */
+  add(data: AddressPayload): Promise<Result<number>> {
+    return post<number>('/address', data)
   },
-  /** 编辑地址（未就绪，占位） */
-  update(_id: string, _data: unknown): Promise<Result<void>> {
-    // TODO(P0): 接入 PUT /api/address/{id}
-    return put<void>('/address/' + _id, _data)
+  /** 编辑地址 */
+  update(id: string, data: AddressPayload): Promise<Result<void>> {
+    return put<void>('/address/' + id, data)
   },
-  /** 删除地址（未就绪，占位） */
-  remove(_id: string): Promise<Result<void>> {
-    // TODO(P0): 接入 DELETE /api/address/{id}
-    return del<void>('/address/' + _id)
+  /** 删除地址 */
+  remove(id: string): Promise<Result<void>> {
+    return del<void>('/address/' + id)
+  },
+  /** 设为默认地址 */
+  setDefault(id: string): Promise<Result<void>> {
+    return put<void>('/address/' + id + '/default')
   }
 }

@@ -83,4 +83,16 @@ public interface ProductService {
      * @throws BusinessException SKU 不存在、无权操作该商品、库存为负
      */
     void updateSkuStock(Long skuId, Integer stock);
+
+    /**
+     * 删除商品（逻辑删除）
+     * <p>
+     * 仅管理员入口使用。删除后主动失效商品详情缓存，并从 Qdrant / ES 索引移除，
+     * 避免「商品已删但检索仍能搜到」的幽灵数据；历史订单因存有商品快照不受影响。
+     * SKU 不做级联删除：SKU 无独立对外入口，商品不可见后其 SKU 自然无法被访问。
+     *
+     * @param id 商品 ID
+     * @throws BusinessException 商品不存在
+     */
+    void deleteProduct(Long id);
 }

@@ -1,5 +1,6 @@
 package com.shop.rag.search;
 
+import com.shop.common.MyBatisPlusTestSupport;
 import com.shop.mapper.SkuMapper;
 import com.shop.model.entity.SkuDO;
 import org.junit.jupiter.api.BeforeAll;

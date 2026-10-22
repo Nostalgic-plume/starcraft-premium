@@ -479,6 +479,31 @@ public class ProductServiceImpl implements ProductService {
     }
 
     /**
+     * 删除商品（逻辑删除）
+     * <p>
+     * 三个副作用必须一起做，少一个就会出现「已删除商品仍能被搜到 / 访问到」：
+     * ① MyBatis-Plus 逻辑删除置 deleted=1；② 删商品详情缓存；③ 删 Qdrant / ES 索引。
+     * <p>
+     * 历史订单不受影响：order_item 存的是下单时快照，不依赖商品表当前状态。
+     *
+     * @param id 商品 ID
+     * @throws BusinessException 商品不存在
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteProduct(Long id) {
+        ProductDO product = productMapper.selectById(id);
+        if (product == null) {
+            throw new BusinessException("商品不存在");
+        }
+
+        productMapper.deleteById(id);
+        redisCache.delete(ProductConstants.CACHE_PRODUCT + id);
+        productIndexSyncService.remove(id);
+        log.info("商品删除成功, productId: {}, name: {}", id, product.getName());
+    }
+
+    /**
      * 商家调整 SKU 库存：更新 MySQL 库存后按 Cache Aside 删除库存缓存与商品详情缓存，
      * 下次预扣（Lua miss 回源）自动加载新值，保证 Redis 与 DB 一致；归属校验 shop_id 隔离
      *

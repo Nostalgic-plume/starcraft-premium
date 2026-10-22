@@ -98,4 +98,20 @@ public class ProductController {
         productService.updateStatus(id, status);
         return Result.success();
     }
+
+    /**
+     * 删除商品（需 product:delete 权限，仅管理员）
+     * <p>
+     * 逻辑删除并同步清理详情缓存与向量/ES 索引；商家侧不开放删除（权限表未授予 merchant）。
+     *
+     * @param id 商品ID
+     * @return 操作成功提示
+     */
+    @SaCheckPermission(value = {PermissionConstants.PRODUCT_DELETE}, type = "admin")
+    @DeleteMapping("/{id}")
+    @Operation(summary = "删除商品（管理员）")
+    public Result<Void> delete(@PathVariable Long id) {
+        productService.deleteProduct(id);
+        return Result.success("删除成功", null);
+    }
 }

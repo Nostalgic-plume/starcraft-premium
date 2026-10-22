@@ -1,26 +1,30 @@
 /**
- * 收藏 API 空壳
+ * 商品收藏 API
  *
- * ⚠️ 后端收藏模块接口尚未就绪，当前仅预留模块与方法签名。
- * 页面数据使用本地占位（见 views/Favorites.vue）。
- *
- * 预期接口（对照前端使用）：
- *   GET    /api/favorite/list       收藏商品列表
- *   POST   /api/favorite/toggle     收藏 / 取消收藏（传 productId）
- *   DELETE /api/favorite/{productId} 取消收藏
+ * 后端：`/api/favorite/*`（需用户登录，userId 由服务端从会话注入）
  */
-import { get, del } from './request'
-import type { Result } from './types'
+import { get, post, del } from './request'
+import type { ProductVO, Result } from './types'
 
 export const favoriteApi = {
-  /** 收藏列表（未就绪，占位） */
-  list(): Promise<Result<unknown>> {
-    // TODO(P1): 接入 GET /api/favorite/list
-    return get<unknown>('/favorite/list')
+  /** 收藏商品列表（按收藏时间倒序，后端跳过已下架 / 已删除商品） */
+  list(): Promise<Result<ProductVO[]>> {
+    return get<ProductVO[]>('/favorite/list')
   },
-  /** 取消收藏（未就绪，占位） */
-  remove(_productId: string): Promise<Result<void>> {
-    // TODO(P1): 接入 DELETE /api/favorite/{productId}
-    return del<void>('/favorite/' + _productId)
+  /** 是否已收藏 */
+  check(productId: string): Promise<Result<boolean>> {
+    return get<boolean>('/favorite/check/' + productId)
+  },
+  /** 收藏总数 */
+  count(): Promise<Result<number>> {
+    return get<number>('/favorite/count')
+  },
+  /** 收藏（幂等） */
+  add(productId: string): Promise<Result<void>> {
+    return post<void>('/favorite/' + productId)
+  },
+  /** 取消收藏 */
+  remove(productId: string): Promise<Result<void>> {
+    return del<void>('/favorite/' + productId)
   }
 }

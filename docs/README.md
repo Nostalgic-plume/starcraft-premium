@@ -126,6 +126,7 @@ shop/                            # Maven 聚合工程
 | **智能客服** | SSE 流式对话，RAG 检索 TOP-3 + 分类名回退；Function Calling 工具链（查/取消真实订单，写操作状态机 + 库存回滚）；引用溯源编号 + 商品卡片推送；小星真人导购人设 |
 | **RAG 搜索** | 本地 TEI/BGE-M3 向量化（1024 维）→ Qdrant 检索；关键词路 Elasticsearch BM25 + IK 分词（故障自动回退 MySQL FULLTEXT）；双路加权 RRF 融合 → 元数据过滤（分类/价格） |
 | **收货地址** | 当前用户地址 CRUD、默认地址唯一、归属校验（userId 由登录会话注入，请求体不接收） |
+| **商品收藏** | 收藏 / 取消收藏（幂等，唯一索引兜底）、收藏列表实时回查商品并过滤已下架 / 已删除项 |
 | **主数据管理** | 管理后台分类（两级结构、删除前校验子分类与商品引用）与品牌（名称唯一、商品引用校验）CRUD |
 | **角色权限** | 角色 CRUD、角色-权限分配、用户-角色分配；权限项由启动初始化器幂等维护，内置角色不可删 |
 | **推荐服务** | 独立进程 + 独立库；行为采集（Kafka）→ Flink 实时特征 → 多路召回（类目偏好 + 热门）→ 首页推荐流，详见[推荐子系统](#推荐子系统) |
@@ -189,11 +190,11 @@ shop/                            # Maven 聚合工程
 
 ## 数据库
 
-### 主库 `shop`（20 张表）
+### 主库 `shop`（21 张表）
 
 | 类别 | 表 | 说明 |
 |------|----|------|
-| 业务 | user / product / sku / orders / order_item / cart / category / address / brand | 用户/商品/订单/购物车/分类/地址/品牌 |
+| 业务 | user / product / sku / orders / order_item / cart / category / address / brand / favorite | 用户/商品/订单/购物车/分类/地址/品牌/收藏 |
 | 账号 | admin / shop | 管理员、商家独立账号（shop 以 shop_id 为身份标识，无 user_id 关联） |
 | RBAC | role / permission / user_role / role_permission | 三级角色 + 7 项权限，角色/权限分配接口已开放 |
 | 日志 | user_status_log / rag_trace | 账号状态变更记录 / RAG 行为反馈埋点 |

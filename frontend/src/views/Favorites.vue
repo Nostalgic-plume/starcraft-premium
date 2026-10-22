@@ -36,45 +36,50 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import ProductCard from '@/components/ProductCard.vue'
 import BackBar from '@/components/BackBar.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import SvgIcon from '@/components/SvgIcon.vue'
+import { favoriteApi } from '@/api/favorite'
 import type { ProductVO } from '@/api/types'
 
 const router = useRouter()
 const message = useMessage()
 
-/** 占位数据：接口未就绪，前端先用静态数据演示（TODO(占位) 接入 GET /api/favorite/list 后移除） */
-const favoriteList = ref<ProductVO[]>([
-  // TODO(占位): 以下为本地占位商品，mainImage 留空以展示 SVG 占位图
-  // status: 0 避免 ProductCard 渲染"在售"角标（收藏页占位商品不做状态角标）
-  { id: 'f1', name: '星创无线蓝牙耳机 Pro', description: '', categoryId: '', categoryName: '数码', brandId: '', brandName: '星创', mainImage: '', images: [], detail: '', minPrice: 299, maxPrice: 299, totalStock: 100, soldCount: 1200, status: 0, skuList: [] },
-  { id: 'f2', name: '轻奢便携保温杯 500ml', description: '', categoryId: '', categoryName: '家居', brandId: '', brandName: '星创', mainImage: '', images: [], detail: '', minPrice: 89, maxPrice: 99, totalStock: 200, soldCount: 860, status: 0, skuList: [] },
-  { id: 'f3', name: '智能手环 8 代', description: '', categoryId: '', categoryName: '数码', brandId: '', brandName: '星创', mainImage: '', images: [], detail: '', minPrice: 199, maxPrice: 249, totalStock: 150, soldCount: 3200, status: 0, skuList: [] },
-  { id: 'f4', name: '氨基酸温和洁面乳', description: '', categoryId: '', categoryName: '美妆', brandId: '', brandName: '星创', mainImage: '', images: [], detail: '', minPrice: 59, maxPrice: 69, totalStock: 300, soldCount: 540, status: 0, skuList: [] }
-])
+/** 收藏列表：来自 GET /api/favorite/list（后端已跳过下架 / 删除商品） */
+const favoriteList = ref<ProductVO[]>([])
 
-/** 取消收藏（本地移除，TODO(占位): 后端就绪后改调 favoriteApi.remove 并刷新） */
-function onUnfavorite(p: ProductVO) {
-  // TODO(占位): 本地移除收藏，接口就绪后替换
+/** 加载收藏列表 */
+async function loadFavorites() {
+  try {
+    const res = await favoriteApi.list()
+    favoriteList.value = res.data || []
+  } catch {
+    favoriteList.value = []
+  }
+}
+
+/** 取消收藏 */
+async function onUnfavorite(p: ProductVO) {
+  await favoriteApi.remove(p.id)
   favoriteList.value = favoriteList.value.filter(item => item.id !== p.id)
   message.success('已取消收藏')
 }
 
-/** 加购（收藏页商品可能无 sku，占位提示） */
+/** 加购：收藏页商品只带首个 SKU 时直接提示去详情页选择规格 */
 function onAddCart(p: ProductVO) {
   const sku = p.skuList?.[0]
   if (!sku) {
     message.warning('该商品暂无规格，请到详情页选择')
     return
   }
-  // TODO(占位): 收藏页占位商品未带 skuList，接入真实收藏列表后走购物车 store
   message.info('请到商品详情页选择规格后加入购物车')
 }
+
+onMounted(loadFavorites)
 </script>
 
 <style scoped>

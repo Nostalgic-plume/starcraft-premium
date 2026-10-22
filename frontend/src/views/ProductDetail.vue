@@ -228,6 +228,7 @@ import { NInputNumber, NSpin, useMessage } from 'naive-ui'
 import * as echarts from 'echarts'
 import gsap from 'gsap'
 import { productApi } from '@/api/product'
+import { favoriteApi } from '@/api/favorite'
 import { useCartStore } from '@/stores/cart'
 import { useUserStore } from '@/stores/user'
 import BackBar from '@/components/BackBar.vue'
@@ -263,44 +264,36 @@ let ctx: gsap.Context | null = null
  */
 let reportView: (() => void) | null = null
 
-/* ====== 收藏（P0 占位：后端接口未就绪，前端存 localStorage） ====== */
-const FAV_KEY = 'shop_fav_products'
-const favIds = ref<string[]>(loadFavs())
+/* ====== 收藏（后端接口，userId 由服务端会话注入） ====== */
+const isFav = ref(false)
 
-function loadFavs(): string[] {
+/** 拉取收藏状态：未登录 / 接口异常时按未收藏处理，不阻断详情页渲染 */
+async function loadFavState() {
+  if (!product.value) return
   try {
-    const raw = localStorage.getItem(FAV_KEY)
-    const arr = raw ? JSON.parse(raw) : []
-    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : []
+    const res = await favoriteApi.check(product.value.id)
+    isFav.value = res.data === true
   } catch {
-    return []
+    isFav.value = false
   }
 }
 
-function persistFavs() {
-  try {
-    localStorage.setItem(FAV_KEY, JSON.stringify(favIds.value))
-  } catch {
-    /* localStorage 不可用时静默忽略 */
-  }
-}
-
-const isFav = computed(() => !!product.value && favIds.value.includes(product.value.id))
-
-function toggleFav() {
+async function toggleFav() {
   if (!product.value) return
   const id = product.value.id
   const nowFav = !isFav.value
-  if (nowFav) {
-    favIds.value = [...favIds.value, id]
-  } else {
-    favIds.value = favIds.value.filter(x => x !== id)
-  }
-  persistFavs()
-  message.success(nowFav ? '已收藏' : '已取消收藏')
-  // 收藏行为埋点：仅收藏时上报，取消收藏不作为正向兴趣信号
-  if (nowFav) {
-    trackFavorite(id)
+  try {
+    if (nowFav) {
+      await favoriteApi.add(id)
+      // 收藏行为埋点：仅收藏时上报，取消收藏不作为正向兴趣信号
+      trackFavorite(id)
+    } else {
+      await favoriteApi.remove(id)
+    }
+    isFav.value = nowFav
+    message.success(nowFav ? '已收藏' : '已取消收藏')
+  } catch {
+    // 未登录 / 网络异常：全局拦截器已提示，保持原状态
   }
 }
 
@@ -387,6 +380,8 @@ async function loadProduct() {
     if (list.length) {
       selectedSku.value = list.find(s => s.stock > 0) || list[0]
     }
+    // 收藏状态单独拉取：失败只影响红心，不影响详情渲染
+    loadFavState()
     await nextTick()
     initTrendChart()
     initAnimations()

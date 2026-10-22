@@ -18,6 +18,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'after-sales', name: 'AfterSales', component: () => import('@/views/AfterSales.vue'), meta: { title: '售后管理' } },
       { path: 'users', name: 'Users', component: () => import('@/views/Users.vue'), meta: { title: '用户管理' } },
       { path: 'categories', name: 'Categories', component: () => import('@/views/Categories.vue'), meta: { title: '分类管理' } },
+      { path: 'brands', name: 'Brands', component: () => import('@/views/Brands.vue'), meta: { title: '品牌管理' } },
+      { path: 'roles', name: 'Roles', component: () => import('@/views/Roles.vue'), meta: { title: '角色权限' } },
       { path: 'rag-index', name: 'RagIndex', component: () => import('@/views/RagIndex.vue'), meta: { title: '索引管理' } },
       // ====== 推荐子系统（接口由推荐服务进程 8082 提供，vite 以 '/api/rec' 代理直达）======
       { path: 'rec-config', name: 'RecConfig', component: () => import('@/views/RecConfig.vue'), meta: { title: '推荐策略配置' } },

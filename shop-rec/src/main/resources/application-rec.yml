@@ -36,7 +36,10 @@ spring:
   # 缓存/会话（RecRedis 使用）；与商城后端共用同一 Redis 实例
   data:
     redis:
-      host: localhost
+      # 必须写 IPv4 字面量：Docker 只把 Redis 映射到 127.0.0.1，而 JDK 会把 localhost
+      # 优先解析为 IPv6 ::1，Lettuce 连 ::1:6379 直到 3 秒超时才失败，
+      # 表现为「Redis 明明在跑、应用却报 Unable to connect to localhost/<unresolved>:6379」
+      host: ${REDIS_HOST:127.0.0.1}
       port: 6379
       database: 0
       timeout: 3000ms

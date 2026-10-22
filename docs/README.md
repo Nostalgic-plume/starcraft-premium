@@ -33,8 +33,7 @@ B2C 电商系统，**Spring Boot 单体后端 + Vue 3 三端分离前端**，Ngi
 | 前端 | Vue 3 + Vite + Naive UI + Pinia + ECharts |
 | 反向代理 | Nginx 1.20.2 |
 | JDK | OpenJDK 22 |
-| RAG 语义搜索 | LangChain4j 1.19.0 + Qdrant（1024 维）+ 本地 TEI 部署 BGE-M3 向量化 |
-| 全文检索（当前未使用） | Elasticsearch 8.11.4 + IK 8.11.4 中文分词（归 `es` profile，默认关闭省内存；Java 侧未接线） |
+| RAG 语义搜索 | LangChain4j 1.19.0 + Qdrant（1024 维）+ 本地 TEI 部署 BGE-M3 向量化 + Elasticsearch 8.11.4 + IK（BM25 关键词路，故障自动回退 MySQL FULLTEXT） |
 | 智能客服 | LangChain4j AiServices + DeepSeek（主）/ 智谱 glm-4-flash（备）+ Function Calling 工具链 + RAG 检索增强 |
 | 推荐子系统 | Kafka 3.7.0（行为事件流）+ Flink 1.17.2（实时特征计算）+ 独立进程 `:8082` / 独立库 `shop_rec` |
 | 离线数仓 | Hive 3.x + Sqoop 1.4.x + Azkaban 3.x |
@@ -51,6 +50,10 @@ cd shop && docker compose up -d
 #     TEI 归入 gpu profile 默认不启动 —— 无 GPU 机器上它会让整条 up 命令失败。
 #     BGE-M3 权重目录由 .env 的 BGE_M3_MODEL_PATH 指定（默认 D:/models/bge-m3，约 2.2G，需含 1_Pooling/）
 cd shop && docker compose --profile gpu up -d
+
+# 0c. 启用 RAG 关键词路（Elasticsearch 8.11.4 + IK，归 es profile 默认不启动以省内存）
+#     ES 未启动时检索自动回退 MySQL FULLTEXT，不报错；首次启动会自动建索引并导入上架商品
+cd shop && docker compose --profile es up -d
 
 # 1. 后端编译启动（Maven 多模块聚合工程：必须 -pl 指定子模块 + 显式 workingDirectory，
 #    否则读不到仓库根的 .env，报 MySQL "Access denied"）
@@ -121,7 +124,7 @@ shop/                            # Maven 聚合工程
 | **商家中心** | shop_id 自动隔离、本店商品/订单管理、发货、本店 ECharts 看板 |
 | **报表库看板** | 查询 shop_ads 报表库（离线数仓产出），ECharts 报表展示 |
 | **智能客服** | SSE 流式对话，RAG 检索 TOP-3 + 分类名回退；Function Calling 工具链（查/取消真实订单，写操作状态机 + 库存回滚）；引用溯源编号 + 商品卡片推送；小星真人导购人设 |
-| **RAG 搜索** | 本地 TEI/BGE-M3 向量化（1024 维）→ Qdrant 检索 → 元数据过滤（分类/价格） |
+| **RAG 搜索** | 本地 TEI/BGE-M3 向量化（1024 维）→ Qdrant 检索；关键词路 Elasticsearch BM25 + IK 分词（故障自动回退 MySQL FULLTEXT）；双路加权 RRF 融合 → 元数据过滤（分类/价格） |
 | **推荐服务** | 独立进程 + 独立库；行为采集（Kafka）→ Flink 实时特征 → 多路召回（类目偏好 + 热门）→ 首页推荐流，详见[推荐子系统](#推荐子系统) |
 
 ---
@@ -234,7 +237,7 @@ shop/                            # Maven 聚合工程
 | **缓存防护** | 商品 ID 布隆过滤器（防穿透）→ 商品详情逻辑过期缓存（防击穿）→ DB |
 | **商品快照** | order_item 记录下单时名称/价格/图片，不受后续变更影响 |
 | **购物车标记** | 下单后批量 `cart.is_ordered = 1`，列表过滤已结算 |
-| **RAG 搜索** | 本地 TEI/BGE-M3 向量化（1024 维）→ Qdrant 检索 → 元数据过滤 |
+| **RAG 搜索** | 本地 TEI/BGE-M3 向量化（1024 维）→ Qdrant 检索；关键词路 ES BM25 + IK（熔断回退 MySQL FULLTEXT）；双路加权 RRF 融合 + 元数据过滤（分类/价格） |
 | **智能客服** | SSE 流式输出 → RAG 检索 TOP-3（空结果走分类名回退）→ DeepSeek 生成回答；主备降级链（熔断 → glm-4-flash 纯 RAG → 模板兜底）；Function Calling 工具链（AiServices 查/取消订单，userId 锁死 + 归属校验防越权）；引用溯源 [n] 编号 + 商品卡片推送 |
 | **统一返回** | `{ code, msg, data }`，全局异常处理器接管所有异常 |
 | **Long→String** | Jackson 全局配置，解决雪花 ID 前端 JS 精度丢失 |

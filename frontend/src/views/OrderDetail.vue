@@ -34,8 +34,14 @@
             <n-button v-if="order.status === 2" type="primary" size="large" class="ops-btn" @click="handleReceive">
               确认收货
             </n-button>
-            <n-button v-if="order.status === 4" type="primary" size="large" class="ops-btn" @click="goReview">
-              去评价
+            <n-button
+              v-if="order.status === 3 || order.status === 4"
+              type="primary"
+              size="large"
+              class="ops-btn"
+              @click="router.push('/my-reviews')"
+            >
+              我的评价
             </n-button>
           </div>
         </div>
@@ -90,6 +96,16 @@
               <div class="goods-info">
                 <p class="goods-name">{{ item.productName }}</p>
                 <p class="goods-sku">{{ item.skuName }}</p>
+                <n-button
+                  v-if="order.status === 3 || order.status === 4"
+                  size="tiny"
+                  quaternary
+                  type="primary"
+                  class="review-entry"
+                  @click="goReviewItem(item)"
+                >
+                  评价
+                </n-button>
               </div>
               <div class="goods-qty">× {{ item.quantity }}</div>
               <div class="goods-price">
@@ -170,6 +186,19 @@ import type { OrderVO } from '@/api/types'
 
 const route = useRoute()
 const router = useRouter()
+
+/** 跳转评价页：orderItemId 是评价的唯一业务键，商品信息仅用于表单展示 */
+function goReviewItem(item: { id: string; productName: string; productImage?: string; skuName?: string }) {
+  router.push({
+    path: '/my-reviews/new',
+    query: {
+      orderItemId: item.id,
+      productName: item.productName,
+      productImage: item.productImage || '',
+      skuName: item.skuName || ''
+    }
+  })
+}
 const message = useMessage()
 const { confirm } = useConfirm()
 
@@ -320,12 +349,6 @@ async function handleReceive() {
   } catch {
     /* 失败提示由拦截器统一处理 */
   }
-}
-
-/** 已完成 → 去评价：跳转我的评价页（评价模块占位，可带 orderId 供后续接入） */
-function goReview() {
-  // TODO(P0): 评价模块后端未就绪，先跳转评价页（前端占位）
-  router.push({ path: '/my-reviews/new', query: order.value?.id ? { orderId: order.value.id } : {} })
 }
 
 onMounted(loadOrder)
@@ -483,6 +506,7 @@ onUnmounted(() => {
 }
 
 /* ====== 商品列表 ====== */
+.review-entry { margin-top: 4px; }
 .goods-row {
   display: flex;
   align-items: center;

@@ -184,6 +184,9 @@ export interface CartAddPayload {
 
 /** 订单商品快照 */
 export interface OrderItemVO {
+  /** 订单项 ID（评价入口使用） */
+  id: string
+  productId: string
   skuId: string
   productName: string
   skuName: string

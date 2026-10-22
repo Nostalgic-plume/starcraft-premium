@@ -28,12 +28,12 @@
             </div>
             <p class="review-time">
               <SvgIcon name="clock" :size="12" />
-              {{ r.time }}
+              {{ r.createTime }}
             </p>
           </div>
         </div>
         <p class="review-content">{{ r.content }}</p>
-        <div v-if="r.images.length" class="review-images">
+        <div v-if="r.images?.length" class="review-images">
           <div v-for="(img, i) in r.images" :key="i" class="review-img">
             <img :src="img" alt="" loading="lazy" />
           </div>
@@ -53,48 +53,29 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { NRate } from 'naive-ui'
 import BackBar from '@/components/BackBar.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import SvgIcon from '@/components/SvgIcon.vue'
-
-/** 评价记录（占位结构，后端就绪后替换为 types.ts 的 ReviewVO） */
-interface ReviewVO {
-  id: string
-  productName: string
-  productImage: string
-  rating: number
-  content: string
-  time: string
-  images: string[]
-}
+import { reviewApi, type ReviewVO } from '@/api/review'
 
 const router = useRouter()
 
-/** 占位数据：接口未就绪，前端先用静态数据演示（TODO(占位) 接入 GET /api/review/my 后移除） */
-const reviewList = ref<ReviewVO[]>([
-  // TODO(占位): 以下为本地占位数据
-  {
-    id: 'r1',
-    productName: '星创无线蓝牙耳机 Pro',
-    productImage: '',
-    rating: 5,
-    content: '音质很惊喜，低音下潜足，降噪效果在地铁上非常明显，续航也能顶一整天。包装精致，发货很快，整体满意！',
-    time: '2026-08-02 14:30',
-    images: []
-  },
-  {
-    id: 'r2',
-    productName: '轻奢便携保温杯 500ml',
-    productImage: '',
-    rating: 4,
-    content: '保温效果不错，早上倒的热水到下午还很烫，杯盖密封性也好，放包里没漏过水。就是杯身稍微有点重。',
-    time: '2026-07-28 09:12',
-    images: []
+/** 评价列表：来自 GET /api/review/my（按时间倒序） */
+const reviewList = ref<ReviewVO[]>([])
+
+async function loadReviews() {
+  try {
+    const res = await reviewApi.mine()
+    reviewList.value = res.data || []
+  } catch {
+    reviewList.value = []
   }
-])
+}
+
+onMounted(loadReviews)
 </script>
 
 <style scoped>

@@ -1,25 +1,49 @@
 /**
- * 评价 API 空壳
+ * 商品评价 API
  *
- * ⚠️ 后端评价模块接口尚未就绪，当前仅预留模块与方法签名。
- * 页面数据使用本地占位（见 views/MyReviews.vue / views/ReviewForm.vue）。
- *
- * 预期接口（对照前端使用）：
- *   GET  /api/review/my         我的评价列表
- *   POST /api/review            发表评价（评分 + 内容 + 图片）
+ * 后端：`/api/review/*`
+ * 发表评价只需传 orderItemId，商品 / 用户 / 订单归属全部由服务端反查校验。
  */
 import { get, post } from './request'
-import type { Result } from './types'
+import type { PageResult, Result } from './types'
+
+/** 评价视图 */
+export interface ReviewVO {
+  id: string
+  orderItemId: string
+  productId: string
+  productName: string
+  productImage: string
+  rating: number
+  content: string
+  images: string[]
+  anonymous: boolean
+  nickname?: string
+  reply?: string
+  replyTime?: string
+  createTime: string
+}
+
+/** 发表评价参数 */
+export interface ReviewCreatePayload {
+  orderItemId: string
+  rating: number
+  content?: string
+  images?: string[]
+  isAnonymous?: number
+}
 
 export const reviewApi = {
-  /** 我的评价列表（未就绪，占位） */
-  mine(): Promise<Result<unknown>> {
-    // TODO(P0): 接入 GET /api/review/my
-    return get<unknown>('/review/my')
+  /** 我的评价列表 */
+  mine(): Promise<Result<ReviewVO[]>> {
+    return get<ReviewVO[]>('/review/my')
   },
-  /** 发表评价（未就绪，占位） */
-  create(_data: unknown): Promise<Result<void>> {
-    // TODO(P0): 接入 POST /api/review
-    return post<void>('/review', _data)
+  /** 商品评价列表（公开） */
+  product(productId: string, page = 1, pageSize = 10): Promise<Result<PageResult<ReviewVO>>> {
+    return get<PageResult<ReviewVO>>('/review/product/' + productId, { params: { page, pageSize } })
+  },
+  /** 发表评价 */
+  create(data: ReviewCreatePayload): Promise<Result<void>> {
+    return post<void>('/review', data)
   }
 }

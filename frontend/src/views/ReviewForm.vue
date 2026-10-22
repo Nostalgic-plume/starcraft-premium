@@ -58,21 +58,26 @@
 
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NForm, NFormItem, NInput, NRate, useMessage,
   type FormInst, type FormRules
 } from 'naive-ui'
 import BackBar from '@/components/BackBar.vue'
 import SvgIcon from '@/components/SvgIcon.vue'
+import { reviewApi } from '@/api/review'
 
 interface ReviewFormModel {
   rating: number
   content: string
 }
 
+const route = useRoute()
 const router = useRouter()
 const message = useMessage()
+
+/** 评价对象由订单详情页通过 query 带入（orderItemId 是唯一的业务键） */
+const orderItemId = String(route.query.orderItemId || '')
 
 const formRef = ref<FormInst | null>(null)
 const submitting = ref(false)
@@ -106,15 +111,19 @@ const rules: FormRules = {
   }
 }
 
-/** 目标商品占位（TODO(占位): 从订单详情 /my-reviews/new?orderId= 接入后替换） */
+/** 目标商品展示信息（订单详情页通过 query 带入，仅用于展示，不参与提交） */
 const targetProduct = {
-  name: '星创无线蓝牙耳机 Pro',
-  sku: '标配版 / 曜石黑',
-  image: ''
+  name: String(route.query.productName || '商品'),
+  sku: String(route.query.skuName || ''),
+  image: String(route.query.productImage || '')
 }
 
-/** 提交评价（TODO(占位): 后端就绪后改调 reviewApi.create） */
+/** 提交评价：只传 orderItemId，商品与归属由服务端校验 */
 async function handleSubmit() {
+  if (!orderItemId) {
+    message.warning('缺少订单项信息，请从订单详情页发起评价')
+    return
+  }
   try {
     await formRef.value?.validate()
   } catch {
@@ -122,7 +131,11 @@ async function handleSubmit() {
   }
   submitting.value = true
   try {
-    // TODO(占位): 本地演示提交，接口就绪后替换为真实调用
+    await reviewApi.create({
+      orderItemId,
+      rating: form.rating,
+      content: form.content
+    })
     message.success('评价提交成功，感谢你的分享')
     router.push('/my-reviews')
   } finally {

@@ -78,6 +78,12 @@ public class OrderVO {
     @Schema(description = "订单商品")
     public static class OrderItemVO {
 
+        @Schema(description = "订单项 ID（评价的唯一业务键）")
+        private Long id;
+
+        @Schema(description = "商品 ID")
+        private Long productId;
+
         @Schema(description = "SKU ID")
         private Long skuId;
 

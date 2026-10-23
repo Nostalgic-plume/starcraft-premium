@@ -171,6 +171,12 @@ rag:
     max-query-limit: 200
     # 公开接口未校验 topK，超大值会放大下游 LIMIT 与 Qdrant maxResults
     max-top-k: 100
+    # 向量路开关（仅作用于智能客服链路）
+    # true  = 客服走「向量 + 关键词」双路加权 RRF 融合（需部署 Qdrant + TEI）
+    # false = 客服退化为纯关键词路（ES，故障回退 MySQL FULLTEXT）
+    # 注意：公开商品检索（/api/product/rag-search）不受此开关影响，固定只走关键词路，
+    #       见 RagSearchService.search() 的注释
+    vector-enabled: true
   # 关键词路 Elasticsearch（功能编号 001，设计见 docs/specs/001-es-keyword-search）
   # ES 为关键词路首选，故障时 Router 自动回退 MySQL FULLTEXT —— 不需要为故障改这里的开关。
   # enabled=false 是「整体回滚到 MySQL FULLTEXT」的开关，与故障降级是两回事。
@@ -190,6 +196,8 @@ rag:
     # 匹配门槛（ES 条件语法）。置空 = 纯 OR（当前默认）。
     # 2026-10-21 实测：OR / 2<70% / 100% 的 Hit@3 分别为 0.973 / 0.892 / 0.946，
     # 提高门槛会误伤「轻薄本」这类简称查询，故不启用。详见 evaluation-2026-10-21.md §4.2
+    # 长句被泛化词带偏的问题（「办公笔记本电脑」召回办公椅）改由「最长词加权」处理，
+    # 见 EsKeywordSearchService#LONGEST_TERM_BOOST，与本配置项互不影响。
     minimum-should-match: ""
   reconcile:
     # 向量索引对账：发现并修复「索引更新失败 → 商品永久搜不到 / 搜到旧内容」的不一致。

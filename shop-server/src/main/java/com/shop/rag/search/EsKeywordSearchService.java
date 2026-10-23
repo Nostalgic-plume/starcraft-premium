@@ -5,6 +5,8 @@ import co.elastic.clients.elasticsearch._types.query_dsl.Operator;
 import co.elastic.clients.elasticsearch._types.query_dsl.TextQueryType;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
+import co.elastic.clients.elasticsearch.indices.AnalyzeResponse;
+import co.elastic.clients.elasticsearch.indices.analyze.AnalyzeToken;
 import co.elastic.clients.json.JsonData;
 import com.shop.constant.ProductConstants;
 import com.shop.rag.config.RagElasticsearchProperties;
@@ -14,6 +16,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -44,6 +47,26 @@ public class EsKeywordSearchService {
             "name^3", "brandName^2", "categoryName^1.5", "description"
     };
 
+    /**
+     * 最长匹配词的加权倍数
+     *
+     * <p><b>解决什么问题</b>：纯 OR 下「办公笔记本电脑」会被 IK 查询期切成
+     * 「办公 / 笔记本电脑」两个词。办公椅、办公桌只命中低频高 IDF 的「办公」，
+     * 得分反而压过命中「笔记本电脑」的笔记本商品（实测 top3 全是办公椅/鼠标）。
+     *
+     * <p><b>为什么不用 minimum_should_match</b>：查询期用 ik_smart 粗分词，长句只剩
+     * 2 个词，任何 ≥50% 的门槛都等价于「两个词全命中」，笔记本商品不含「办公」会被
+     * 直接过滤成空结果（实测「办公笔记本电脑」返回 0 条）。
+     *
+     * <p><b>本方案</b>：保留原查询的 OR 召回，额外用「查询中最长的词」对 name 字段加一个
+     * should 子句加权。最长词通常是真正的品类词（笔记本电脑），泛化修饰词（办公）较短，
+     * 不会获得额外加分。实测 top3 从「办公椅/办公鼠标」变为全部笔记本。
+     */
+    private static final float LONGEST_TERM_BOOST = 8.0f;
+
+    /** 参与加权的词长度下限：单字太泛（「本」「机」），加权会放大噪声 */
+    private static final int LONGEST_TERM_MIN_CHARS = 2;
+
     private final ElasticsearchClient esClient;
     private final RagElasticsearchProperties properties;
 
@@ -65,6 +88,10 @@ public class EsKeywordSearchService {
         }
 
         try {
+            // 打分辅助项在进入 lambda 前算好，保证 effectively final
+            String minimumShouldMatch = properties.getMinimumShouldMatch();
+            boolean useMinShouldMatch = minimumShouldMatch != null && !minimumShouldMatch.isBlank();
+            String longestTerm = resolveLongestTerm(query);
             SearchResponse<EsProductHit> response = esClient.search(s -> {
                 s.index(properties.getIndexName())
                         .size(limit)
@@ -72,20 +99,27 @@ public class EsKeywordSearchService {
                         .source(src -> src.filter(f -> f.includes("productId")))
                         .query(q -> q.bool(b -> {
                             // 打分部分：多字段匹配，best_fields 取单字段最高分。
-                            // minimum_should_match 用条件语法（默认 2<70%）：≤2 词要求全命中，
-                            // 避免 IK 把未登录词切成单字后、OR 让单字命中带来的噪声；
-                            // 长句只要求 70%，保留召回。置空则退回纯 OR。
+                            // minimum_should_match 默认留空（纯 OR）：查询期 ik_smart 粗分词下，
+                            // 任何百分比门槛都会把长句压缩成「全命中」，反而搜不到。
                             b.must(m -> m.multiMatch(mm -> {
                                 mm.query(query)
                                         .fields(List.of(SEARCH_FIELDS))
                                         .type(TextQueryType.BestFields)
                                         .operator(Operator.Or);
-                                String minimumShouldMatch = properties.getMinimumShouldMatch();
-                                if (minimumShouldMatch != null && !minimumShouldMatch.isBlank()) {
+                                if (useMinShouldMatch) {
                                     mm.minimumShouldMatch(minimumShouldMatch);
                                 }
                                 return mm;
                             }));
+
+                            // 最长词加权：品类词（笔记本电脑）压过泛化修饰词（办公），
+                            // 见 LONGEST_TERM_BOOST 注释。must 存在时 should 只加分不强制。
+                            if (longestTerm != null) {
+                                b.should(sd -> sd.match(m -> m
+                                        .field("name")
+                                        .query(longestTerm)
+                                        .boost(LONGEST_TERM_BOOST)));
+                            }
 
                             // 过滤部分：filter context 不参与打分，且有查询缓存
                             b.filter(f -> f.term(t -> t.field("status").value(ProductConstants.STATUS_ON_SHELF)));
@@ -129,6 +163,34 @@ public class EsKeywordSearchService {
         } catch (Exception e) {
             // 空结果已在上面正常返回，走到这里必然是引擎层故障
             throw new KeywordSearchUnavailableException("ES 关键词检索失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 取查询经 IK 查询期分词后的最长词
+     *
+     * <p>用 {@code ik_smart}（与字段的 search_analyzer 一致）分析，取长度最长且不少于
+     * {@link #LONGEST_TERM_MIN_CHARS} 的 token，用作 name 字段的加权词。
+     *
+     * <p>失败语义：分词异常只影响加权（退回纯 OR），不中断检索，故捕获后返回 null。
+     *
+     * @param query 原始查询串
+     * @return 最长词；无可加权词时返回 null
+     */
+    private String resolveLongestTerm(String query) {
+        try {
+            AnalyzeResponse response = esClient.indices().analyze(a -> a
+                    .index(properties.getIndexName())
+                    .analyzer("ik_smart")
+                    .text(query));
+            return response.tokens().stream()
+                    .map(AnalyzeToken::token)
+                    .filter(token -> token != null && token.length() >= LONGEST_TERM_MIN_CHARS)
+                    .max(Comparator.comparingInt(String::length))
+                    .orElse(null);
+        } catch (Exception e) {
+            log.debug("查询分词失败，跳过长词加权: {}", e.getMessage());
+            return null;
         }
     }
 

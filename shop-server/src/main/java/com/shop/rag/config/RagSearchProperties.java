@@ -44,4 +44,16 @@ public class RagSearchProperties {
 
     /** topK 上限：公开接口未校验参数，超大值会放大下游查询成本 */
     private int maxTopK = 100;
+
+    /**
+     * 是否启用向量路检索
+     *
+     * <p>默认 true（向量 + 关键词双路加权 RRF 融合）。置 false 时**完全跳过**向量化与
+     * Qdrant 检索——连 TEI 的 embedding 请求都不发，避免未部署向量服务时每次查询都
+     * 白等一次连接超时。
+     *
+     * <p>关闭后只走关键词路（ES，故障自动回退 MySQL FULLTEXT）；RRF 融合对单路为空有
+     * 专门分支，因此无需改动融合逻辑，排序结果等价于单路排序。
+     */
+    private boolean vectorEnabled = true;
 }

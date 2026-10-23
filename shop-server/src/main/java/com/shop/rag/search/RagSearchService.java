@@ -100,7 +100,9 @@ public class RagSearchService {
      */
     public List<RagHitVO> search(String query, int topK,
                                   Long categoryId, BigDecimal minPrice, BigDecimal maxPrice) {
-        return searchWithAvailability(query, topK, categoryId, minPrice, maxPrice).hits();
+        // 公开检索（商品搜索页）固定只走关键词路：不查向量库，避免未部署 Qdrant/TEI 时
+        // 每次请求都白等一次连接超时；智能客服仍走完整 RAG（见 searchWithAvailability）
+        return searchWithAvailability(query, topK, categoryId, minPrice, maxPrice, false).hits();
     }
 
     /**
@@ -118,6 +120,21 @@ public class RagSearchService {
      */
     public RagSearchResult searchWithAvailability(String query, int topK,
                                   Long categoryId, BigDecimal minPrice, BigDecimal maxPrice) {
+        return searchWithAvailability(query, topK, categoryId, minPrice, maxPrice,
+                ragSearchProperties.isVectorEnabled());
+    }
+
+    /**
+     * 混合搜索商品（带可售性信息，可显式指定是否启用向量路）
+     *
+     * <p>供需要按链路区分检索策略的调用方使用：公开商品检索传 {@code false}（纯关键词路），
+     * 智能客服走完整 RAG 传 {@code true}（向量 + 关键词双路加权 RRF）。
+     *
+     * @param useVector 是否启用向量路；false 时完全跳过 embedding 与 Qdrant 调用
+     */
+    public RagSearchResult searchWithAvailability(String query, int topK,
+                                  Long categoryId, BigDecimal minPrice, BigDecimal maxPrice,
+                                  boolean useVector) {
         if (query == null || query.isBlank()) {
             return new RagSearchResult(List.of(), false);
         }
@@ -127,7 +144,12 @@ public class RagSearchService {
         int safeTopK = clampTopK(topK);
 
         // 1. 生成查询向量：任何失败都不中断主流程，退化为纯关键词路（见类注释「降级策略」）
-        float[] queryVector = embedQueryOrNull(query);
+        //    useVector=false 时直接跳过：不发 embedding 请求、不查 Qdrant，
+        //    避免未部署向量服务时每次查询都白等一次超时；关键词路照常执行
+        float[] queryVector = useVector ? embedQueryOrNull(query) : null;
+        if (!useVector) {
+            log.debug("本次检索未启用向量路，仅走关键词路");
+        }
 
         // 2. 双路检索，候选池对齐：两路各取 queryLimit 条，融合后再截断 topK
         //    （向量路已降级时为空列表，RRF 合并天然退化为纯关键词）

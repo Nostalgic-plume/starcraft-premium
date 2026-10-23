@@ -154,6 +154,36 @@ public class ItemDataService {
     }
 
     /**
+     * 重建失败自动补偿
+     *
+     * <p><b>为什么需要它</b>：启动时的重建（{@link #rebuildOnStartup()}）只尝试一次。
+     * 推荐服务与 Redis 同机部署时，容器启停、端口转发未就绪等都可能让这一次失败——
+     * 失败后商品状态缓存为空，后续所有候选在过滤阶段被判定为 {@code statusUnknown}
+     * 而全数丢弃，表现为「榜单一直是兜底甚至为空」，且除启动日志外没有任何信号。
+     *
+     * <p><b>行为</b>：每 30 秒检查一次，仅当上次重建失败时重试；成功后立即停止重试，
+     * 不产生额外开销。重试与每日全量、手动重建共用 {@code rebuilding} 标志串行执行。
+     *
+     * <p><b>失败语义</b>：{@link #rebuildAll()} 内部已捕获异常并记录状态，本方法不抛出，
+     * 避免定时任务线程因异常终止（Spring 的 {@code @Scheduled} 不会自动恢复已失效的任务）。
+     */
+    @Scheduled(fixedDelay = 30_000L, initialDelay = 30_000L)
+    public void retryFailedRebuild() {
+        if (lastRebuildSuccess) {
+            return;
+        }
+        if (!rebuilding.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            log.warn("检测到上次商品索引重建未成功（{}），开始自动重试", lastRebuildMessage);
+            rebuildAll();
+        } finally {
+            rebuilding.set(false);
+        }
+    }
+
+    /**
      * 手动触发全量重建（管理后台用）
      *
      * <p><b>为什么需要这个入口</b>：商品索引此前完全依赖 {@code @Scheduled}（全量每日 01:00、

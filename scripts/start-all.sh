@@ -94,3 +94,9 @@ echo "  用户端    http://localhost"
 echo "  管理后台  http://localhost/admin/"
 echo "  商家中心  http://localhost/merchant/"
 echo "  日志      logs/shop-server.log / logs/shop-rec.log"
+
+# ---- 7. 推荐链路自检（只读，不阻断启动） ----
+# 重点拦截两类「服务起来了但推荐不可用」的静默故障：
+# Flink 作业未提交（特征停止更新）、启动重建失败（商品状态缓存为空）。
+echo
+bash "$ROOT/scripts/check-rec-health.sh" || echo "[WARN] 推荐链路自检未通过，见上方明细" >&2

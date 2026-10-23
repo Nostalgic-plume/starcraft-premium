@@ -286,6 +286,10 @@ public class RankService {
      * <p>按位置把坑位商品放入榜单对应位置，其余商品顺序顺延；坑位商品若已在榜单中则先从原位置移除，
      * 避免重复曝光（详细设计 6.4(5)）。
      *
+     * <p><b>坑位可售校验（详细设计 3.7 步骤 8）</b>：坑位商品不来自候选池，未经过 M-06 的六类过滤，
+     * 因此必须单独校验可售状态——否则运营配置一个已下架商品，它会绕过全部过滤规则直接出现在榜单
+     * 指定位置。不可售或状态不可确认的坑位直接跳过，位置由后续商品自然补位。
+     *
      * @param ranked 榜单
      * @return 注入坑位后的榜单
      */
@@ -295,7 +299,13 @@ public class RankService {
             return ranked;
         }
 
-        Set<Long> slotItemIds = new HashSet<>(slots.values());
+        // 只有可售坑位参与注入；被跳过的坑位不占用位置，后续商品顺延补位
+        Map<Integer, Long> sellableSlots = filterSellableSlots(slots);
+        if (sellableSlots.isEmpty()) {
+            return ranked;
+        }
+
+        Set<Long> slotItemIds = new HashSet<>(sellableSlots.values());
         List<RankedItem> remaining = new ArrayList<>(ranked.size());
         for (RankedItem item : ranked) {
             if (!slotItemIds.contains(item.getItemId())) {
@@ -307,7 +317,7 @@ public class RankService {
         Iterator<RankedItem> iterator = remaining.iterator();
         int total = ranked.size();
         for (int position = 1; position <= total; position++) {
-            Long slotItemId = slots.get(position);
+            Long slotItemId = sellableSlots.get(position);
             if (slotItemId != null) {
                 result.add(new RankedItem(slotItemId, RankedItem.SOURCE_FIXED_SLOT, 0D, true));
             } else if (iterator.hasNext()) {
@@ -318,6 +328,54 @@ public class RankService {
             }
         }
         return result;
+    }
+
+    /**
+     * 过滤出可售的坑位
+     *
+     * <p>状态读取的是推荐库商品状态缓存（由 M-04 维护），与 M-06 过滤环节同一数据源。
+     * 读取失败或缓存缺失一律按不可确认处理并跳过——坑位是运营强插位，宁可少一个坑位，
+     * 也不能把下架或售罄商品推到用户面前。
+     *
+     * @param slots 位置到商品标识的映射
+     * @return 可售坑位映射；全部不可售时返回空映射
+     */
+    private Map<Integer, Long> filterSellableSlots(Map<Integer, Long> slots) {
+        Map<Integer, Long> sellable = new LinkedHashMap<>(slots.size());
+        for (Map.Entry<Integer, Long> entry : slots.entrySet()) {
+            if (isSellable(entry.getValue())) {
+                sellable.put(entry.getKey(), entry.getValue());
+            } else {
+                log.warn("坑位商品不可售或状态不可确认，跳过该坑位, position: {}, itemId: {}",
+                        entry.getKey(), entry.getValue());
+            }
+        }
+        return sellable;
+    }
+
+    /**
+     * 判断商品是否可售
+     *
+     * @param itemId 商品标识
+     * @return 可售返回 true；下架、售罄、缓存缺失或读取异常返回 false
+     */
+    private boolean isSellable(Long itemId) {
+        if (itemId == null) {
+            return false;
+        }
+        try {
+            Map<Object, Object> state = recRedis.hgetAll(RecRedisKeys.itemState(itemId));
+            if (state.isEmpty()) {
+                // 缓存缺失属不可确认：保守跳过，避免下架商品借坑位绕过过滤
+                return false;
+            }
+            String status = String.valueOf(state.get(RecRedisKeys.ITEM_STATE_FIELD_STATUS));
+            String stock = String.valueOf(state.get(RecRedisKeys.ITEM_STATE_FIELD_STOCK));
+            return RecRedisKeys.ITEM_STATUS_ON_SALE.equals(status) && !"0".equals(stock);
+        } catch (Exception e) {
+            log.warn("坑位商品可售状态读取失败，按不可售处理, itemId: {}", itemId, e);
+            return false;
+        }
     }
 
     /**

@@ -64,7 +64,16 @@ services:
     # 归入 gpu profile：默认 up 不启动它，避免无 GPU 机器上「第一步就失败」。
     # 启用：docker compose --profile gpu up -d（只起 TEI 亦可：--profile gpu up -d tei）
     profiles: ["gpu"]
-    gpus: all                            # 等价 docker run --gpus all；需 nvidia-container-toolkit
+    # 显式限定 GPU 0：TEI 1.7 在本机用 --gpus all 时会打开 Cuda(CudaDevice(DeviceId(1)))，
+    # 而本机只有一块卡（id 0），报 "Cannot allocate memory (os error 12)" 后退出。
+    # 用 device_ids 只暴露 0 号卡，避免它去打开不存在的第二块。
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']
+              capabilities: [gpu]
     ports:
       - "127.0.0.1:9090:80"              # 宿主 9090 → 容器 80（TEI 默认端口）；⚠️ 不可用 8080（被后端 server.port 占用）
     volumes:
@@ -77,7 +86,18 @@ services:
       - HF_ENDPOINT=https://hf-mirror.com   # 国内镜像；离线环境避免卡在联网校验
     # ⚠️ --model-id 必须是【容器内绝对路径】：写成模型名（BAAI/bge-m3）时 TEI 会强制联网
     #    拉取 1_Pooling/config.json 并卡死；--pooling cls 显式指定池化，省去该次探测。
-    command: --model-id /data/BAAI/bge-m3 --pooling cls
+    # --dtype float16：GPU 上显存占用减半（BGE-M3 fp32 约 2.2G），检索场景与 fp32 差异可忽略。
+    # 内存约束（本机 16G / WSL 12G，需与 ES、Kafka、Flink 共存）：默认 20 个分词线程 +
+    # 16384 batch tokens 会把进程内存推到约 6G（实测系统仅剩 1.9G），演示为单条查询，
+    # 以下参数足够且把内存压到约 3G。
+    command: >-
+      --model-id /data/BAAI/bge-m3
+      --pooling cls
+      --dtype float16
+      --tokenization-workers 4
+      --max-batch-tokens 2048
+      --max-concurrent-requests 16
+      --max-client-batch-size 8
     healthcheck:
       # TEI 镜像自带 curl；/health 就绪后才真正可用（后端重建索引前务必确认）
       test: ["CMD-SHELL", "curl -fs http://localhost:80/health || exit 1"]
